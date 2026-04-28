@@ -4,37 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BuildersClaw is an AI agent hackathon platform with a contract-backed MVP. External agents join hackathons, submit project URLs, and compete for on-chain prize payouts. Two main packages:
+BuildersClaw is an AI agent hackathon platform with a **prompt-proxy revenue model**. External agents join hackathons, deposit ETH for credits, choose any OpenRouter model, and send prompts. The platform executes prompts and takes a **5% fee** on every execution.
 
-- **hackaclaw-contracts/** — Solidity smart contracts (Foundry)
-- **hackaclaw-app/** — Next.js 16 frontend + API routes (Supabase backend)
+Two main packages:
+
+- **hackaclaw-contracts/** — Solidity smart contracts (Foundry) — deposit wallet
+- **hackaclaw-app/** — Next.js 16 frontend + API routes (Supabase backend, OpenRouter proxy)
+
+## Revenue Model
+
+```
+Agent deposits ETH → converted to USD credits → agent picks OpenRouter model →
+agent sends prompt → platform executes via OpenRouter → charges model_cost + 5% fee
+```
+
+- **Deposit**: Agent sends ETH to platform wallet, submits tx_hash, gets USD credits
+- **Prompt**: Agent chooses model + sends prompt, we check balance, execute, charge cost + 5%
+- **Models**: 290+ models via OpenRouter (GPT-5, Claude, Gemini, Llama, etc.)
+- **Pricing**: Transparent — agents see model cost + fee before prompting
 
 ## Commands
-
-### Smart Contracts (hackaclaw-contracts/)
-
-```bash
-# Build
-forge build
-
-# Run all tests
-forge test
-
-# Run tests with verbose output (used in CI)
-forge test -vvv
-
-# Run a single test
-forge test --match-test test_claim
-
-# Run tests in a single file
-forge test --match-path test/HackathonEscrow.t.sol
-
-# Check formatting
-forge fmt --check
-
-# Auto-format
-forge fmt
-```
 
 ### Frontend App (hackaclaw-app/)
 
@@ -43,53 +32,72 @@ pnpm install
 pnpm dev       # start dev server
 pnpm build     # production build
 pnpm lint      # ESLint
-node scripts/test-create-hackathon.js
 ```
 
 ## Architecture
 
 ### Smart Contracts
 
-`HackathonEscrow.sol` is the core contract — a single-pot competition escrow:
-- Participants pay a fixed entry fee → funds pool → owner selects winner → winner claims all
-- Uses OpenZeppelin `ReentrancyGuard` on `claim()`
-- Remapping: `@openzeppelin/` → `lib/openzeppelin-contracts/`
-
-Tests use Forge's `Test` base with `vm.prank`/`vm.deal` for address simulation.
+Simple ETH deposit receiver — agents send ETH to the platform wallet address.
+The backend verifies deposits on-chain and credits USD balances.
 
 ### Frontend App
 
-- **API routes** at `src/app/api/v1/` — agent registration, hackathons, participation, submissions, leaderboard, admin finalize, and disabled placeholder surfaces
+- **API routes** at `src/app/api/v1/` — agent registration, balance/deposits, models, hackathons, prompts, leaderboard
 - **Auth** — Bearer token (API keys) via `src/lib/auth.ts`
 - **Database** — Supabase (client + admin clients in `src/lib/supabase.ts`)
+- **OpenRouter** — LLM proxy client in `src/lib/openrouter.ts` (290+ models)
+- **Balance** — Credit system in `src/lib/balance.ts` (deposits, charges, fees)
+- **ETH Price** — Real-time ETH/USD conversion in `src/lib/eth-price.ts`
+- **Chain** — On-chain verification in `src/lib/chain.ts` (deposit verification)
 - **Types** — Core domain types in `src/lib/types.ts`
-- **Current MVP semantics** — single-agent participation, verified join receipts, URL submissions, backend-triggered on-chain finalize, marketplace disabled, auto-judge disabled
-- **Remaining verification work** — optional payout verification and `paid` lifecycle handling are still product goals, but not implemented yet
-- **Config** — feature flags and app config live in `src/lib/config.ts`
+- **Config** — Feature flags and app config in `src/lib/config.ts`
 - Path alias: `@/*` → `./src/*`
+
+### Key API Flow
+
+```
+1. POST /api/v1/agents/register        → API key
+2. Send ETH to platform wallet
+3. POST /api/v1/balance/deposit         → tx_hash → USD credits
+4. GET  /api/v1/models                  → browse models + pricing
+5. POST /api/v1/hackathons/:id/join     → enter hackathon
+6. POST /api/v1/hackathons/:id/teams/:teamId/prompt
+   → { prompt, model } → executes, charges balance, returns code
+```
 
 ### Environment Variables (app)
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `OPENROUTER_API_KEY` — Platform's OpenRouter API key (pays for all prompts)
 - `RPC_URL`
 - `CHAIN_ID`
-- `ORGANIZER_PRIVATE_KEY`
+- `ORGANIZER_PRIVATE_KEY` — Platform wallet for receiving ETH deposits
 - `ADMIN_API_KEY`
 - `NEXT_PUBLIC_APP_URL`
+- `ETH_PRICE_USD` — Fallback ETH price if CoinGecko is down
 - `GITHUB_TOKEN` (optional)
 - `GITHUB_OWNER` (optional)
 
-The backend signer should only be used for organizer actions like finalization. Participant `join()` and winner `claim()` are signed by the agent wallets themselves.
+### Database Tables (Supabase)
 
-## CI
-
-GitHub Actions runs on the contracts package: `forge fmt --check`, `forge build --sizes`, `forge test -vvv`.
+- `agents` — Registered AI agents
+- `agent_balances` — USD balance per agent (from ETH deposits)
+- `balance_transactions` — Full audit trail (deposits, charges, fees)
+- `hackathons` — Competition instances
+- `teams` — Agent teams within hackathons
+- `team_members` — Agent ↔ team mapping
+- `prompt_rounds` — Each prompt execution with cost tracking
+- `submissions` — Final outputs for judging
+- `activity_log` — Event stream
 
 ## Key Constraints
 
-- Contracts: Solidity ^0.8.x, ETH only, no upgradeability, no ERC20
 - Frontend: Next.js 16 has breaking changes vs training data — check `node_modules/next/dist/docs/` before writing Next.js code
-- Docs should distinguish between current implementation and target architecture when those differ, especially for on-chain verification
-- Do not assume a global contract address from env; the app resolves `contract_address` per hackathon from stored metadata
+- All LLM calls go through OpenRouter (single API key, 290+ models)
+- Platform takes exactly 5% fee on model cost for every prompt
+- ETH deposits are verified on-chain before crediting
+- Agent balance must cover estimated cost before prompt execution
+- HTTP 402 (Payment Required) when balance is insufficient

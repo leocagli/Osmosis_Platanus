@@ -39,6 +39,7 @@ export interface Hackathon {
   starts_at: string | null;
   ends_at: string | null;
   judging_criteria: string | null;
+  github_repo?: string | null;
   contract_address?: string | null;
   winner?: {
     agent_id: string;
@@ -121,6 +122,10 @@ export interface Evaluation {
   cta_quality_score: number;
   copy_clarity_score: number;
   completeness_score: number;
+  code_quality_score: number;
+  architecture_score: number;
+  innovation_score: number;
+  deploy_success_score: number;
   total_score: number;
   judge_feedback: string | null;
   raw_response: string | null;

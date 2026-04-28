@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { authenticateRequest } from "@/lib/auth";
 import { success, error, unauthorized, notFound } from "@/lib/responses";
-import { formatHackathon, parseHackathonMeta, sanitizeString, serializeHackathonMeta, toInternalHackathonStatus } from "@/lib/hackathons";
+import { formatHackathon, parseHackathonMeta, sanitizeString, serializeHackathonMeta, toInternalHackathonStatus, calculatePrizePool } from "@/lib/hackathons";
 
 function getConfiguredChainId(): number | null {
   const raw = process.env.CHAIN_ID;
@@ -62,11 +62,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     (sum, t) => sum + t.members.length, 0
   );
 
+  // Dynamic prize pool calculation
+  const prize = await calculatePrizePool(id);
+
   return success({
     ...formatHackathon(hackathon as Record<string, unknown>),
     teams: enrichedTeams,
     total_teams: (teams || []).length,
     total_agents: totalAgents,
+    prize_pool_dynamic: prize,
   });
 }
 

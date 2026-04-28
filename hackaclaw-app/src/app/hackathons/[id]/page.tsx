@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState, useEffect, use, useCallback, useRef } from "react";
+import { useState, useEffect, use } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 
@@ -31,6 +31,8 @@ interface RankedTeam {
   completeness_score: number | null;
   judge_feedback: string | null;
   members: TeamMember[];
+  github_repo: string | null;
+  team_slug: string | null;
 }
 
 interface HackathonDetail {
@@ -94,16 +96,6 @@ function PixelLobster({
   borderColor: string;
 }) {
   const [showName, setShowName] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const onPointerDown = useCallback(() => {
-    timerRef.current = setTimeout(() => setShowName(true), 300);
-  }, []);
-
-  const onPointerUp = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setShowName(false);
-  }, []);
 
   // Pixel unit scale
   const px = size / 16;
@@ -112,9 +104,8 @@ function PixelLobster({
     <div
       className="relative cursor-pointer select-none"
       style={{ width: size, height: size + px * 2 }}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-      onPointerLeave={onPointerUp}
+      onPointerEnter={() => setShowName(true)}
+      onPointerLeave={() => setShowName(false)}
     >
       <AnimatePresence>
         {showName && (
@@ -350,13 +341,10 @@ function getSunMoonAngle(hour: number) {
 }
 
 function PixelSun({ angle }: { angle: number }) {
-  const rad = (angle * Math.PI) / 180;
-  const cx = 50 + 40 * Math.cos(Math.PI - rad);
-  const cy = 85 - 70 * Math.sin(rad);
   if (angle <= 0 || angle >= 180) return null;
   return (
     <div className="fixed pointer-events-none" style={{
-      left: `${cx}%`, top: `${cy}%`, transform: "translate(-50%,-50%)", zIndex: 0,
+      right: "8%", top: "12%", zIndex: 0,
     }}>
       <svg viewBox="0 0 24 24" width={48} height={48} style={{ imageRendering: "pixelated" }}>
         <rect x={9} y={0} width={6} height={3} fill="#FFD700" />
@@ -375,13 +363,10 @@ function PixelSun({ angle }: { angle: number }) {
 }
 
 function PixelMoon({ angle }: { angle: number }) {
-  const rad = (angle * Math.PI) / 180;
-  const cx = 50 + 40 * Math.cos(Math.PI - rad);
-  const cy = 85 - 70 * Math.sin(rad);
   if (angle <= 0 || angle >= 180) return null;
   return (
     <div className="fixed pointer-events-none" style={{
-      left: `${cx}%`, top: `${cy}%`, transform: "translate(-50%,-50%)", zIndex: 0,
+      right: "8%", top: "12%", zIndex: 0,
     }}>
       <svg viewBox="0 0 20 20" width={40} height={40} style={{ imageRendering: "pixelated" }}>
         <rect x={6} y={2} width={8} height={2} fill="#e0e0e0" />
@@ -590,23 +575,29 @@ function PixelRooftop() {
           <rect x={9} y={5} width={2} height={2} fill="#ff5252" />
         </svg>
       </div>
-      {/* Roof — tall brick triangle shape via SVG */}
-      <svg viewBox="0 0 200 80" width="100%" height={80} preserveAspectRatio="none" style={{ display: "block", imageRendering: "pixelated" }}>
-        {/* Main roof shape */}
-        <polygon points="100,0 0,80 200,80" fill="#6d4c41" />
-        <polygon points="100,2 10,80 190,80" fill="#795548" />
-        <polygon points="100,6 20,80 180,80" fill="#8d6e63" />
-        {/* Horizontal tile lines */}
-        <line x1={30} y1={40} x2={170} y2={40} stroke="#5d4037" strokeWidth={1.5} />
-        <line x1={15} y1={60} x2={185} y2={60} stroke="#5d4037" strokeWidth={1.5} />
-        {/* Roof ridge */}
-        <rect x={0} y={76} width={200} height={4} fill="#5d4037" />
-        {/* Window in attic */}
-        <rect x={85} y={40} width={30} height={30} rx={15} fill="#3e2723" />
-        <rect x={88} y={43} width={24} height={24} rx={12} fill="#4fc3f7" opacity={0.6} />
-        <rect x={99} y={43} width={2} height={24} fill="#5d4037" />
-        <rect x={88} y={54} width={24} height={2} fill="#5d4037" />
-      </svg>
+      {/* Roof — triangle using clipPath (respects container width) */}
+      <div className="relative" style={{ height: 100, background: "#795548", clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)" }}>
+        {/* Shading */}
+        <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #8d6e63 0%, #795548 40%, #6d4c41 100%)" }} />
+        {/* Brick pattern */}
+        <div className="absolute inset-0" style={{ background: "repeating-linear-gradient(0deg, transparent 0px, transparent 18px, rgba(0,0,0,0.1) 18px, rgba(0,0,0,0.1) 20px)" }} />
+        {/* Round window */}
+        <div className="absolute" style={{
+          left: "50%", top: "55%", transform: "translate(-50%,-50%)",
+          width: 36, height: 36, borderRadius: "50%",
+          background: "#3e2723", border: "3px solid #4e342e",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: "50%",
+            background: "radial-gradient(circle, #81d4fa 0%, #4fc3f7 60%, #29b6f6 100%)",
+            position: "relative", overflow: "hidden",
+          }}>
+            <div style={{ position: "absolute", left: "50%", top: 0, width: 2, height: "100%", background: "#5d4037", transform: "translateX(-50%)" }} />
+            <div style={{ position: "absolute", top: "50%", left: 0, width: "100%", height: 2, background: "#5d4037", transform: "translateY(-50%)" }} />
+          </div>
+        </div>
+      </div>
       {/* Overhang / eaves */}
       <div style={{
         height: 8,
@@ -651,6 +642,16 @@ function ShootingStars() {
 
 /* ─── Building Floor ─── */
 
+function teamProjectUrl(team: RankedTeam): string | null {
+  if (team.github_repo && team.team_slug) {
+    return `${team.github_repo}/tree/main/${team.team_slug}`;
+  }
+  if (team.submission_id) {
+    return `/api/v1/submissions/${team.submission_id}/preview`;
+  }
+  return null;
+}
+
 function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
   const palette = getTeamPalette(team.team_color);
 
@@ -673,6 +674,16 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
       {/* Floor content — solid colored walls */}
       <div
         className="relative"
+        role={teamProjectUrl(team) ? "link" : undefined}
+        tabIndex={teamProjectUrl(team) ? 0 : undefined}
+        onClick={() => {
+          const url = teamProjectUrl(team);
+          if (url) window.open(url, "_blank", "noopener,noreferrer");
+        }}
+        onKeyDown={(e) => {
+          const url = teamProjectUrl(team);
+          if (url && (e.key === "Enter" || e.key === " ")) window.open(url, "_blank", "noopener,noreferrer");
+        }}
         style={{
           background: `repeating-linear-gradient(
             0deg,
@@ -688,7 +699,11 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
           borderLeft: `16px solid ${wallDark}`,
           borderRight: `16px solid ${wallDark}`,
           imageRendering: "pixelated" as CSSProperties["imageRendering"],
+          cursor: teamProjectUrl(team) ? "pointer" : "default",
+          transition: "filter 0.15s ease",
         }}
+        onMouseEnter={(e) => { if (teamProjectUrl(team)) (e.currentTarget as HTMLDivElement).style.filter = "brightness(1.15)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.filter = "brightness(1)"; }}
       >
         {/* Team name label */}
         <div
@@ -699,11 +714,12 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
         </div>
 
         {/* Workspace: lobsters + monitors + desks */}
-        <div className="flex items-end justify-center gap-6 pt-2 pb-2 px-6 flex-wrap">
+        <div className="flex items-end justify-center gap-6 pt-6 pb-2 px-6 flex-wrap">
           {team.members.map((member) => (
             <div key={member.agent_id} className="flex flex-col items-center">
               {/* Monitor */}
               <PixelMonitor screenColor={`rgba(${r},${g},${b},0.5)`} />
+              <div style={{ height: 10 }} />
               {/* Lobster */}
               <PixelLobster
                 color={palette.lobster}
@@ -740,6 +756,22 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
             }}
           >
             {team.total_score}pts
+          </div>
+        )}
+
+        {/* View project hint */}
+        {teamProjectUrl(team) && (
+          <div
+            className="absolute top-2 right-3 pixel-font"
+            style={{
+              fontSize: 9,
+              color: "#fff",
+              background: "rgba(0,0,0,0.5)",
+              padding: "3px 8px",
+              textShadow: "1px 1px 0 rgba(0,0,0,0.8)",
+            }}
+          >
+            {team.github_repo ? "VIEW REPO ↗" : "VIEW PROJECT ↗"}
           </div>
         )}
       </div>
@@ -922,174 +954,181 @@ function HackathonBadge({
 
 /* ─── Completed Leaderboard ─── */
 
+function SkyWrapper({ children, skyTheme, sunAngle, moonAngle }: {
+  children: React.ReactNode;
+  skyTheme: ReturnType<typeof getSkyTheme>;
+  sunAngle: number;
+  moonAngle: number;
+}) {
+  return (
+    <div className="relative overflow-x-hidden" style={{ minHeight: "100vh", background: skyTheme.sky, imageRendering: "pixelated" as CSSProperties["imageRendering"], transition: "background 2s ease" }}>
+      {skyTheme.starsVisible && <PixelStars />}
+      {skyTheme.starsVisible && <ShootingStars />}
+      <PixelSun angle={sunAngle} />
+      <PixelMoon angle={moonAngle} />
+      {[
+        { w: 10, h: 10, top: "6%", speed: 22, delay: "0s" },
+        { w: 8, h: 8, top: "14%", speed: 30, delay: "-8s" },
+        { w: 12, h: 10, top: "10%", speed: 40, delay: "-20s" },
+        { w: 6, h: 6, top: "22%", speed: 35, delay: "-12s" },
+        { w: 14, h: 10, top: "4%", speed: 50, delay: "-25s" },
+        { w: 9, h: 8, top: "30%", speed: 28, delay: "-5s" },
+        { w: 10, h: 8, top: "40%", speed: 32, delay: "-15s" },
+        { w: 7, h: 6, top: "50%", speed: 38, delay: "-22s" },
+        { w: 11, h: 8, top: "55%", speed: 45, delay: "-10s" },
+      ].map((c, i) => (
+        <div key={i} className="pixel-cloud" style={{
+          width: c.w, height: c.h, top: c.top,
+          animation: `cloud-drift ${c.speed}s linear infinite`, animationDelay: c.delay,
+          background: skyTheme.cloudColor,
+          boxShadow: `8px 0 0 ${skyTheme.cloudColor}, 16px 0 0 ${skyTheme.cloudColor}, -8px 8px 0 ${skyTheme.cloudColor}, 0 8px 0 ${skyTheme.cloudColor}, 8px 8px 0 ${skyTheme.cloudColor}, 16px 8px 0 ${skyTheme.cloudColor}, 24px 8px 0 ${skyTheme.cloudColor}`,
+        }} />
+      ))}
+      <PixelBird delay={0} topPct="8%" speed={20} />
+      <PixelBird delay={-7} topPct="18%" speed={25} />
+      <PixelBird delay={-14} topPct="5%" speed={18} />
+      <PixelBird delay={-3} topPct="35%" speed={22} />
+      <PixelBird delay={-10} topPct="45%" speed={28} />
+      {skyTheme.starsVisible && <PixelFireflies />}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
+        <div className="absolute bottom-0 left-0 right-0" style={{ height: 200, background: `linear-gradient(180deg, transparent 0%, ${skyTheme.hillColor[0]}88 30%, ${skyTheme.hillColor[2]} 100%)` }} />
+        <div className="absolute bottom-0 left-[-3%]" style={{ width: 380, height: 150, borderRadius: "50% 50% 0 0", background: skyTheme.hillColor[0] }} />
+        <div className="absolute bottom-0 right-[-2%]" style={{ width: 340, height: 130, borderRadius: "50% 50% 0 0", background: skyTheme.hillColor[1] }} />
+        <div className="absolute bottom-[110px] left-[2%]"><BigPixelTree variant={0} scale={1.8} /></div>
+        <div className="absolute bottom-[100px] left-[8%]"><BigPixelTree variant={1} scale={1.4} /></div>
+        <div className="absolute bottom-[105px] right-[3%]"><BigPixelTree variant={0} scale={1.6} /></div>
+        <div className="absolute bottom-[95px] right-[9%]"><BigPixelTree variant={1} scale={1.3} /></div>
+        <div className="absolute bottom-[70px] left-[5%]"><PixelFlower color="#ff69b4" size={10} /></div>
+        <div className="absolute bottom-[65px] right-[7%]"><PixelFlower color="#ffeb3b" size={10} /></div>
+        <div className="absolute bottom-[68px] left-[15%]"><PixelPlant /></div>
+        <div className="absolute bottom-[62px] right-[14%]"><PixelPlant /></div>
+      </div>
+      <div className="relative" style={{ zIndex: 1 }}>{children}</div>
+    </div>
+  );
+}
+
 function CompletedLeaderboard({
   teams,
   hackathon,
+  skyTheme,
+  sunAngle,
+  moonAngle,
 }: {
   teams: RankedTeam[];
   hackathon: HackathonDetail;
+  skyTheme: ReturnType<typeof getSkyTheme>;
+  sunAngle: number;
+  moonAngle: number;
 }) {
   const winner = teams[0];
   const winPalette = winner ? getTeamPalette(winner.team_color) : null;
 
   return (
-    <div className="pixel-sky min-h-[85vh] pb-8">
-      {/* Clouds */}
-      <div className="pixel-cloud" style={{ width: 8, height: 8, top: 30, animation: "cloud-drift 25s linear infinite" }} />
-      <div className="pixel-cloud" style={{ width: 8, height: 8, top: 60, animation: "cloud-drift 35s linear infinite", animationDelay: "-10s" }} />
-
-      <div className="max-w-lg mx-auto px-4 pt-8">
-        <Link href="/hackathons" className="pixel-font text-white hover:text-[#ffd700] block mb-6 transition-colors" style={{ fontSize: 12, textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
+    <SkyWrapper skyTheme={skyTheme} sunAngle={sunAngle} moonAngle={moonAngle}>
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "90px 24px 100px" }}>
+        {/* Back */}
+        <Link href="/hackathons" className="pixel-font text-white hover:text-[#ffd700] transition-colors"
+          style={{ fontSize: 14, textShadow: "2px 2px 0 rgba(0,0,0,0.6)", background: "rgba(0,0,0,0.3)", padding: "8px 16px", display: "inline-block", marginBottom: 32 }}>
           {"<"} BACK
         </Link>
 
-        <div className="text-center mb-8">
-          <div className="pixel-trophy-bounce inline-block mb-3" style={{ fontSize: 48 }}>
-            🏆
-          </div>
-          <h1 className="pixel-font text-white mb-2" style={{ fontSize: 12, textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
+        {/* Title */}
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <div style={{ fontSize: 56, marginBottom: 8 }}>🏆</div>
+          <h1 className="pixel-font text-white" style={{ fontSize: 16, textShadow: "2px 2px 0 rgba(0,0,0,0.5)", marginBottom: 6 }}>
             {hackathon.title}
           </h1>
-          <p className="pixel-font text-white/60" style={{ fontSize: 7 }}>
-            HACKATHON FINALIZED
-          </p>
+          <p className="pixel-font" style={{ fontSize: 9, color: "rgba(255,255,255,0.5)" }}>HACKATHON FINALIZED</p>
         </div>
 
         {/* Winner spotlight */}
         {winner && winPalette && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="pixel-winner-glow mb-8 p-6 text-center"
-            style={{
-              background: "rgba(0,0,0,0.6)",
-              border: "4px solid #ffd700",
-            }}
-          >
-            <div className="pixel-font text-[#ffd700] mb-1" style={{ fontSize: 8 }}>
-              ★ WINNER ★
-            </div>
-            <div className="pixel-font text-white mb-3" style={{ fontSize: 14, textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+            style={{ background: "rgba(0,0,0,0.55)", border: "3px solid #ffd700", borderRadius: 12, padding: "32px 24px", textAlign: "center", marginBottom: 32 }}>
+            <div className="pixel-font" style={{ fontSize: 10, color: "#ffd700", marginBottom: 8 }}>★ WINNER ★</div>
+            <div className="pixel-font text-white" style={{ fontSize: 18, textShadow: "2px 2px 0 rgba(0,0,0,0.5)", marginBottom: 20 }}>
               {winner.team_name}
             </div>
 
-            <div className="flex justify-center gap-4 mb-4">
+            <div style={{ display: "flex", justifyContent: "center", gap: 24, marginBottom: 20 }}>
               {winner.members.map((m) => (
-                <div key={m.agent_id} className="flex flex-col items-center gap-1">
-                  <PixelLobster
-                    color={winPalette.lobster}
-                    darkColor={winPalette.lobsterDark}
-                    size={52}
-                    name={m.agent_display_name || m.agent_name}
-                    role={m.role}
-                    borderColor="#ffd700"
-                  />
-                  <span className="pixel-font text-white/90" style={{ fontSize: 6 }}>
+                <div key={m.agent_id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <PixelLobster color={winPalette.lobster} darkColor={winPalette.lobsterDark} size={56}
+                    name={m.agent_display_name || m.agent_name} role={m.role} borderColor="#ffd700" />
+                  <span className="pixel-font text-white/80" style={{ fontSize: 8 }}>
                     {m.agent_display_name || m.agent_name}
                   </span>
                 </div>
               ))}
             </div>
 
-            <div className="pixel-font" style={{ fontSize: 22, color: "#ffd700", textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
+            <div className="pixel-font" style={{ fontSize: 28, color: "#ffd700", textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
               {winner.total_score || 0}
             </div>
-            <div className="pixel-font text-white/40" style={{ fontSize: 7 }}>SCORE / 100</div>
+            <div className="pixel-font" style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>SCORE / 100</div>
 
             {winner.judge_feedback && (
-              <p className="mt-3 text-xs text-white/60 italic" style={{ fontFamily: "Inter, sans-serif" }}>
+              <p style={{ marginTop: 16, fontSize: 13, color: "rgba(255,255,255,0.6)", fontStyle: "italic", fontFamily: "Inter, sans-serif", lineHeight: 1.5 }}>
                 &ldquo;{winner.judge_feedback}&rdquo;
               </p>
             )}
-
             {winner.submission_id && (
-              <a
-                href={`/api/v1/submissions/${winner.submission_id}/preview`}
-                target="_blank"
-                className="inline-block mt-3 pixel-font px-4 py-2"
-                style={{ fontSize: 7, background: "#ffd700", color: "#1a1a1a", border: "3px solid #b8860b" }}
-              >
+              <a href={`/api/v1/submissions/${winner.submission_id}/preview`} target="_blank" rel="noopener noreferrer"
+                className="pixel-font" style={{ display: "inline-block", marginTop: 16, fontSize: 9, background: "#ffd700", color: "#1a1a1a", padding: "8px 20px", border: "3px solid #b8860b" }}>
                 VIEW PROJECT
               </a>
             )}
           </motion.div>
         )}
 
-        {/* Leaderboard rows */}
-        <div className="space-y-2">
+        {/* Leaderboard */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {teams.map((team, i) => {
             const p = getTeamPalette(team.team_color);
             const medals = ["🥇", "🥈", "🥉"];
             return (
-              <motion.div
-                key={team.team_id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
+              <motion.div key={team.team_id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.3 + i * 0.08 }}
-                className="pixel-leaderboard-row flex items-center gap-3 px-4 py-3"
                 style={{
-                  background: i === 0 ? "rgba(255,215,0,0.12)" : "rgba(0,0,0,0.5)",
-                  borderLeft: `4px solid ${p.lobster}`,
-                  borderBottom: "2px solid rgba(255,255,255,0.05)",
-                }}
-              >
-                <div className="pixel-font text-center" style={{ width: 28, fontSize: i < 3 ? 16 : 9 }}>
+                  display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+                  background: i === 0 ? "rgba(255,215,0,0.12)" : "rgba(0,0,0,0.45)",
+                  borderLeft: `4px solid ${p.lobster}`, borderRadius: 8,
+                }}>
+                <div className="pixel-font" style={{ width: 32, textAlign: "center", fontSize: i < 3 ? 18 : 10 }}>
                   {i < 3 ? medals[i] : `#${i + 1}`}
                 </div>
-
-                <PixelLobster
-                  color={p.lobster}
-                  darkColor={p.lobsterDark}
-                  size={32}
-                  name={team.team_name}
-                  role=""
-                  borderColor={p.lobster}
-                />
-
-                <div className="flex-1 min-w-0">
-                  <div className="pixel-font text-white truncate" style={{ fontSize: 8 }}>
+                <PixelLobster color={p.lobster} darkColor={p.lobsterDark} size={36} name={team.team_name} role="" borderColor={p.lobster} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="pixel-font text-white" style={{ fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {team.team_name}
                   </div>
-                  <div className="pixel-font text-white/40 truncate" style={{ fontSize: 6 }}>
+                  <div className="pixel-font" style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {team.members.map((m) => m.agent_display_name || m.agent_name).join(", ")}
                   </div>
                 </div>
-
-                <div className="text-right">
+                <div style={{ textAlign: "right", minWidth: 48 }}>
                   {team.total_score !== null ? (
                     <div className="pixel-font" style={{
-                      fontSize: 12,
-                      color: team.total_score >= 80 ? "#ffd700" : team.total_score >= 60 ? "#00ffaa" : "#aaa",
+                      fontSize: 14, color: team.total_score >= 80 ? "#ffd700" : team.total_score >= 60 ? "#00ffaa" : "#aaa",
                     }}>
                       {team.total_score}
                     </div>
                   ) : (
-                    <div className="pixel-font text-white/30" style={{ fontSize: 7 }}>
-                      {team.status}
-                    </div>
+                    <div className="pixel-font" style={{ fontSize: 8, color: "rgba(255,255,255,0.3)" }}>{team.status}</div>
                   )}
                 </div>
-
                 {team.submission_id && (
-                  <a
-                    href={`/api/v1/submissions/${team.submission_id}/preview`}
-                    target="_blank"
-                    className="pixel-font text-[var(--accent-primary)] hover:underline"
-                    style={{ fontSize: 6 }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    VIEW
-                  </a>
+                  <a href={`/api/v1/submissions/${team.submission_id}/preview`} target="_blank" rel="noopener noreferrer"
+                    className="pixel-font" style={{ fontSize: 8, color: "var(--primary)", padding: "4px 10px", background: "rgba(255,107,53,0.1)", borderRadius: 4 }}
+                    onClick={(e) => e.stopPropagation()}>VIEW</a>
                 )}
               </motion.div>
             );
           })}
         </div>
       </div>
-
-      {/* Grass */}
-      <div className="pixel-grass" style={{ height: 24, marginTop: 32 }} />
-    </div>
+    </SkyWrapper>
   );
 }
 
@@ -1131,7 +1170,7 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
 
   /* ─── COMPLETED → LEADERBOARD ─── */
   if (hackathon.status === "finalized") {
-    return <CompletedLeaderboard teams={teams} hackathon={hackathon} />;
+    return <CompletedLeaderboard teams={teams} hackathon={hackathon} skyTheme={skyTheme} sunAngle={sunAngle} moonAngle={moonAngle} />;
   }
 
   /* ─── ACTIVE → PIXEL BUILDING ─── */
@@ -1288,7 +1327,7 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
                 teamsCount={teams.length}
                 agentsCount={totalAgents}
               />
-              <p className="pixel-font text-center text-white/60 mt-1" style={{ fontSize: 7, textShadow: "1px 1px 0 rgba(0,0,0,0.5)" }}>
+              <p className="pixel-font text-center text-white/60 mt-1" style={{ fontSize: 9, textShadow: "1px 1px 0 rgba(0,0,0,0.5)" }}>
                 TAP BADGE FOR INFO
               </p>
             </div>
@@ -1317,20 +1356,25 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
 
           {/* No teams */}
           {teams.length === 0 && (
-            <div className="text-center py-16">
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "20px 0 40px" }}>
               <HackathonBadge
                 hackathon={hackathon}
                 teamsCount={0}
                 agentsCount={0}
               />
-              <p className="pixel-font text-white/60 mt-2 mb-6" style={{ fontSize: 7 }}>
-                TAP BADGE FOR INFO
-              </p>
-              <div className="pixel-font text-white mb-3" style={{ fontSize: 12, textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
-                NO TEAMS YET
-              </div>
-              <div className="pixel-font text-white/60" style={{ fontSize: 8 }}>
-                WAITING FOR AGENTS TO REGISTER...
+              <p className="pixel-font" style={{ fontSize: 9, color: "rgba(255,255,255,0.5)" }}>TAP BADGE FOR INFO</p>
+              <div style={{
+                background: "rgba(0,0,0,0.45)", padding: "28px 32px", textAlign: "center",
+                border: "2px dashed rgba(255,255,255,0.12)", width: "100%", maxWidth: 360,
+              }}>
+                <div className="pixel-font text-white" style={{ fontSize: 14, textShadow: "2px 2px 0 rgba(0,0,0,0.5)", marginBottom: 10 }}>
+                  NO TEAMS YET
+                </div>
+                <div className="pixel-font" style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", lineHeight: 1.8 }}>
+                  WAITING FOR AGENTS...
+                  <br />
+                  THE BUILDING WILL GROW AS TEAMS JOIN
+                </div>
               </div>
             </div>
           )}

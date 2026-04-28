@@ -169,6 +169,44 @@ export function formatHackathon(hackathon: JsonObject) {
   };
 }
 
+/**
+ * Calculate the dynamic prize pool for a hackathon.
+ * Prize = (entry_fee × participant_count) − 10% platform cut.
+ */
+export async function calculatePrizePool(hackathonId: string): Promise<{
+  entry_fee: number;
+  participant_count: number;
+  total_pot: number;
+  platform_cut_pct: number;
+  platform_cut: number;
+  prize_pool: number;
+}> {
+  const { data: hackathon } = await supabaseAdmin
+    .from("hackathons").select("entry_fee").eq("id", hackathonId).single();
+
+  const entryFee = hackathon?.entry_fee ?? 0;
+
+  const { count } = await supabaseAdmin
+    .from("teams")
+    .select("*", { count: "exact", head: true })
+    .eq("hackathon_id", hackathonId);
+
+  const participantCount = count || 0;
+  const totalPot = entryFee * participantCount;
+  const platformCutPct = 0.10; // 10% platform cut on prize
+  const platformCut = totalPot * platformCutPct;
+  const prizePool = totalPot - platformCut;
+
+  return {
+    entry_fee: entryFee,
+    participant_count: participantCount,
+    total_pot: totalPot,
+    platform_cut_pct: platformCutPct,
+    platform_cut: platformCut,
+    prize_pool: Math.max(0, prizePool),
+  };
+}
+
 function extractNumericScore(value: unknown): number | null {
   const score = Number(value);
   if (Number.isNaN(score)) return null;
@@ -358,6 +396,17 @@ export async function loadHackathonLeaderboard(hackathonId: string) {
 
       const primaryAgentId = typeof flatMembers[0]?.agent_id === "string" ? flatMembers[0].agent_id : null;
       const submissionMeta = parseSubmissionMeta(submission?.build_log, submission?.preview_url);
+      
+      let aiScore = null;
+      if (submission?.id) {
+        const { data: evalData } = await supabaseAdmin
+          .from("evaluations")
+          .select("total_score, judge_feedback")
+          .eq("submission_id", submission.id)
+          .single();
+        if (evalData) aiScore = evalData;
+      }
+
       const manualScore = resolveManualScore(meta.scores, {
         submissionId: submission?.id ?? null,
         teamId: team.id,
@@ -378,11 +427,13 @@ export async function loadHackathonLeaderboard(hackathonId: string) {
         members: flatMembers,
         submission_id: submission?.id ?? null,
         submission_status: submission?.status ?? null,
-        total_score: manualScore?.total_score ?? null,
-        judge_feedback: manualScore?.notes ?? null,
+        total_score: manualScore?.total_score ?? aiScore?.total_score ?? null,
+        judge_feedback: manualScore?.notes ?? aiScore?.judge_feedback ?? null,
         winner: isWinner,
         project_url: submissionMeta.project_url,
         repo_url: submissionMeta.repo_url,
+        github_repo: hackathon.github_repo ?? null,
+        team_slug: team.name ? team.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100) : null,
         submission_notes: submissionMeta.notes,
       };
     })

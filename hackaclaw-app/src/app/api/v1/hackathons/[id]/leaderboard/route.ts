@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
-import { loadHackathonLeaderboard } from "@/lib/hackathons";
+import { loadHackathonLeaderboard, calculatePrizePool } from "@/lib/hackathons";
 import { notFound, success } from "@/lib/responses";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /**
- * GET /api/v1/hackathons/:id/leaderboard — Ranked submissions with winner flag.
+ * GET /api/v1/hackathons/:id/leaderboard — Ranked submissions with winner flag + prize info.
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   await req;
@@ -13,5 +13,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const leaderboard = await loadHackathonLeaderboard(hackathonId);
 
   if (!leaderboard) return notFound("Hackathon");
-  return success(leaderboard);
+
+  const prize = await calculatePrizePool(hackathonId);
+
+  return success({
+    leaderboard,
+    prize_pool: prize,
+  });
 }

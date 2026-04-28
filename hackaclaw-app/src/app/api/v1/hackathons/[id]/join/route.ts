@@ -1,21 +1,20 @@
 import crypto from "crypto";
 import { NextRequest } from "next/server";
 import { authenticateRequest } from "@/lib/auth";
-import { normalizeAddress, sameAddress, verifyJoinTransaction } from "@/lib/chain";
-import { parseHackathonMeta } from "@/lib/hackathons";
 import { supabaseAdmin } from "@/lib/supabase";
 import { created, error, notFound, unauthorized } from "@/lib/responses";
-import { createSingleAgentTeam, sanitizeString, toPublicHackathonStatus } from "@/lib/hackathons";
+import { createSingleAgentTeam, sanitizeString, toPublicHackathonStatus, calculatePrizePool, parseHackathonMeta } from "@/lib/hackathons";
+import { getBalance, chargeForPrompt, InsufficientBalanceError } from "@/lib/balance";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-function getConfiguredChainId(): number | null {
-  const parsed = Number.parseInt(process.env.CHAIN_ID || "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
 /**
- * POST /api/v1/hackathons/:id/join — Register one agent as one team in a hackathon.
+ * POST /api/v1/hackathons/:id/join — Join a hackathon.
+ *
+ * If the hackathon has an entry_fee > 0, the fee is deducted from the agent's USD balance.
+ * Agents must have deposited enough ETH first (via POST /api/v1/balance/deposit).
+ *
+ * Body: { name?: string, color?: string }
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const agent = await authenticateRequest(req);
@@ -25,88 +24,162 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
 
   if (!hackathon) return notFound("Hackathon");
-  if (toPublicHackathonStatus(hackathon.status) !== "open") return error("Hackathon is not open for new participants", 400);
-
-  const meta = parseHackathonMeta(hackathon.judging_criteria);
-  if (!meta.contract_address) {
-    return error("Hackathon does not have a configured contract address", 400);
+  if (toPublicHackathonStatus(hackathon.status) !== "open") {
+    return error("Hackathon is not open for new participants", 400);
   }
 
   const body = await req.json().catch(() => ({}));
-  const requestedAgentId = sanitizeString(body.agent_id, 64);
-  if (requestedAgentId && requestedAgentId !== agent.id) {
-    return error("agent_id must match the authenticated agent", 403);
-  }
 
-  const wallet = sanitizeString(body.wallet, 128);
-  const txHash = sanitizeString(body.tx_hash, 256);
+  // Check if agent is already in this hackathon
+  const { data: existingMembership } = await supabaseAdmin
+    .from("team_members")
+    .select("team_id, teams!inner(hackathon_id)")
+    .eq("agent_id", agent.id)
+    .eq("teams.hackathon_id", hackathonId)
+    .single();
 
-  if (!wallet) return error("wallet is required", 400);
-  if (!txHash) return error("tx_hash is required", 400);
-
-  let normalizedWallet: string;
-  let normalizedAgentWallet: string | null = null;
-
-  try {
-    normalizedWallet = normalizeAddress(wallet);
-    normalizedAgentWallet = agent.wallet_address ? normalizeAddress(agent.wallet_address) : null;
-  } catch {
-    return error("wallet must be a valid EVM address", 400);
-  }
-
-  if (normalizedAgentWallet && !sameAddress(normalizedAgentWallet, normalizedWallet)) {
-    return error("wallet must match the agent's registered wallet", 403);
-  }
-
-  let verification;
-  try {
-    verification = await verifyJoinTransaction({
-      contractAddress: meta.contract_address,
-      walletAddress: normalizedWallet,
-      txHash,
+  if (existingMembership) {
+    const { data: existingTeam } = await supabaseAdmin
+      .from("teams").select("*").eq("id", existingMembership.team_id).single();
+    const existingMeta = parseHackathonMeta(hackathon.judging_criteria);
+    return created({
+      joined: false,
+      team: existingTeam,
+      agent_id: agent.id,
+      hackathon: {
+        id: hackathon.id,
+        title: hackathon.title,
+        brief: hackathon.brief,
+        description: hackathon.description || null,
+        rules: hackathon.rules || null,
+        challenge_type: hackathon.challenge_type || "landing_page",
+        judging_criteria: existingMeta.criteria_text,
+        ends_at: hackathon.ends_at || null,
+        max_participants: hackathon.max_participants,
+        github_repo: hackathon.github_repo || null,
+      },
+      message: "Agent was already registered for this hackathon.",
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to verify join transaction";
-    return error(message, 400);
   }
 
-  if (!normalizedAgentWallet) {
-    await supabaseAdmin.from("agents").update({ wallet_address: normalizedWallet }).eq("id", agent.id);
+  // Check capacity
+  const { count: currentParticipants } = await supabaseAdmin
+    .from("teams")
+    .select("*", { count: "exact", head: true })
+    .eq("hackathon_id", hackathonId);
+
+  if ((currentParticipants || 0) >= hackathon.max_participants) {
+    return error("Hackathon is full", 400, `Max participants: ${hackathon.max_participants}`);
   }
 
+  // ── Charge entry fee from balance (if paid hackathon) ──
+  const entryFee = hackathon.entry_fee || 0;
+  let entryCharge = null;
+
+  if (entryFee > 0) {
+    const balance = await getBalance(agent.id);
+
+    if (balance.balance_usd < entryFee) {
+      return error(
+        `Insufficient balance for entry fee. Need $${entryFee.toFixed(2)}, have $${balance.balance_usd.toFixed(2)}`,
+        402,
+        "Deposit ETH via POST /api/v1/balance/deposit to fund your account."
+      );
+    }
+
+    // Deduct entry fee (no platform fee on entry — the 10% cut is taken from the prize pool)
+    const { data: updated, error: chargeErr } = await supabaseAdmin
+      .from("agent_balances")
+      .update({
+        balance_usd: balance.balance_usd - entryFee,
+        total_spent_usd: balance.total_spent_usd + entryFee,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("agent_id", agent.id)
+      .gte("balance_usd", entryFee)
+      .select("balance_usd")
+      .single();
+
+    if (chargeErr || !updated) {
+      return error(
+        "Failed to charge entry fee (balance may have changed). Try again.",
+        402
+      );
+    }
+
+    // Log the entry fee transaction
+    await supabaseAdmin.from("balance_transactions").insert({
+      id: crypto.randomUUID(),
+      agent_id: agent.id,
+      type: "entry_fee",
+      amount_usd: -entryFee,
+      balance_after: updated.balance_usd,
+      reference_id: hackathonId,
+      metadata: {
+        type: "entry_fee",
+        hackathon_id: hackathonId,
+        hackathon_title: hackathon.title,
+      },
+      created_at: new Date().toISOString(),
+    });
+
+    entryCharge = {
+      entry_fee_usd: entryFee,
+      balance_after_usd: updated.balance_usd,
+    };
+  }
+
+  // ── Create team ──
   const { team, existed } = await createSingleAgentTeam({
     hackathonId,
     agent,
-    wallet: normalizedWallet,
-    txHash,
+    name: sanitizeString(body.name, 120),
+    color: sanitizeString(body.color, 32),
   });
 
   if (!team) return error("Failed to join hackathon", 500);
 
+  // Activity log
   if (!existed) {
     await supabaseAdmin.from("activity_log").insert({
       id: crypto.randomUUID(),
       hackathon_id: hackathonId,
       team_id: typeof team.id === "string" ? team.id : null,
       agent_id: agent.id,
-      event_type: "join_verified",
+      event_type: "hackathon_joined",
       event_data: {
-        wallet: normalizedWallet,
-        tx_hash: txHash,
-        contract_address: meta.contract_address,
-        chain_id: meta.chain_id ?? getConfiguredChainId(),
-        entry_fee_wei: verification.entryFee.toString(),
-        verified_at: new Date().toISOString(),
+        entry_fee_usd: entryFee,
+        paid_from_balance: entryFee > 0,
       },
     });
   }
 
+  // Calculate current prize pool
+  const prize = await calculatePrizePool(hackathonId);
+
+  // Parse hackathon meta for judging criteria
+  const meta = parseHackathonMeta(hackathon.judging_criteria);
+
   return created({
-    joined: !existed,
+    joined: true,
     team,
     agent_id: agent.id,
-    wallet: normalizedWallet,
-    tx_hash: txHash,
-    message: existed ? "Agent was already registered for this hackathon." : "Hackathon join verified and recorded.",
+    entry_fee_charged: entryCharge,
+    prize_pool: prize,
+    hackathon: {
+      id: hackathon.id,
+      title: hackathon.title,
+      brief: hackathon.brief,
+      description: hackathon.description || null,
+      rules: hackathon.rules || null,
+      challenge_type: hackathon.challenge_type || "landing_page",
+      judging_criteria: meta.criteria_text,
+      ends_at: hackathon.ends_at || null,
+      max_participants: hackathon.max_participants,
+      github_repo: hackathon.github_repo || null,
+    },
+    message: entryFee > 0
+      ? `Joined! Entry fee of $${entryFee.toFixed(2)} charged from balance. Current prize pool: $${prize.prize_pool.toFixed(2)}`
+      : "Joined! This is a free hackathon.",
   });
 }

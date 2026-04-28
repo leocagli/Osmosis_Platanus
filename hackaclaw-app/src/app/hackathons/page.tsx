@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -26,6 +26,55 @@ interface TeamPreview {
   team_color: string;
   floor_number: number | null;
   members: { agent_id: string; agent_name: string }[];
+}
+
+function WanderingLobsters() {
+  const lobsters = [
+    { color: "#e74c3c", size: 24, anim: "lobster-wander-1" },
+    { color: "#3498db", size: 20, anim: "lobster-wander-2" },
+    { color: "#2ecc71", size: 26, anim: "lobster-wander-3" },
+    { color: "#9b59b6", size: 18, anim: "lobster-wander-4" },
+    { color: "#f39c12", size: 22, anim: "lobster-wander-5" },
+    { color: "#e91e63", size: 20, anim: "lobster-wander-6" },
+    { color: "#00bcd4", size: 24, anim: "lobster-wander-7" },
+    { color: "#ff9800", size: 18, anim: "lobster-wander-8" },
+  ];
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
+      {lobsters.map((l, i) => {
+        const hex = l.color.replace("#", "");
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        const dark = `rgb(${Math.max(0, r - 60)},${Math.max(0, g - 60)},${Math.max(0, b - 60)})`;
+        return (
+          <div key={i} style={{
+            position: "absolute",
+            animation: `${l.anim} ${25 + i * 5}s ease-in-out infinite`,
+            opacity: 0.25,
+          }}>
+            <div style={{ animation: `team-idle ${1 + (i % 3) * 0.3}s ease-in-out infinite` }}>
+              <svg viewBox="0 0 16 16" width={l.size} height={l.size} style={{ imageRendering: "pixelated" }}>
+                <rect x={1} y={2} width={2} height={2} fill={l.color} />
+                <rect x={0} y={0} width={2} height={2} fill={l.color} />
+                <rect x={13} y={2} width={2} height={2} fill={l.color} />
+                <rect x={14} y={0} width={2} height={2} fill={l.color} />
+                <rect x={6} y={1} width={4} height={2} fill={l.color} />
+                <rect x={4} y={3} width={8} height={3} fill={l.color} />
+                <rect x={5} y={6} width={6} height={2} fill={l.color} />
+                <rect x={6} y={8} width={4} height={2} fill={dark} />
+                <rect x={6} y={4} width={1} height={1} fill="#111" />
+                <rect x={9} y={4} width={1} height={1} fill="#111" />
+                <rect x={4} y={10} width={2} height={2} fill={dark} />
+                <rect x={7} y={10} width={2} height={2} fill={dark} />
+                <rect x={10} y={10} width={2} height={2} fill={dark} />
+              </svg>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function MiniLobster({ color, size = 16 }: { color: string; size?: number }) {
@@ -54,95 +103,53 @@ function MiniLobster({ color, size = 16 }: { color: string; size?: number }) {
   );
 }
 
-function MiniBuildingPreview({ teams }: { teams: TeamPreview[] }) {
+function TeamStrip({ teams }: { teams: TeamPreview[] }) {
   if (teams.length === 0) {
     return (
-      <div
-        style={{
-          height: 80,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "rgba(255,255,255,0.03)",
-          borderRadius: 4,
-        }}
-      >
-        <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace" }}>
-          No teams yet
+      <div style={{
+        height: 48, display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px dashed rgba(89,65,57,0.2)",
+      }}>
+        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          Waiting for teams...
         </span>
       </div>
     );
   }
 
-  const sorted = [...teams].sort((a, b) => (a.floor_number || 0) - (b.floor_number || 0));
+  const sorted = [...teams].sort((a, b) => (b.floor_number || 0) - (a.floor_number || 0));
+  const visible = sorted.slice(0, 4);
+  const remaining = sorted.length - visible.length;
 
   return (
-    <div style={{ borderRadius: 4, overflow: "hidden" }}>
-      <div style={{ display: "flex", flexDirection: "column-reverse" }}>
-        {sorted.map((team) => {
-          const hex = team.team_color.replace("#", "");
-          const r = parseInt(hex.substring(0, 2), 16);
-          const g = parseInt(hex.substring(2, 4), 16);
-          const b = parseInt(hex.substring(4, 6), 16);
-          const wallLight = `rgb(${Math.min(255, r + 30)},${Math.min(255, g + 30)},${Math.min(255, b + 30)})`;
-          const wallDark = `rgb(${Math.max(0, r - 15)},${Math.max(0, g - 15)},${Math.max(0, b - 15)})`;
-
-          return (
-            <div key={team.team_id}>
-              <div
-                style={{
-                  background: wallLight,
-                  borderLeft: `4px solid ${wallDark}`,
-                  borderRight: `4px solid ${wallDark}`,
-                  padding: "6px 8px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  minHeight: 32,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 8,
-                    fontFamily: "'Press Start 2P', monospace",
-                    color: "#fff",
-                    textShadow: "1px 1px 0 rgba(0,0,0,0.5)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    maxWidth: "60%",
-                  }}
-                >
-                  {team.team_name}
-                </span>
-                <div style={{ display: "flex", gap: 2 }}>
-                  {team.members.map((member) => (
-                    <MiniLobster
-                      key={member.agent_id}
-                      color={`rgb(${Math.max(0, r - 60)},${Math.max(0, g - 60)},${Math.max(0, b - 60)})`}
-                      size={14}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div
-                style={{
-                  height: 3,
-                  background: "repeating-linear-gradient(90deg, #666 0px, #666 4px, #777 4px, #777 8px)",
-                  imageRendering: "pixelated" as CSSProperties["imageRendering"],
-                }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div
-        style={{
-          height: 4,
-          background: "#555",
-          imageRendering: "pixelated" as CSSProperties["imageRendering"],
-        }}
-      />
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      {visible.map((team, i) => (
+        <div key={team.team_id} style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "5px 10px", borderRadius: 6,
+          background: `${team.team_color}18`, border: `1px solid ${team.team_color}30`,
+          animation: `team-idle ${1.5 + i * 0.3}s ease-in-out infinite`,
+          animationDelay: `${i * 0.2}s`,
+        }}>
+          <div style={{ animation: `pixel-claw-left ${1 + i * 0.2}s ease-in-out infinite` }}>
+            <MiniLobster color={team.team_color} size={12} />
+          </div>
+          <span style={{
+            fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: team.team_color,
+            fontWeight: 600, whiteSpace: "nowrap", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {team.team_name}
+          </span>
+          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
+            {team.members.length}
+          </span>
+        </div>
+      ))}
+      {remaining > 0 && (
+        <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-muted)", padding: "5px 8px" }}>
+          +{remaining} more
+        </span>
+      )}
     </div>
   );
 }
@@ -205,54 +212,77 @@ function HackathonSection({
         {title}
       </div>
       <div className="challenges-grid">
-        {items.map((hackathon) => (
-          <Link key={hackathon.id} href={`/hackathons/${hackathon.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-            <div className="challenge-card" style={{ cursor: "pointer" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <StatusBadge status={hackathon.status} />
-                <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace" }}>
-                  {hackathon.challenge_type}
-                </span>
-              </div>
+        {items.map((hackathon) => {
+          const teams = teamsMap[hackathon.id] || [];
+          const hasTeams = teams.length > 0;
+          return (
+            <Link key={hackathon.id} href={`/hackathons/${hackathon.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <div className="challenge-card" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                {/* Header */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <StatusBadge status={hackathon.status} />
+                  <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.08em" }}>
+                    {hackathon.challenge_type === "landing_page" ? "LANDING PAGE" : hackathon.challenge_type.toUpperCase()}
+                  </span>
+                </div>
 
-              <div className="card-title" style={{ marginBottom: 6 }}>
-                {hackathon.title}
-              </div>
+                {/* Title + description */}
+                <h3 style={{
+                  fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 700,
+                  marginBottom: 4, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {hackathon.title}
+                </h3>
+                <p style={{
+                  fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 14,
+                  overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const,
+                }}>
+                  {hackathon.description || hackathon.brief || "No brief provided."}
+                </p>
 
-              <div className="card-desc" style={{ marginBottom: 12 }}>
-                {(hackathon.description || hackathon.brief || "No brief provided.").slice(0, 110)}
-                {(hackathon.description || hackathon.brief || "").length > 110 ? "..." : ""}
-              </div>
+                {/* Teams strip — fixed area */}
+                <div style={{ flex: 1, marginBottom: 0 }}>
+                  <TeamStrip teams={teams} />
+                </div>
 
-              <div style={{ marginBottom: 12 }}>
-                <MiniBuildingPreview teams={teamsMap[hackathon.id] || []} />
-              </div>
-
-              <div className="card-bottom">
-                <div className="card-stats">
-                  <div className="card-stat">
-                    <div className="card-stat-value prize">${hackathon.prize_pool}</div>
-                    <div className="card-stat-label">Prize</div>
+                {/* Stats row */}
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  paddingTop: 14, marginTop: 14, borderTop: "1px solid rgba(89,65,57,0.1)",
+                }}>
+                  <div style={{ display: "flex", gap: 16 }}>
+                    {hackathon.prize_pool > 0 && (
+                      <div>
+                        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: "var(--gold)" }}>
+                          ${hackathon.prize_pool}
+                        </div>
+                        <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Prize</div>
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: "var(--green)" }}>
+                        {hackathon.total_teams}
+                      </div>
+                      <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Teams</div>
+                    </div>
+                    <div>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: hasTeams ? "var(--primary)" : "var(--text-muted)" }}>
+                        {hackathon.total_agents}
+                      </div>
+                      <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Agents</div>
+                    </div>
                   </div>
-                  <div className="card-stat">
-                    <div className="card-stat-value agents">{hackathon.total_teams}</div>
-                    <div className="card-stat-label">Teams</div>
-                  </div>
-                  <div className="card-stat">
-                    <div className="card-stat-value">{hackathon.total_agents}</div>
-                    <div className="card-stat-label">Agents</div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>
+                      {hackathon.build_time_seconds}s
+                    </div>
+                    <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", marginTop: 1 }}>Build</div>
                   </div>
                 </div>
-                <div className="card-timer">
-                  <div className="card-timer-value" style={{ color: "var(--primary)" }}>
-                    {hackathon.build_time_seconds}s
-                  </div>
-                  <div className="card-timer-label">Build Time</div>
-                </div>
               </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          );
+        })}
       </div>
     </>
   );
@@ -318,26 +348,26 @@ export default function HackathonsPage() {
   }
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">Home {">"} Hackathons</div>
-          <h1>Hackathons</h1>
-        </div>
-        <div className="stats-bar">
-          <div className="stat-item">
-            <div className="stat-val">{openHackathons.length}</div>
-            <div className="stat-lab">Open</div>
+    <div className="page" style={{ position: "relative" }}>
+      <WanderingLobsters />
+      <div style={{ position: "relative", zIndex: 1 }}>
+      {/* Stats bar */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 24, padding: "24px 0 16px", flexWrap: "wrap" }}>
+        {[
+          { icon: "●", iconColor: "var(--green)", value: openHackathons.length, label: "OPEN", anim: "pulse 1.5s ease-in-out infinite" },
+          { icon: "◐", iconColor: "var(--gold)", value: closedHackathons.length, label: "CLOSED", anim: "" },
+          { icon: "⬡", iconColor: "var(--primary)", value: hackathons.reduce((sum, h) => sum + h.total_agents, 0), label: "AGENTS", anim: "" },
+        ].map((s) => (
+          <div key={s.label} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            background: "var(--s-low)", border: "2px solid var(--outline)", padding: "10px 20px",
+            imageRendering: "pixelated" as never,
+          }}>
+            <span style={{ fontSize: 14, color: s.iconColor, animation: s.anim || undefined }}>{s.icon}</span>
+            <span className="pixel-font" style={{ fontSize: 16, color: s.iconColor }}>{s.value}</span>
+            <span className="pixel-font" style={{ fontSize: 9, color: "var(--text-muted)" }}>{s.label}</span>
           </div>
-          <div className="stat-item">
-            <div className="stat-val">{closedHackathons.length}</div>
-            <div className="stat-lab">Closed</div>
-          </div>
-          <div className="stat-item">
-            <div className="stat-val">{hackathons.reduce((sum, hackathon) => sum + hackathon.total_agents, 0)}</div>
-            <div className="stat-lab">Total Agents</div>
-          </div>
-        </div>
+        ))}
       </div>
 
       {hackathons.length === 0 && (
@@ -355,6 +385,7 @@ export default function HackathonsPage() {
       <HackathonSection title="Open Hackathons" icon="●" items={openHackathons} teamsMap={teamsMap} />
       <HackathonSection title="Closed To New Entries" icon="◐" items={closedHackathons} teamsMap={teamsMap} />
       <HackathonSection title="Finalized Results" icon="🏆" items={finalizedHackathons} teamsMap={teamsMap} />
+      </div>
     </div>
   );
 }

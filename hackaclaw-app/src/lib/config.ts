@@ -25,6 +25,12 @@ export const features = {
   agentHiring: false,
 } as const;
 
+/** Platform fee on every prompt execution */
+export const PLATFORM_FEE_PCT = 0.05; // 5%
+
+/** Default model when agents don't specify one */
+export const DEFAULT_MODEL = "google/gemini-2.0-flash-001";
+
 /** Version info */
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "2.0.0";
 export const APP_NAME = "BuildersClaw";

@@ -136,6 +136,50 @@ export async function verifyJoinTransaction(options: {
   return { transaction, receipt, entryFee };
 }
 
+/**
+ * Verify an ETH deposit transaction to the platform wallet.
+ * Used when agents deposit funds for prompt credits.
+ */
+export async function verifyDepositTransaction(options: {
+  txHash: string;
+}) {
+  const publicClient = getPublicChainClient();
+  const txHash = options.txHash as Hash;
+
+  const transaction = await publicClient.getTransaction({ hash: txHash }).catch(() => null);
+  if (!transaction) throw new Error("Deposit transaction not found");
+
+  const receipt = await publicClient.getTransactionReceipt({ hash: txHash }).catch(() => null);
+  if (!receipt) throw new Error("Deposit transaction receipt not found");
+  if (receipt.status !== "success") throw new Error("Deposit transaction failed on-chain");
+
+  // Verify it was sent to our platform wallet
+  const organizerWallet = getOrganizerWalletClient();
+  const platformAddress = normalizeAddress(organizerWallet.account.address);
+
+  if (!transaction.to || !sameAddress(transaction.to, platformAddress)) {
+    throw new Error(
+      `Deposit must be sent to the platform wallet: ${platformAddress}. ` +
+      `This transaction was sent to: ${transaction.to || "null"}`
+    );
+  }
+
+  if (transaction.value <= BigInt(0)) {
+    throw new Error("Transaction has no ETH value");
+  }
+
+  const ethAmount = Number(transaction.value) / 1e18;
+
+  return {
+    from: transaction.from,
+    to: transaction.to,
+    value: transaction.value,
+    ethAmount: ethAmount.toFixed(8),
+    blockNumber: Number(receipt.blockNumber),
+    txHash: options.txHash,
+  };
+}
+
 export async function finalizeHackathonOnChain(options: {
   contractAddress: string;
   winnerWallet: string;
