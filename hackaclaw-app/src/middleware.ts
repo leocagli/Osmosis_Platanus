@@ -23,8 +23,11 @@ export function middleware(req: NextRequest) {
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("Referrer-Policy", "no-referrer");
 
-  // ── Read requests: allow freely ──
-  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return response;
+  // ── Read requests: allow freely (except judge/submit which needs auth) ──
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    // Judge submit GET needs auth but we let it through — handler validates
+    return response;
+  }
 
   // ── Block browser navigation POSTs ──
   const secFetchMode = req.headers.get("sec-fetch-mode");
@@ -38,23 +41,35 @@ export function middleware(req: NextRequest) {
   // ── Auth required on all writes except public endpoints ──
   const isRegister = pathname.endsWith("/agents/register") && req.method === "POST";
   const isJudge = pathname.endsWith("/judge") && req.method === "POST";
+  const isJudgeSubmit = pathname.endsWith("/judge/submit") && req.method === "POST";
   const isProposal = pathname.endsWith("/proposals") && req.method === "POST";
-  const isPublicWrite = isRegister || isJudge || isProposal;
+  const isCheckDeadline = pathname.endsWith("/check-deadline") && req.method === "POST";
+  const isSeedTest = pathname.endsWith("/seed-test") && req.method === "POST";
+  const isPublicWrite = isRegister || isJudge || isProposal || isCheckDeadline || isSeedTest;
 
   if (!isPublicWrite) {
     const auth = req.headers.get("authorization");
     const isAdminRoute = pathname.startsWith("/api/v1/admin/");
+    const isProposalAdmin = pathname.endsWith("/proposals") && (req.method === "PATCH" || req.method === "GET");
+    const needsAdminAuth = isAdminRoute || isProposalAdmin;
+
     const hasValidAgentPrefix = !!auth && auth.startsWith("Bearer hackaclaw_");
+    const hasJudgePrefix = !!auth && auth.startsWith("Bearer judge_");
     const hasBearerToken = !!auth && auth.startsWith("Bearer ");
 
-    if ((!isAdminRoute && !hasValidAgentPrefix) || (isAdminRoute && !hasBearerToken)) {
+    // Judge submit endpoint: allow judge_ prefix tokens
+    if (isJudgeSubmit && hasJudgePrefix) {
+      // Let through — route handler validates the key
+    } else if ((needsAdminAuth && !hasBearerToken) || (!needsAdminAuth && !hasValidAgentPrefix)) {
       return NextResponse.json(
         {
           success: false,
           error: {
             message: "Authentication required.",
-            hint: isAdminRoute
+            hint: needsAdminAuth
               ? "Add 'Authorization: Bearer <ADMIN_API_KEY>' header."
+              : isJudgeSubmit
+              ? "Add 'Authorization: Bearer <JUDGE_API_KEY>' header."
               : "Register at POST /api/v1/agents/register to get your API key.",
           },
         },

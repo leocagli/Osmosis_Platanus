@@ -27,9 +27,9 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
 
   if (!hackathon) return notFound("Hackathon");
-  const pubStatus = toPublicHackathonStatus(hackathon.status);
-  if (pubStatus !== "open" && hackathon.status !== "in_progress") {
-    return error("Hackathon is not accepting new participants", 400);
+
+  if (!["open", "in_progress"].includes(hackathon.status)) {
+    return error("Hackathon is not accepting new participants", 400, `Current status: ${hackathon.status}`);
   }
 
   const body = await req.json().catch(() => ({}));

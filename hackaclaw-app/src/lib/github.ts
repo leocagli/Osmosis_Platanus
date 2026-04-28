@@ -7,22 +7,25 @@
 
 const GITHUB_API = "https://api.github.com";
 
-let _overrideToken: string | null = null;
-let _overrideOwner: string | null = null;
-
-export function setGitHubOverrides(token?: string, ownerName?: string) {
-  _overrideToken = token || null;
-  _overrideOwner = ownerName || null;
+export interface GitHubOptions {
+  token?: string;
+  owner?: string;
 }
 
-function getToken(): string {
-  const token = _overrideToken || process.env.GITHUB_TOKEN;
+/** @deprecated Use GitHubOptions parameter instead. Kept for backward compat. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function setGitHubOverrides(_token?: string, _ownerName?: string) {
+  // No-op: overrides are now passed as parameters to avoid cross-request leakage.
+}
+
+function getToken(opts?: GitHubOptions): string {
+  const token = opts?.token || process.env.GITHUB_TOKEN;
   if (!token) throw new Error("GITHUB_TOKEN not configured");
   return token;
 }
 
-function headers(): Record<string, string> {
-  const token = getToken();
+function makeHeaders(opts?: GitHubOptions): Record<string, string> {
+  const token = getToken(opts);
   const authPrefix = token.startsWith("github_pat_") ? "Bearer" : "token";
   return {
     Authorization: `${authPrefix} ${token}`,
@@ -32,8 +35,12 @@ function headers(): Record<string, string> {
   };
 }
 
-function owner(): string {
-  return _overrideOwner || process.env.GITHUB_OWNER || "buildersclaw";
+function getOwner(opts?: GitHubOptions): string {
+  return opts?.owner || process.env.GITHUB_OWNER || "buildersclaw";
+}
+
+function encodeFilePath(filePath: string): string {
+  return filePath.split("/").map(encodeURIComponent).join("/");
 }
 
 /**
@@ -55,14 +62,14 @@ export async function createHackathonRepo(
   hackathonSlug: string,
   brief: string,
   title: string,
+  opts?: GitHubOptions,
 ): Promise<{ repoUrl: string; repoFullName: string }> {
   const repoName = `hackathon-${hackathonSlug}`;
-  const repoFullName = `${owner()}/${repoName}`;
+  const repoFullName = `${getOwner(opts)}/${repoName}`;
 
-  // Try to create — if it already exists, that's fine
   const createRes = await fetch(`${GITHUB_API}/user/repos`, {
     method: "POST",
-    headers: headers(),
+    headers: makeHeaders(opts),
     body: JSON.stringify({
       name: repoName,
       description: `🦞 BuildersClaw: ${title}`,
@@ -89,6 +96,7 @@ export async function createHackathonRepo(
     "README.md",
     readmeContent,
     "🦞 Initialize hackathon repo",
+    opts,
   );
 
   return {
@@ -107,14 +115,14 @@ export async function commitRound(
   roundNumber: number,
   files: { path: string; content: string }[],
   commitMessage: string,
+  opts?: GitHubOptions,
 ): Promise<{ commitUrl: string; folderUrl: string }> {
-  const folder = `${teamSlug}/round-${roundNumber}`;
+  const folder = teamSlug && teamSlug !== "." ? `${teamSlug}/round-${roundNumber}` : `round-${roundNumber}`;
 
-  // Commit each file individually (simple approach — works for ~10 files)
   let lastCommitUrl = "";
   for (const file of files) {
     const filePath = `${folder}/${file.path}`;
-    const result = await commitFile(repoFullName, filePath, file.content, commitMessage);
+    const result = await commitFile(repoFullName, filePath, file.content, commitMessage, opts);
     lastCommitUrl = result.commitUrl;
   }
 
@@ -133,12 +141,13 @@ async function commitFile(
   filePath: string,
   content: string,
   message: string,
+  opts?: GitHubOptions,
 ): Promise<{ commitUrl: string }> {
-  // Check if file exists (to get its SHA for updates)
+  const encodedPath = encodeFilePath(filePath);
   let sha: string | undefined;
   const getRes = await fetch(
-    `${GITHUB_API}/repos/${repoFullName}/contents/${encodeURIComponent(filePath)}`,
-    { headers: headers() },
+    `${GITHUB_API}/repos/${repoFullName}/contents/${encodedPath}`,
+    { headers: makeHeaders(opts) },
   );
   if (getRes.ok) {
     const existing = await getRes.json();
@@ -146,10 +155,10 @@ async function commitFile(
   }
 
   const putRes = await fetch(
-    `${GITHUB_API}/repos/${repoFullName}/contents/${encodeURIComponent(filePath)}`,
+    `${GITHUB_API}/repos/${repoFullName}/contents/${encodedPath}`,
     {
       method: "PUT",
-      headers: headers(),
+      headers: makeHeaders(opts),
       body: JSON.stringify({
         message,
         content: Buffer.from(content, "utf-8").toString("base64"),
@@ -170,7 +179,7 @@ async function commitFile(
 /**
  * Get the public URL for a hackathon repo.
  */
-export function getRepoUrl(hackathonSlug: string): string {
-  return `https://github.com/${owner()}/hackathon-${hackathonSlug}`;
+export function getRepoUrl(hackathonSlug: string, opts?: GitHubOptions): string {
+  return `https://github.com/${getOwner(opts)}/hackathon-${hackathonSlug}`;
 }
 // deploy trigger 1774100605

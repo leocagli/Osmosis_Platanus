@@ -248,16 +248,7 @@ async function main() {
   const deadlineUnix = Math.floor(Date.now() / 1000) + DURATION_HOURS * 60 * 60;
   const endsAt = new Date(deadlineUnix * 1000).toISOString();
 
-  logStep("1.", "Registering creator agent");
-  const creator = await api("POST", "/agents/register", {
-    name: makeAgentName("onchain_creator"),
-    display_name: "On-Chain Creator",
-    model: "openai",
-  });
-  const creatorKey = creator.data.agent.api_key;
-  console.log(`Creator agent: ${creator.data.agent.id}`);
-
-  logStep("2.", "Registering fresh participant agent with a fresh wallet");
+  logStep("1.", "Registering fresh participant agent with a fresh wallet");
   const participant = await api("POST", "/agents/register", {
     name: makeAgentName("onchain_participant"),
     display_name: "On-Chain Participant",
@@ -269,30 +260,44 @@ async function main() {
   console.log(`Participant agent: ${participantAgentId}`);
   console.log(`Participant wallet: ${participantWallet.address}`);
 
-  logStep("3.", "Funding the fresh participant wallet for gas");
+  logStep("2.", "Funding the fresh participant wallet for gas");
   const fundingTx = sendTx(ORGANIZER_PRIVATE_KEY, participantWallet.address, PARTICIPANT_FUNDING_WEI);
   console.log(`Funding tx: ${fundingTx.transactionHash}`);
 
-  logStep("4.", "Deploying funded escrow contract");
+  logStep("3.", "Deploying funded escrow contract");
   const { escrowAddress } = deployEscrow(deadlineUnix, organizerAddress);
   console.log(`Escrow: ${escrowAddress}`);
 
-  logStep("5.", "Creating hackathon with the deployed on-chain escrow");
-  const createHackathon = await api("POST", "/hackathons", {
-    title: `On-Chain Prize Flow ${Date.now()}`,
-    brief: "End-to-end test for on-chain join, backend verification, finalization, and claim.",
-    description: "Automated on-chain E2E test with a funded escrow prize pool.",
-    rules: "Fresh participant wallet must join on-chain before backend registration.",
-    entry_fee: 0,
-    prize_pool: 0,
-    max_participants: 5,
+  logStep("4.", "Submitting enterprise proposal with the deployed escrow");
+  const proposal = await api("POST", "/proposals", {
+    company: `On-Chain Test Co ${Date.now()}`,
+    email: `onchain-test-${Date.now()}@example.com`,
+    track: "api",
+    problem: "Verify the full on-chain join, finalize, and claim flow against a funded escrow.",
+    judge_agent: "platform",
+    prize_amount: "0",
+    judging_priorities: "End-to-end integration reliability.",
+    tech_requirements: "Contract-backed hackathon with repo submission.",
+    hackathon_title: `On-Chain Prize Flow ${Date.now()}`,
+    hackathon_brief: "End-to-end test for on-chain join, backend verification, finalization, and claim.",
+    hackathon_rules: "Fresh participant wallet must join on-chain before backend registration.",
+    hackathon_deadline: endsAt,
+    hackathon_min_participants: 2,
     challenge_type: "api",
-    ends_at: endsAt,
     contract_address: escrowAddress,
-    judging_criteria: "Automated on-chain prize flow test.",
-  }, creatorKey);
-  const hackathonId = createHackathon.data.id;
-  assertEqual(createHackathon.data.contract_address, escrowAddress, "hackathon contract_address");
+    chain_id: Number(process.env.CHAIN_ID),
+  });
+  const proposalId = proposal.data.id;
+  console.log(`Proposal: ${proposalId}`);
+
+  logStep("5.", "Approving proposal to auto-create the hackathon");
+  const approval = await api("PATCH", "/proposals", {
+    id: proposalId,
+    status: "approved",
+    notes: "Automated contract-backed E2E approval.",
+  }, ADMIN_API_KEY);
+  const hackathonId = approval.data.hackathon_id;
+  assertEqual(approval.data.contract_address, escrowAddress, "approved contract_address");
   console.log(`Hackathon: ${hackathonId}`);
 
   logStep("6.", "Submitting on-chain join transaction from the fresh participant wallet");

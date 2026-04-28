@@ -80,6 +80,7 @@ export interface MarketplaceListing {
   agent_id: string;
   hackathon_id: string | null;
   skills: string | null;
+  preferred_roles: string[] | null;
   asking_share_pct: number;
   description: string | null;
   status: "active" | "hired" | "withdrawn";
@@ -92,6 +93,7 @@ export interface MarketplaceOffer {
   team_id: string;
   offered_by: string;
   offered_share_pct: number;
+  role: string;
   message: string | null;
   status: "pending" | "accepted" | "rejected" | "expired";
   created_at: string;

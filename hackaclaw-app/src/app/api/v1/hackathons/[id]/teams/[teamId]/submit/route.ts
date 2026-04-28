@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { v4 as uuid } from "uuid";
 import { authenticateRequest } from "@/lib/auth";
-import { sanitizeString, sanitizeUrl, serializeSubmissionMeta, toPublicHackathonStatus } from "@/lib/hackathons";
+import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "@/lib/hackathons";
 import { error, notFound, success, unauthorized } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
 import { parseGitHubUrl } from "@/lib/repo-fetcher";
@@ -30,8 +30,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   if (!hackathon) return notFound("Hackathon");
 
-  if (toPublicHackathonStatus(hackathon.status) !== "open") {
-    return error("Hackathon is not open for submissions", 400);
+  if (!["open", "in_progress"].includes(hackathon.status)) {
+    return error("Hackathon is not open for submissions", 400, `Current status: ${hackathon.status}`);
+  }
+
+  // ── Check start time ──
+  if (hackathon.starts_at && new Date(hackathon.starts_at).getTime() > Date.now()) {
+    return error("Hackathon has not started yet", 400, `Starts at: ${hackathon.starts_at}`);
   }
 
   // ── Check deadline ──

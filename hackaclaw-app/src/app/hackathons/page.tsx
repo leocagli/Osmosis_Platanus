@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { formatDeadlineGMT3 } from "@/lib/date-utils";
 
 interface HackathonSummary {
   id: string;
@@ -17,6 +18,7 @@ interface HackathonSummary {
   build_time_seconds: number;
   total_teams: number;
   total_agents: number;
+  ends_at: string | null;
   created_at: string;
 }
 
@@ -181,6 +183,53 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (status === "finalized") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  const deadline = new Date(endsAt).getTime();
+  const diff = deadline - now;
+
+  if (status === "finalized") {
+    return (
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 8 }}>
+        🏆 Ended {formatDeadlineGMT3(endsAt)}
+      </div>
+    );
+  }
+
+  if (diff <= 0) {
+    return (
+      <div style={{ fontSize: 10, color: "var(--red)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 8, animation: "pulse 1.5s ease-in-out infinite" }}>
+        ⏰ Deadline passed — judging...
+      </div>
+    );
+  }
+
+  const hrs = Math.floor(diff / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+
+  const isUrgent = diff <= 300000; // 5 min
+  const color = isUrgent ? "var(--red)" : diff <= 3600000 ? "var(--gold)" : "var(--green)";
+
+  return (
+    <div style={{ fontFamily: "'JetBrains Mono', monospace", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: 10, color }}>
+        ⏱ {hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m ${secs}s`} left
+      </span>
+      <span style={{ fontSize: 8, color: "var(--text-muted)" }}>
+        · {formatDeadlineGMT3(endsAt)}
+      </span>
+    </div>
+  );
+}
+
 function HackathonSection({
   title,
   icon,
@@ -225,6 +274,11 @@ function HackathonSection({
                     {hackathon.challenge_type === "landing_page" ? "LANDING PAGE" : hackathon.challenge_type.toUpperCase()}
                   </span>
                 </div>
+
+                {/* Deadline info */}
+                {hackathon.ends_at && (
+                  <DeadlineLabel endsAt={hackathon.ends_at} status={hackathon.status} />
+                )}
 
                 {/* Title + description */}
                 <h3 style={{
@@ -271,12 +325,6 @@ function HackathonSection({
                       </div>
                       <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Agents</div>
                     </div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>
-                      {hackathon.build_time_seconds}s
-                    </div>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", marginTop: 1 }}>Build</div>
                   </div>
                 </div>
               </div>
@@ -328,14 +376,21 @@ export default function HackathonsPage() {
         );
 
         setTeamsMap(nextTeamsMap);
+
+        // Fire-and-forget: trigger check-deadline for any expired open hackathons
+        for (const h of payload.data as HackathonSummary[]) {
+          if ((h.status === "open" || h.status === "judging") && h.ends_at && new Date(h.ends_at).getTime() < Date.now()) {
+            fetch(`/api/v1/hackathons/${h.id}/check-deadline`, { method: "POST" }).catch(() => {});
+          }
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  const openHackathons = hackathons.filter((hackathon) => hackathon.status === "open");
-  const closedHackathons = hackathons.filter((hackathon) => hackathon.status === "closed");
-  const finalizedHackathons = hackathons.filter((hackathon) => hackathon.status === "finalized");
+  const openHackathons = hackathons.filter((h) => h.status === "open" || h.status === "judging");
+  const closedHackathons = hackathons.filter((h) => h.status === "closed");
+  const finalizedHackathons = hackathons.filter((h) => h.status === "finalized");
 
   if (loading) {
     return (

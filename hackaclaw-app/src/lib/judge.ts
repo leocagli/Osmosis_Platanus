@@ -233,15 +233,19 @@ export async function judgeHackathon(hackathonId: string) {
 
   if (!hackathon) throw new Error("Hackathon not found");
 
-  const { data: submissions } = await supabaseAdmin
-    .from("submissions")
-    .select("*, teams(name)")
-    .eq("hackathon_id", hackathonId);
+  // ── Concurrency guard: atomically claim "judging" status ──
+  if (hackathon.status === "completed") return true;
 
-  await supabaseAdmin
+  // Try to claim — works from open, in_progress, OR judging (retry after failure)
+  const { data: locked, error: lockErr } = await supabaseAdmin
     .from("hackathons")
-    .update({ status: "judging", internal_status: "judging" })
-    .eq("id", hackathonId);
+    .update({ status: "judging" })
+    .in("status", ["open", "in_progress", "judging"])
+    .eq("id", hackathonId)
+    .select("id")
+    .single();
+
+  if (lockErr || !locked) return true;
 
   // Parse existing judging metadata
   let updatedMeta: Record<string, unknown> = {};
@@ -253,117 +257,105 @@ export async function judgeHackathon(hackathonId: string) {
     } catch { /* ignore */ }
   }
 
-  if (!submissions || submissions.length === 0) {
-    updatedMeta.notes = "Ended with 0 submissions.";
-    await supabaseAdmin
-      .from("hackathons")
-      .update({ status: "completed", internal_status: "completed", judging_criteria: updatedMeta })
-      .eq("id", hackathonId);
-    return true;
-  }
+  try {
+    const { data: submissions } = await supabaseAdmin
+      .from("submissions")
+      .select("*, teams(name)")
+      .eq("hackathon_id", hackathonId);
 
-  if (submissions.length === 1) {
-    // 1 submission: still judge it for feedback, but auto-win
-    const winningSub = submissions[0];
-    const teamData = winningSub.teams as { name?: string } | undefined;
-    const teamSlug = teamData?.name ? slugify(teamData.name) : undefined;
-
-    // Still run judging for the feedback
-    const result = await judgeSubmission(winningSub, hackathon, teamSlug);
-
-    await supabaseAdmin.from("evaluations").upsert([{
-      submission_id: winningSub.id,
-      functionality_score: result.functionality_score,
-      brief_compliance_score: result.brief_compliance_score,
-      code_quality_score: result.code_quality_score,
-      architecture_score: result.architecture_score,
-      innovation_score: result.innovation_score,
-      completeness_score: result.completeness_score,
-      documentation_score: result.documentation_score,
-      testing_score: result.testing_score,
-      security_score: result.security_score,
-      deploy_readiness_score: result.deploy_readiness_score,
-      total_score: result.total_score,
-      judge_feedback: result.judge_feedback,
-      raw_response: JSON.stringify(result),
-    }], { onConflict: "submission_id" });
-
-    const { data: teamMembers } = await supabaseAdmin
-      .from("team_members")
-      .select("agent_id")
-      .eq("team_id", winningSub.team_id)
-      .eq("role", "leader")
-      .single();
-
-    updatedMeta.winner_agent_id = teamMembers?.agent_id;
-    updatedMeta.winner_team_id = winningSub.team_id;
-    updatedMeta.finalized_at = new Date().toISOString();
-    updatedMeta.notes = "Won by default (only participant). Judged for feedback.";
-
-    await supabaseAdmin
-      .from("hackathons")
-      .update({ status: "completed", internal_status: "completed", judging_criteria: updatedMeta })
-      .eq("id", hackathonId);
-    return true;
-  }
-
-  // Multiple submissions: judge all and rank
-  const evaluationsToUpsert = [];
-
-  for (const submission of submissions) {
-    const teamData = submission.teams as { name?: string } | undefined;
-    const teamSlug = teamData?.name ? slugify(teamData.name) : undefined;
-    const result = await judgeSubmission(submission, hackathon, teamSlug);
-
-    evaluationsToUpsert.push({
-      submission_id: submission.id,
-      functionality_score: result.functionality_score,
-      brief_compliance_score: result.brief_compliance_score,
-      code_quality_score: result.code_quality_score,
-      architecture_score: result.architecture_score,
-      innovation_score: result.innovation_score,
-      completeness_score: result.completeness_score,
-      documentation_score: result.documentation_score,
-      testing_score: result.testing_score,
-      security_score: result.security_score,
-      deploy_readiness_score: result.deploy_readiness_score,
-      total_score: result.total_score,
-      judge_feedback: result.judge_feedback,
-      raw_response: JSON.stringify(result),
-    });
-  }
-
-  if (evaluationsToUpsert.length > 0) {
-    await supabaseAdmin
-      .from("evaluations")
-      .upsert(evaluationsToUpsert, { onConflict: "submission_id" });
-  }
-
-  // Determine winner (highest total_score)
-  evaluationsToUpsert.sort((a, b) => b.total_score - a.total_score);
-  const winningEval = evaluationsToUpsert[0];
-  const winningSub = submissions.find((s) => s.id === winningEval.submission_id);
-
-  if (winningSub) {
-    const { data: teamMembers } = await supabaseAdmin
-      .from("team_members")
-      .select("agent_id")
-      .eq("team_id", winningSub.team_id)
-      .eq("role", "leader")
-      .single();
-
-    if (teamMembers?.agent_id) {
-      updatedMeta.winner_agent_id = teamMembers.agent_id;
-      updatedMeta.winner_team_id = winningSub.team_id;
+    if (!submissions || submissions.length === 0) {
+      updatedMeta.notes = "Ended with 0 submissions.";
       updatedMeta.finalized_at = new Date().toISOString();
-      updatedMeta.notes = "Automatically judged by AI. Code repositories were analyzed.";
+      await supabaseAdmin
+        .from("hackathons")
+        .update({ status: "completed", judging_criteria: updatedMeta })
+        .eq("id", hackathonId);
+      return true;
     }
+
+    // Judge all submissions (with per-submission error handling)
+    const evaluationsToUpsert = [];
+    for (const submission of submissions) {
+      try {
+        const teamData = submission.teams as { name?: string } | undefined;
+        const teamSlug = teamData?.name ? slugify(teamData.name) : undefined;
+        const result = await judgeSubmission(submission, hackathon, teamSlug);
+
+        evaluationsToUpsert.push({
+          submission_id: submission.id,
+          functionality_score: result.functionality_score,
+          brief_compliance_score: result.brief_compliance_score,
+          code_quality_score: result.code_quality_score,
+          architecture_score: result.architecture_score,
+          innovation_score: result.innovation_score,
+          completeness_score: result.completeness_score,
+          documentation_score: result.documentation_score,
+          testing_score: result.testing_score,
+          security_score: result.security_score,
+          deploy_readiness_score: result.deploy_readiness_score,
+          total_score: result.total_score,
+          judge_feedback: result.judge_feedback,
+          raw_response: JSON.stringify(result),
+        });
+      } catch (subErr: unknown) {
+        const msg = subErr instanceof Error ? subErr.message : String(subErr);
+        console.error(`Judge error for submission ${submission.id}:`, msg);
+        evaluationsToUpsert.push({
+          submission_id: submission.id,
+          functionality_score: 0, brief_compliance_score: 0, code_quality_score: 0,
+          architecture_score: 0, innovation_score: 0, completeness_score: 0,
+          documentation_score: 0, testing_score: 0, security_score: 0,
+          deploy_readiness_score: 0, total_score: 0,
+          judge_feedback: `Evaluation failed: ${msg}`,
+          raw_response: JSON.stringify({ error: msg }),
+        });
+      }
+    }
+
+    if (evaluationsToUpsert.length > 0) {
+      await supabaseAdmin
+        .from("evaluations")
+        .upsert(evaluationsToUpsert, { onConflict: "submission_id" });
+    }
+
+    // Determine winner (highest total_score)
+    evaluationsToUpsert.sort((a, b) => b.total_score - a.total_score);
+    const winningEval = evaluationsToUpsert[0];
+    const winningSub = submissions.find((s) => s.id === winningEval.submission_id);
+
+    if (winningSub && winningEval.total_score > 0) {
+      const { data: teamMembers } = await supabaseAdmin
+        .from("team_members")
+        .select("agent_id")
+        .eq("team_id", winningSub.team_id)
+        .eq("role", "leader")
+        .single();
+
+      if (teamMembers?.agent_id) {
+        updatedMeta.winner_agent_id = teamMembers.agent_id;
+        updatedMeta.winner_team_id = winningSub.team_id;
+      }
+    }
+
+    updatedMeta.finalized_at = new Date().toISOString();
+    updatedMeta.notes = submissions.length === 1
+      ? "Won by default (only participant). Judged for feedback."
+      : "Automatically judged by AI. Code repositories were analyzed.";
+
+    await supabaseAdmin
+      .from("hackathons")
+      .update({ status: "completed", judging_criteria: updatedMeta })
+      .eq("id", hackathonId);
+
+    return true;
+  } catch (err) {
+    // On unexpected failure, revert to in_progress so cron can retry
+    console.error(`judgeHackathon(${hackathonId}) fatal error, reverting status:`, err);
+    await supabaseAdmin
+      .from("hackathons")
+      .update({ status: "in_progress" })
+      .eq("id", hackathonId)
+      .eq("status", "judging");
+    throw err;
   }
-
-  await supabaseAdmin
-    .from("hackathons")
-    .update({ status: "completed", internal_status: "completed", judging_criteria: updatedMeta })
-    .eq("id", hackathonId);
-
-  return true;
 }

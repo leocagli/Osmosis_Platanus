@@ -12,11 +12,19 @@ import {
   type Hash,
 } from "viem";
 
+const factoryAbi = parseAbi([
+  "function createHackathon(uint256 _entryFee, uint256 _deadline) payable returns (address)",
+  "function hackathons(uint256) view returns (address)",
+  "function hackathonCount() view returns (uint256)",
+  "event HackathonCreated(address indexed escrow, uint256 entryFee, uint256 deadline)",
+]);
+
 const escrowAbi = parseAbi([
   "function entryFee() view returns (uint256)",
   "function hasJoined(address) view returns (bool)",
   "function finalized() view returns (bool)",
   "function winner() view returns (address)",
+  "function owner() view returns (address)",
   "function sponsor() view returns (address)",
   "function deadline() view returns (uint256)",
   "function prizePool() view returns (uint256)",
@@ -227,4 +235,119 @@ export async function finalizeHackathonOnChain(options: {
   if (receipt.status !== "success") throw new Error("Finalize transaction failed on-chain");
 
   return { txHash, receipt };
+}
+
+/**
+ * Deploy a new HackathonEscrow via the on-chain HackathonFactory.
+ * Requires FACTORY_ADDRESS env var to be set.
+ */
+export async function deployHackathonEscrow(options: {
+  entryFeeWei: bigint;
+  deadlineUnix: bigint;
+  fundingWei?: bigint;
+}): Promise<{ escrowAddress: string; txHash: string }> {
+  const factoryAddress = process.env.FACTORY_ADDRESS || process.env.FACTORYA_ADDRESS;
+  if (!factoryAddress) throw new Error("FACTORY_ADDRESS not configured");
+
+  const publicClient = getPublicChainClient();
+  const walletClient = getOrganizerWalletClient();
+  const factory = normalizeAddress(factoryAddress);
+
+  const txHash = await walletClient.writeContract({
+    address: factory,
+    abi: factoryAbi,
+    functionName: "createHackathon",
+    args: [options.entryFeeWei, options.deadlineUnix],
+    value: options.fundingWei ?? BigInt(0),
+    account: walletClient.account,
+    chain: walletClient.chain,
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  if (receipt.status !== "success") throw new Error("Factory createHackathon transaction failed");
+
+  // Extract escrow address from HackathonCreated event log
+  // The escrow address is the first indexed param (topics[1]), zero-padded to 32 bytes
+  let escrowAddress: string | null = null;
+  for (const log of receipt.logs) {
+    if (log.address && sameAddress(log.address, factory) && log.topics.length >= 2 && log.topics[1]) {
+      // topics[1] is the indexed escrow address, padded to 32 bytes
+      escrowAddress = getAddress("0x" + log.topics[1].slice(26));
+      break;
+    }
+  }
+
+  if (!escrowAddress) throw new Error("Could not find escrow address in transaction logs");
+
+  return { escrowAddress, txHash };
+}
+
+/**
+ * Verify that a sponsor has funded a HackathonEscrow contract.
+ * Checks: tx succeeded, sent to contract, from sponsor wallet, value > 0,
+ * contract sponsor() matches, and platform organizer is contract owner().
+ */
+export async function verifySponsorFunding(options: {
+  contractAddress: string;
+  sponsorWallet: string;
+  txHash: string;
+}): Promise<{ prizePoolWei: bigint; blockNumber: number }> {
+  const publicClient = getPublicChainClient();
+  const contractAddr = normalizeAddress(options.contractAddress);
+  const sponsorAddr = normalizeAddress(options.sponsorWallet);
+  const txHash = options.txHash as Hash;
+
+  const transaction = await publicClient.getTransaction({ hash: txHash }).catch(() => null);
+  if (!transaction) throw new Error("Funding transaction not found");
+
+  const receipt = await publicClient.getTransactionReceipt({ hash: txHash }).catch(() => null);
+  if (!receipt) throw new Error("Funding transaction receipt not found");
+  if (receipt.status !== "success") throw new Error("Funding transaction failed on-chain");
+
+  if (!transaction.to || !sameAddress(transaction.to, contractAddr)) {
+    throw new Error("Funding transaction was not sent to the escrow contract");
+  }
+  if (!sameAddress(transaction.from, sponsorAddr)) {
+    throw new Error("Funding transaction sender does not match sponsor wallet");
+  }
+  if (transaction.value <= BigInt(0)) {
+    throw new Error("Funding transaction has no ETH value");
+  }
+
+  // Verify contract's sponsor() matches the provided wallet
+  const onChainSponsor = await publicClient.readContract({
+    address: contractAddr,
+    abi: escrowAbi,
+    functionName: "sponsor",
+  }) as string;
+  if (!sameAddress(onChainSponsor, sponsorAddr)) {
+    throw new Error("Contract sponsor does not match provided wallet");
+  }
+
+  // Verify platform organizer is set as contract owner
+  const organizerWallet = getOrganizerWalletClient();
+  const platformAddress = normalizeAddress(organizerWallet.account.address);
+  const onChainOwner = await publicClient.readContract({
+    address: contractAddr,
+    abi: escrowAbi,
+    functionName: "owner",
+  }) as string;
+  if (!sameAddress(onChainOwner, platformAddress)) {
+    throw new Error(
+      `Contract owner must be the platform organizer (${platformAddress}). ` +
+      `Found: ${onChainOwner}. Deploy the escrow with _owner set to the platform wallet.`
+    );
+  }
+
+  // Read current prize pool
+  const prizePoolWei = await publicClient.readContract({
+    address: contractAddr,
+    abi: escrowAbi,
+    functionName: "prizePool",
+  }) as bigint;
+
+  return {
+    prizePoolWei,
+    blockNumber: Number(receipt.blockNumber),
+  };
 }

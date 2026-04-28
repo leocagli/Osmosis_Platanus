@@ -5,7 +5,7 @@ import { success, error, unauthorized, notFound } from "@/lib/responses";
 import { v4 as uuid } from "uuid";
 import { chatCompletion, estimateCost, type ChatMessage } from "@/lib/openrouter";
 import { canAfford, chargeForPrompt, InsufficientBalanceError, PLATFORM_FEE_PCT } from "@/lib/balance";
-import { commitRound, slugify, setGitHubOverrides } from "@/lib/github";
+import { commitRound, createHackathonRepo, slugify, type GitHubOptions } from "@/lib/github";
 import { sanitizePrompt, sanitizeGeneratedOutput } from "@/lib/prompt-security";
 import { parseHackathonMeta } from "@/lib/hackathons";
 
@@ -75,6 +75,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   if (!["open", "in_progress"].includes(hackathon.status)) {
     return error("Hackathon is not accepting prompts", 400, `Current status: ${hackathon.status}`);
+  }
+
+  // ── START TIME CHECK ──
+  if (hackathon.starts_at && new Date(hackathon.starts_at).getTime() > Date.now()) {
+    return error("Hackathon has not started yet", 400, `Starts at: ${hackathon.starts_at}`);
   }
 
   // ── DEADLINE CHECK ──
@@ -259,30 +264,43 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   // Commit to GitHub (best-effort)
   let commitUrl = "";
   let folderUrl = "";
+  let agentRepoUrl = "";
   const teamSlug = slugify(team.name);
+  const ghToken = (typeof body.github_token === "string" && body.github_token) ? body.github_token.trim().slice(0, 256) : undefined;
 
-  if (hackathon.github_repo) {
+  if (ghToken) {
+    // Agent provided their own token → create/use their own public repo
     try {
-      // Use github_token from request body, or fall back to env var
-      const ghToken = (typeof body.github_token === "string" && body.github_token) ? body.github_token.trim().slice(0, 256) : undefined;
-      if (ghToken) {
-        const ghOwner = hackathon.github_repo.replace("https://github.com/", "").split("/")[0];
-        setGitHubOverrides(ghToken, ghOwner);
-      }
-      const repoFullName = hackathon.github_repo.replace("https://github.com/", "");
+      const hackSlug = slugify(hackathon.title);
+      const ghOpts: GitHubOptions = { token: ghToken };
+      const { repoUrl, repoFullName } = await createHackathonRepo(
+        hackSlug, hackathon.brief || hackathon.title, hackathon.title, ghOpts,
+      );
+      agentRepoUrl = repoUrl;
+
+      // Commit files to root (no team subfolder — it's their own repo)
       const commitResult = await commitRound(
-        repoFullName,
-        teamSlug,
-        roundNumber,
-        files,
-        `🤖 ${agent.name} — Round ${roundNumber}`,
+        repoFullName, ".", roundNumber, files,
+        `🤖 Round ${roundNumber}`, ghOpts,
       );
       commitUrl = commitResult.commitUrl;
       folderUrl = commitResult.folderUrl;
     } catch (err) {
+      console.error("Agent GitHub commit failed:", err);
+    }
+  } else if (hackathon.github_repo) {
+    // No agent token → fall back to shared hackathon repo (platform token)
+    try {
+      const repoFullName = hackathon.github_repo.replace("https://github.com/", "");
+      const commitResult = await commitRound(
+        repoFullName, teamSlug, roundNumber, files,
+        `🤖 ${agent.name} — Round ${roundNumber}`,
+      );
+      commitUrl = commitResult.commitUrl;
+      folderUrl = commitResult.folderUrl;
+      agentRepoUrl = hackathon.github_repo;
+    } catch (err) {
       console.error("GitHub commit failed:", err);
-    } finally {
-      setGitHubOverrides();
     }
   }
 
@@ -315,13 +333,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     .eq("hackathon_id", hackathonId)
     .single();
 
+  const buildLog = JSON.stringify({
+    round: roundNumber,
+    agent: agent.name,
+    model: result.model,
+    ...(agentRepoUrl ? { repo_url: agentRepoUrl } : {}),
+  });
+
   if (existingSub) {
     await supabaseAdmin.from("submissions").update({
       html_content: htmlFile?.content || null,
+      preview_url: agentRepoUrl || null,
       files,
       file_count: files.length,
       languages: [...new Set(files.map(f => detectLanguage(f.path)))],
-      build_log: `Round ${roundNumber} by ${agent.name} via ${result.model}`,
+      build_log: buildLog,
       status: "completed",
       completed_at: new Date().toISOString(),
     }).eq("id", existingSub.id);
@@ -331,11 +357,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       team_id: teamId,
       hackathon_id: hackathonId,
       html_content: htmlFile?.content || null,
+      preview_url: agentRepoUrl || null,
       files,
       file_count: files.length,
       languages: [...new Set(files.map(f => detectLanguage(f.path)))],
       project_type: hackathon.challenge_type || "landing_page",
-      build_log: `Round ${roundNumber} by ${agent.name} via ${result.model}`,
+      build_log: buildLog,
       status: "completed",
       started_at: new Date().toISOString(),
       completed_at: new Date().toISOString(),
@@ -366,16 +393,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     },
   });
 
-  // Build the browse URL even if commit failed (so agent always knows the folder)
+  const repoDisplay = agentRepoUrl || hackathon.github_repo || null;
   const teamSlugForUrl = slugify(team.name);
-  const expectedFolder = hackathon.github_repo
-    ? `${hackathon.github_repo}/tree/main/${teamSlugForUrl}/round-${roundNumber}`
-    : null;
+  const expectedFolder = agentRepoUrl
+    ? `${agentRepoUrl}/tree/main/round-${roundNumber}`
+    : hackathon.github_repo
+      ? `${hackathon.github_repo}/tree/main/${teamSlugForUrl}/round-${roundNumber}`
+      : null;
 
   return success({
     round: roundNumber,
     model: result.model,
-    // Cost breakdown
     billing: {
       model_cost_usd: result.cost_usd,
       fee_usd: charge.fee,
@@ -385,17 +413,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       input_tokens: result.input_tokens,
       output_tokens: result.output_tokens,
     },
-    // Generated files (summary + full content)
     files: files.map(f => ({ path: f.path, size: f.content.length })),
     file_contents: files.map(f => ({ path: f.path, content: f.content })),
-    // GitHub — always present so the agent knows where to look
     github: {
-      repo: hackathon.github_repo || null,
+      repo: repoDisplay,
       folder: folderUrl || expectedFolder,
       commit: commitUrl || null,
-      clone_cmd: hackathon.github_repo ? `git clone ${hackathon.github_repo}` : null,
+      clone_cmd: repoDisplay ? `git clone ${repoDisplay}` : null,
     },
-    // Meta
     duration_ms: result.duration_ms,
     hint: roundNumber === 1
       ? `Round 1 complete. Review your code at: ${folderUrl || expectedFolder || "GitHub"}. Send another prompt to iterate.`

@@ -28,3 +28,4 @@ node_modules/
 # GSD
 .gsd/browser-state/
 .gsd/browser-baselines/
+autonomy-audit.md

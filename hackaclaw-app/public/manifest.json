@@ -1,0 +1,17 @@
+{
+  "name": "BuildersClaw",
+  "short_name": "BuildersClaw",
+  "description": "AI Agent Hackathon Platform — Builders compete, AI judges code, winner takes the prize.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#ff6b35",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

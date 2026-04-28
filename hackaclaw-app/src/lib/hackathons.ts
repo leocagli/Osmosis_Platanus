@@ -65,29 +65,39 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     scores: null,
   };
 
-  if (typeof raw !== "string" || !raw.trim()) return base;
+  if (!raw) return base;
 
-  try {
-    const parsed = JSON.parse(raw);
-    if (!isObject(parsed) || parsed._format !== META_VERSION) {
+  // Handle JSONB (object) or text (string)
+  let parsed: Record<string, unknown>;
+  if (typeof raw === "string") {
+    if (!raw.trim()) return base;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
       return { ...base, criteria_text: raw };
     }
-
-    return {
-      chain_id: typeof parsed.chain_id === "number" ? parsed.chain_id : null,
-      contract_address: sanitizeString(parsed.contract_address, 128),
-      sponsor_address: sanitizeString(parsed.sponsor_address, 128),
-      criteria_text: sanitizeString(parsed.criteria_text, 4000),
-      winner_agent_id: sanitizeString(parsed.winner_agent_id, 64),
-      winner_team_id: sanitizeString(parsed.winner_team_id, 64),
-      finalization_notes: sanitizeString(parsed.finalization_notes, 4000),
-      finalized_at: sanitizeString(parsed.finalized_at, 128),
-      finalize_tx_hash: sanitizeString(parsed.finalize_tx_hash, 256),
-      scores: parsed.scores ?? null,
-    };
-  } catch {
-    return { ...base, criteria_text: raw };
+  } else if (isObject(raw)) {
+    parsed = raw as Record<string, unknown>;
+  } else {
+    return base;
   }
+
+  if (!isObject(parsed)) {
+    return base;
+  }
+
+  return {
+    chain_id: typeof parsed.chain_id === "number" ? parsed.chain_id : null,
+    contract_address: sanitizeString(parsed.contract_address, 128),
+    sponsor_address: sanitizeString(parsed.sponsor_address, 128),
+    criteria_text: sanitizeString(parsed.criteria_text, 4000),
+    winner_agent_id: sanitizeString(parsed.winner_agent_id, 64),
+    winner_team_id: sanitizeString(parsed.winner_team_id, 64),
+    finalization_notes: sanitizeString(parsed.finalization_notes, 4000),
+    finalized_at: sanitizeString(parsed.finalized_at, 128),
+    finalize_tx_hash: sanitizeString(parsed.finalize_tx_hash, 256),
+    scores: parsed.scores ?? null,
+  };
 }
 
 export function serializeHackathonMeta(meta: Partial<HackathonMeta>): string {
@@ -140,13 +150,15 @@ export function serializeSubmissionMeta(meta: Partial<SubmissionMeta>): string {
   });
 }
 
-export function toPublicHackathonStatus(status: unknown): "open" | "closed" | "finalized" {
-  if (status === "open") return "open";
+export function toPublicHackathonStatus(status: unknown): "open" | "judging" | "closed" | "finalized" {
+  if (status === "open" || status === "in_progress") return "open";
+  if (status === "judging") return "judging";
   if (status === "completed") return "finalized";
   return "closed";
 }
 
 export function toInternalHackathonStatus(status: unknown): string | null {
+  if (status === "scheduled") return "scheduled";
   if (status === "open") return "open";
   if (status === "closed") return "judging";
   if (status === "finalized") return "completed";

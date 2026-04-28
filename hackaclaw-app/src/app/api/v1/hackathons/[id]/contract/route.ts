@@ -13,6 +13,7 @@ const escrowAbi = parseAbi([
   "function hasJoined(address) view returns (bool)",
   "function finalized() view returns (bool)",
   "function winner() view returns (address)",
+  "function sponsor() view returns (address)",
   "function prizePool() view returns (uint256)",
 ]);
 
@@ -48,17 +49,20 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   const publicClient = getPublicChainClient();
   let status;
   try {
-    const [finalized, winner, prizePoolWei, entryFeeWei] = await Promise.all([
+    const [finalized, winner, sponsorAddr, prizePoolWei, entryFeeWei] = await Promise.all([
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "finalized" }),
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "winner" }),
+      publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "sponsor" }),
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "prizePool" }),
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "entryFee" }),
     ]);
 
     const winnerAddr = winner as string;
+    const sponsorAddress = sponsorAddr as string;
     status = {
       finalized: finalized as boolean,
       winner: winnerAddr === "0x0000000000000000000000000000000000000000" ? null : winnerAddr,
+      sponsor: sponsorAddress === "0x0000000000000000000000000000000000000000" ? null : sponsorAddress,
       prize_pool_wei: (prizePoolWei as bigint).toString(),
       entry_fee_wei: (entryFeeWei as bigint).toString(),
     };
@@ -77,6 +81,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
       hasJoined: "function hasJoined(address) view returns (bool)",
       finalized: "function finalized() view returns (bool)",
       winner: "function winner() view returns (address)",
+      sponsor: "function sponsor() view returns (address)",
       prizePool: "function prizePool() view returns (uint256)",
       entryFee: "function entryFee() view returns (uint256)",
     },

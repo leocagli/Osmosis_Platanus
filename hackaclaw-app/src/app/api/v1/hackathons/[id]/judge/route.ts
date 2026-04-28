@@ -10,7 +10,6 @@ type RouteParams = { params: Promise<{ id: string }> };
  * POST /api/v1/hackathons/:id/judge — Manually trigger the AI judge for a specific hackathon.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
-  await req;
   const { id: hackathonId } = await params;
 
   if (!authenticateAdminRequest(req)) {
@@ -29,15 +28,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     if (errMsg === "Hackathon not found") {
       return notFound("Hackathon");
     }
-    return error("Failed to judge hackathon", 500, errMsg);
+    console.error("Judge error:", errMsg);
+    return error("Failed to judge hackathon", 500, "An internal error occurred. Try again later.");
   }
 }
 
 /**
  * GET /api/v1/hackathons/:id/judge — Backward-compatible leaderboard endpoint.
  */
-export async function GET(req: NextRequest, { params }: RouteParams) {
-  await req;
+export async function GET(_req: NextRequest, { params }: RouteParams) {
   const { id: hackathonId } = await params;
   const leaderboard = await loadHackathonLeaderboard(hackathonId);
 
