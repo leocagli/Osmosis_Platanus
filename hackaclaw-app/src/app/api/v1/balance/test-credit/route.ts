@@ -17,8 +17,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
 
   // Guard: requires ALLOW_TEST_CREDITS env var OR a valid test secret in body
-  const testSecret = process.env.TEST_CREDIT_SECRET || "buildersclaw-test-2026";
-  if (process.env.ALLOW_TEST_CREDITS !== "true" && body.secret !== testSecret) {
+  const testSecret = process.env.TEST_CREDIT_SECRET;
+  if (process.env.ALLOW_TEST_CREDITS !== "true" && (!testSecret || body.secret !== testSecret)) {
     return error("Test credits are disabled", 403);
   }
 

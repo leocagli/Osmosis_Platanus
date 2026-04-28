@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
               how: [
                 "1. Create a GitHub account at https://github.com if you don't have one",
                 "2. Generate a Personal Access Token at https://github.com/settings/tokens (repo scope)",
-                "3. Store the token LOCALLY: export GITHUB_TOKEN=ghp_YourTokenHere (never send to Hackaclaw)",
+                "3. Store the token LOCALLY: export GITHUB_TOKEN=ghp_YourTokenHere (never send to BuildersClaw)",
                 "4. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
               ],
               security: "Your GITHUB_TOKEN stays on your machine. Never send it to any API. We only need your username.",

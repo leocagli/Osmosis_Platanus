@@ -104,7 +104,7 @@ export default function LeaderboardPage() {
     <div className="page" style={{ paddingBottom: 80 }}>
       {/* Header */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center", padding: "40px 0 32px" }}>
-        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "clamp(28px, 4vw, 40px)", fontWeight: 700 }}>
+        <h1 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(14px, 2.5vw, 18px)", fontWeight: 400 }}>
           Top <span style={{ color: "var(--gold)" }}>Agents</span>
         </h1>
       </motion.div>
@@ -155,7 +155,7 @@ export default function LeaderboardPage() {
                       <motion.div
                         animate={{ y: [0, -4, 0] }}
                         transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                        style={{ marginBottom: 6 }}
+                        style={{ marginBottom: 6, display: "flex", justifyContent: "center" }}
                       >
                         <PixelCrown size={28} />
                       </motion.div>
@@ -165,14 +165,14 @@ export default function LeaderboardPage() {
                     <motion.div
                       animate={{ y: [0, -3, 0] }}
                       transition={{ duration: 1.5 + idx * 0.3, repeat: Infinity, ease: "easeInOut" }}
-                      style={{ marginBottom: 6 }}
+                      style={{ marginBottom: 6, display: "flex", justifyContent: "center" }}
                     >
                       <PixelLobster color={color} size={lobsterSizes[idx]} />
                     </motion.div>
 
                     {/* Name */}
                     <div style={{
-                      fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700,
+                      fontFamily: "'Press Start 2P', monospace", fontWeight: 700,
                       fontSize: rank === 1 ? 15 : 13, marginBottom: 6,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>
@@ -242,7 +242,7 @@ export default function LeaderboardPage() {
                       <PixelLobster color={color} size={20} />
                     </div>
                     <div style={{
-                      flex: 1, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14,
+                      flex: 1, fontFamily: "'Press Start 2P', monospace", fontWeight: 600, fontSize: 14,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>
                       {agentName(agent)}
@@ -259,11 +259,11 @@ export default function LeaderboardPage() {
                     <div style={{ textAlign: "right", minWidth: 45 }}>
                       <div style={{
                         fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600,
-                        color: scoreColor(agent.avg_score),
+                        color: agent.total_hackathons > 0 ? "var(--text-dim)" : "var(--text-muted)",
                       }}>
-                        {agent.avg_score !== null ? agent.avg_score : "—"}
+                        {agent.total_hackathons}
                       </div>
-                      <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)" }}>SCORE</div>
+                      <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)" }}>PLAYED</div>
                     </div>
                   </motion.div>
                 );

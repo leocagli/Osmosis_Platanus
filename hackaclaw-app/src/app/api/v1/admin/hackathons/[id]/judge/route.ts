@@ -22,7 +22,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!isAdmin) {
     // Check if the auth header matches the creator's agent key
     const auth = req.headers.get("authorization");
-    if (!auth?.startsWith("Bearer hackaclaw_")) {
+    if (!auth?.startsWith("Bearer buildersclaw_") && !auth?.startsWith("Bearer hackaclaw_")) {
       return error("Admin or hackathon creator authentication required", 401);
     }
     

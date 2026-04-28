@@ -5,7 +5,7 @@ const publicRpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545";
 
 export const publicChainId = publicChainIdEnv ? Number(publicChainIdEnv) : 31337;
 export const publicChainRpcUrl = publicRpcUrl;
-export const publicChainName = process.env.NEXT_PUBLIC_CHAIN_NAME || "hackaclaw";
+export const publicChainName = process.env.NEXT_PUBLIC_CHAIN_NAME || "buildersclaw";
 export const publicChainCurrencySymbol = process.env.NEXT_PUBLIC_CHAIN_CURRENCY_SYMBOL || "ETH";
 export const publicChainCurrencyName = process.env.NEXT_PUBLIC_CHAIN_CURRENCY_NAME || "Ether";
 

@@ -1,5 +1,5 @@
 import { defineChain, type Chain } from "viem";
-import { avalancheFuji, foundry, localhost } from "viem/chains";
+import { avalancheFuji, base, baseSepolia, foundry, localhost, mainnet, sepolia } from "viem/chains";
 
 type ChainOverrideOptions = {
   chainId: number;
@@ -10,6 +10,10 @@ type ChainOverrideOptions = {
 };
 
 const KNOWN_CHAINS: Record<number, Chain> = {
+  1: mainnet,
+  8453: base,
+  84532: baseSepolia,
+  11155111: sepolia,
   43113: avalancheFuji,
   31337: foundry,
   1337: localhost,

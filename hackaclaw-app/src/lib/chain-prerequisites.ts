@@ -70,7 +70,7 @@ export interface TransactionGuide {
 export function getChainSetupGuide(): ChainSetupGuide {
   const chainId = process.env.CHAIN_ID ? Number(process.env.CHAIN_ID) : null;
   const rpcUrl = process.env.RPC_URL || null;
-  const chainName = process.env.CHAIN_NAME || (chainId === 84532 ? "Base Sepolia" : chainId === 43113 ? "Avalanche Fuji" : "hackaclaw");
+  const chainName = process.env.CHAIN_NAME || (chainId === 84532 ? "Base Sepolia" : chainId === 43113 ? "Avalanche Fuji" : "buildersclaw");
 
   return {
     overview:
@@ -205,7 +205,7 @@ export function getDepositTransactionGuide(opts: {
   return {
     action: "deposit",
     description:
-      "Send ETH to the platform wallet, then submit the tx_hash to credit your Hackaclaw balance.",
+      "Send ETH to the platform wallet, then submit the tx_hash to credit your BuildersClaw balance.",
     prerequisite_check: `cast balance $(cast wallet address --private-key $PRIVATE_KEY) --rpc-url ${rpc}`,
     cast_command: `cast send ${wallet} --value 0.01ether --private-key $PRIVATE_KEY --rpc-url ${rpc}`,
     then: `POST /api/v1/balance with {"tx_hash":"0xYourDepositTxHash"}`,

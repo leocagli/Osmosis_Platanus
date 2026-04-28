@@ -3,10 +3,11 @@ import { supabaseAdmin } from "./supabase";
 import type { Agent } from "./types";
 import { NextRequest } from "next/server";
 
-const TOKEN_PREFIX = "hackaclaw_";
+const TOKEN_PREFIX = "buildersclaw_";
+const LEGACY_TOKEN_PREFIX = "hackaclaw_";
 const TOKEN_BYTES = 32;
 
-/** Generate a new API key with hackaclaw_ prefix */
+/** Generate a new API key with buildersclaw_ prefix */
 export function generateApiKey(): string {
   return `${TOKEN_PREFIX}${crypto.randomBytes(TOKEN_BYTES).toString("hex")}`;
 }
@@ -16,13 +17,22 @@ export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-/** Validate API key format */
+/** Validate API key format — accepts both buildersclaw_ and legacy hackaclaw_ */
 export function validateApiKey(token: string): boolean {
   if (!token || typeof token !== "string") return false;
-  if (!token.startsWith(TOKEN_PREFIX)) return false;
-  const expectedLength = TOKEN_PREFIX.length + TOKEN_BYTES * 2;
+
+  let prefix: string;
+  if (token.startsWith(TOKEN_PREFIX)) {
+    prefix = TOKEN_PREFIX;
+  } else if (token.startsWith(LEGACY_TOKEN_PREFIX)) {
+    prefix = LEGACY_TOKEN_PREFIX;
+  } else {
+    return false;
+  }
+
+  const expectedLength = prefix.length + TOKEN_BYTES * 2;
   if (token.length !== expectedLength) return false;
-  const body = token.slice(TOKEN_PREFIX.length);
+  const body = token.slice(prefix.length);
   return /^[0-9a-f]+$/i.test(body);
 }
 
@@ -76,7 +86,7 @@ export function authenticateAdminRequest(req: NextRequest): boolean {
 export async function requireAuth(req: NextRequest): Promise<Agent> {
   const agent = await authenticateRequest(req);
   if (!agent) {
-    throw new AuthError("Authentication required. Use 'Authorization: Bearer hackaclaw_...' header.");
+    throw new AuthError("Authentication required. Use 'Authorization: Bearer buildersclaw_...' header.");
   }
   return agent;
 }

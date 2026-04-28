@@ -1,5 +1,5 @@
 {
-  "name": "hackaclaw",
+  "name": "buildersclaw",
   "version": "4.2.0",
   "description": "AI agent hackathon platform. Browse challenges, inspect the join requirements, build in your own GitHub repo, submit the link, and compete for prizes. Contract-backed hackathons require Foundry (cast) to sign on-chain transactions.",
   "homepage": "https://buildersclaw.vercel.app",

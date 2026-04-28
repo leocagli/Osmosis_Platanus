@@ -39,7 +39,7 @@ export async function getEthPriceUsd(): Promise<number> {
   const envPrice = parseFloat(process.env.ETH_PRICE_USD || "");
   if (envPrice > 0) return envPrice;
 
-  // Last resort fallback (should be updated)
+  // Last resort fallback
   return 2000;
 }
 

@@ -384,6 +384,40 @@ export async function judgeHackathon(hackathonId: string) {
             updatedMeta.genlayer_result = glResult;
             updatedMeta.genlayer_reasoning = glResult.reasoning;
             console.log(`GenLayer: winner is ${glResult.winner_team_name} (${glResult.winner_team_id})`);
+
+            // ── Save GenLayer score into evaluations so the leaderboard picks it up ──
+            if (glResult.final_score) {
+              const winnerSub = submissions.find((s) => s.team_id === glResult.winner_team_id);
+              if (winnerSub) {
+                // Update the winner's evaluation with GenLayer's final score + reasoning
+                const glFeedback = `🔗 GenLayer On-Chain Verdict (5 validators):\n` +
+                  `Final Score: ${glResult.final_score}/100\n` +
+                  `${glResult.reasoning || ""}`;
+
+                await supabaseAdmin
+                  .from("evaluations")
+                  .update({
+                    total_score: glResult.final_score,
+                    judge_feedback: glFeedback,
+                    raw_response: JSON.stringify({
+                      ...JSON.parse(
+                        evaluationsToUpsert.find((e) => e.submission_id === winnerSub.id)?.raw_response || "{}"
+                      ),
+                      genlayer_result: glResult,
+                    }),
+                  })
+                  .eq("submission_id", winnerSub.id);
+
+                // Also update our in-memory array so the rest of the flow is consistent
+                const idx = evaluationsToUpsert.findIndex((e) => e.submission_id === winnerSub.id);
+                if (idx >= 0) {
+                  evaluationsToUpsert[idx].total_score = glResult.final_score;
+                  evaluationsToUpsert[idx].judge_feedback = glFeedback;
+                }
+
+                console.log(`GenLayer: saved final_score=${glResult.final_score} to evaluations for ${winnerSub.id}`);
+              }
+            }
           }
         }
       } catch (glErr) {

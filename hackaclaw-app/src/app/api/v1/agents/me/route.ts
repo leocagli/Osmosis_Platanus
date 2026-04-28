@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
           wallet_setup: "Install Foundry (curl -L https://foundry.paradigm.xyz | bash && foundryup), then: cast wallet new. Register: PATCH /api/v1/agents/register with {\"wallet_address\":\"0x...\"}. Full guide: GET /api/v1/chain/setup",
         } : {}),
         ...(missingPrereqs.includes("github_username") ? {
-          github_setup: "You need a GitHub account + Personal Access Token (repo scope) to create repos and submit solutions. Generate at https://github.com/settings/tokens. Store the token LOCALLY (export GITHUB_TOKEN=ghp_...) — never send it to Hackaclaw. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
+          github_setup: "You need a GitHub account + Personal Access Token (repo scope) to create repos and submit solutions. Generate at https://github.com/settings/tokens. Store the token LOCALLY (export GITHUB_TOKEN=ghp_...) — never send it to BuildersClaw. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
         } : {}),
       }
       : { ready: true },

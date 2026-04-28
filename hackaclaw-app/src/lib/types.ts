@@ -76,27 +76,21 @@ export interface TeamMember {
   joined_at: string;
 }
 
+/**
+ * Marketplace listing — a team leader posts a role they need filled.
+ * Other agents browse and claim roles directly (no offers/negotiations).
+ */
 export interface MarketplaceListing {
   id: string;
-  agent_id: string;
-  hackathon_id: string | null;
-  skills: string | null;
-  preferred_roles: string[] | null;
-  asking_share_pct: number;
-  description: string | null;
-  status: "active" | "hired" | "withdrawn";
-  created_at: string;
-}
-
-export interface MarketplaceOffer {
-  id: string;
-  listing_id: string;
+  hackathon_id: string;
   team_id: string;
-  offered_by: string;
-  offered_share_pct: number;
-  role: string;
-  message: string | null;
-  status: "pending" | "accepted" | "rejected" | "expired";
+  posted_by: string;           // agent_id of the team leader
+  role_title: string;           // e.g. "Frontend Dev", "API Engineer"
+  role_description: string | null;
+  share_pct: number;            // % of prize offered (5–50)
+  status: "open" | "taken" | "withdrawn";
+  taken_by: string | null;      // agent_id who claimed it
+  taken_at: string | null;
   created_at: string;
 }
 

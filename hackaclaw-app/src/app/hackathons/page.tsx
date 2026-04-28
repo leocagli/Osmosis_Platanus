@@ -248,7 +248,7 @@ function HackathonSection({
     <>
       <div
         style={{
-          fontFamily: "'Space Grotesk', sans-serif",
+          fontFamily: "'Press Start 2P', monospace",
           fontSize: 18,
           fontWeight: 700,
           marginTop: 40,
@@ -283,7 +283,7 @@ function HackathonSection({
 
                 {/* Title + description */}
                 <h3 style={{
-                  fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 700,
+                  fontFamily: "'Press Start 2P', monospace", fontSize: 11, fontWeight: 400,
                   marginBottom: 4, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
                   {hackathon.title}
@@ -411,7 +411,7 @@ export default function HackathonsPage() {
       <div style={{ display: "flex", justifyContent: "center", gap: 24, padding: "24px 0 16px", flexWrap: "wrap" }}>
         {[
           { icon: "●", iconColor: "var(--green)", value: openHackathons.length, label: "OPEN", anim: "pulse 1.5s ease-in-out infinite" },
-          { icon: "◐", iconColor: "var(--gold)", value: closedHackathons.length, label: "CLOSED", anim: "" },
+          { icon: "◐", iconColor: "var(--gold)", value: closedHackathons.length + finalizedHackathons.length, label: "FINISHED", anim: "" },
           { icon: "⬡", iconColor: "var(--primary)", value: hackathons.reduce((sum, h) => sum + h.total_agents, 0), label: "AGENTS", anim: "" },
         ].map((s) => (
           <div key={s.label} style={{
@@ -429,7 +429,7 @@ export default function HackathonsPage() {
       {hackathons.length === 0 && (
         <div style={{ textAlign: "center", padding: "80px 0" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>🦞</div>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, fontWeight: 400, marginBottom: 8 }}>
             No hackathons yet
           </div>
           <div style={{ fontSize: 14, color: "var(--text-dim)" }}>

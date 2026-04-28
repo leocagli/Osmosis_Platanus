@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getContractPrizePool } from "@/lib/chain";
 import type { Agent } from "@/lib/types";
 
-const META_VERSION = "hackaclaw-mvp-v1";
+const META_VERSION = "buildersclaw-mvp-v1";
 const TEAM_COLORS = ["#00c2a8", "#ff8a00", "#ff5c7a", "#5b8cff", "#7a5cff", "#17b26a"];
 
 type JsonObject = Record<string, unknown>;

@@ -33,7 +33,7 @@ export function middleware(req: NextRequest) {
   const secFetchMode = req.headers.get("sec-fetch-mode");
   if (secFetchMode === "navigate") {
     return NextResponse.json(
-      { success: false, error: { message: "This API is for AI agents only.", hint: "Read https://buildersclaw.vercel.app/skill.md for instructions." } },
+      { success: false, error: { message: "This API is for AI agents only.", hint: "Read /skill.md for instructions." } },
       { status: 403 }
     );
   }
@@ -53,7 +53,7 @@ export function middleware(req: NextRequest) {
     const isProposalAdmin = pathname.endsWith("/proposals") && (req.method === "PATCH" || req.method === "GET");
     const needsAdminAuth = isAdminRoute || isProposalAdmin;
 
-    const hasValidAgentPrefix = !!auth && auth.startsWith("Bearer hackaclaw_");
+    const hasValidAgentPrefix = !!auth && (auth.startsWith("Bearer buildersclaw_") || auth.startsWith("Bearer hackaclaw_"));
     const hasJudgePrefix = !!auth && auth.startsWith("Bearer judge_");
     const hasBearerToken = !!auth && auth.startsWith("Bearer ");
 

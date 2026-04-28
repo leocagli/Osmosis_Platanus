@@ -432,45 +432,32 @@ async function main() {
   const hiredAgentId = hiredReg.data.agent.id;
   console.log(`Hired agent: ${hiredAgentId}`);
 
-  logStep("17.", "Hired agent creates marketplace listing");
+  logStep("17.", "Leader posts marketplace role listing (40% share)");
   const listing = await api("POST", "/marketplace", {
     hackathon_id: mwHackathonId,
-    skills: "Solidity, TypeScript, Testing",
-    asking_share_pct: 30,
-    description: "E2E test hired member",
-  }, hiredKey);
-  const listingId = listing.data.id;
-  console.log(`Listing: ${listingId}`);
-
-  logStep("18.", "Leader sends hire offer (40% share)");
-  const offer = await api("POST", "/marketplace/offers", {
-    listing_id: listingId,
     team_id: mwTeamId,
-    offered_share_pct: 40,
-    role: "backend",
-    message: "Join us for the multi-winner E2E test.",
+    role_title: "Backend Dev",
+    role_description: "E2E test hired member role",
+    share_pct: 40,
   }, leaderKey);
-  const offerId = offer.data.id;
-  assertEqual(offer.data.leader_share_after, 60, "leader_share_after on offer");
-  console.log(`Offer: ${offerId}, leader share after: ${offer.data.leader_share_after}%`);
+  const listingId = listing.data.id;
+  assertEqual(listing.data.share_pct, 40, "listing share_pct");
+  assertEqual(listing.data.leader_keeps, 60, "leader_keeps");
+  console.log(`Listing: ${listingId}, leader keeps ${listing.data.leader_keeps}%`);
 
-  logStep("19.", "Hired agent accepts the offer");
-  const acceptResp = await api("PATCH", `/marketplace/offers/${offerId}`, {
-    action: "accept",
-  }, hiredKey);
-  assertEqual(acceptResp.data.status, "accepted", "offer status");
-  assertEqual(acceptResp.data.your_share_pct, 40, "hired share_pct");
-  assertEqual(acceptResp.data.leader_share_after, 60, "leader_share_after on accept");
-  console.log(`Accepted: hired gets ${acceptResp.data.your_share_pct}%, leader keeps ${acceptResp.data.leader_share_after}%`);
+  logStep("18.", "Hired agent claims the role");
+  const takeResp = await api("POST", `/marketplace/${listingId}/take`, {}, hiredKey);
+  assertEqual(takeResp.data.share_pct, 40, "hired share_pct");
+  console.log(`Claimed: hired gets ${takeResp.data.share_pct}%, role: ${takeResp.data.role}`);
 
-  logStep("20.", "Submitting repo from the team");
+  logStep("19.", "Submitting repo from the team");
   await api("POST", `/hackathons/${mwHackathonId}/teams/${mwTeamId}/submit`, {
     repo_url: "https://github.com/hackaclaw/multi-winner-e2e-test",
     notes: "Automated multi-winner E2E test submission.",
   }, leaderKey);
   console.log("Submission recorded");
 
-  logStep("21.", "Finalizing with winner_team_id (multi-winner split)");
+  logStep("20.", "Finalizing with winner_team_id (multi-winner split)");
   const mwFinalizeResp = await api(
     "POST",
     `/admin/hackathons/${mwHackathonId}/finalize`,
@@ -489,7 +476,7 @@ async function main() {
   assertEqual(mwContractState.data.status.winner_count, 2, "on-chain winner_count");
   console.log(`On-chain prize pool at finalize: ${mwContractState.data.status.total_prize_at_finalize_wei} wei`);
 
-  logStep("22.", "Both members claim their prizes independently");
+  logStep("21.", "Both members claim their prizes independently");
   // Fund hired wallet for gas (they never called join, so they have no funds)
   const hiredGasTx = sendTx(ORGANIZER_PRIVATE_KEY, hiredWallet.address, PARTICIPANT_FUNDING_WEI);
   console.log(`Hired gas funding tx: ${hiredGasTx.transactionHash}`);
@@ -525,7 +512,7 @@ async function main() {
   console.log(`Leader gained: ${leaderGain} wei (expected ~${expectedLeaderPrize})`);
   console.log(`Hired gained: ${hiredGain} wei (expected ~${expectedHiredPrize})`);
 
-  logStep("23.", "Verifying prize pool emptied after both claims");
+  logStep("22.", "Verifying prize pool emptied after both claims");
   await waitForPrizePoolZero(mwHackathonId);
   console.log("Prize pool after both claims: 0 wei");
 

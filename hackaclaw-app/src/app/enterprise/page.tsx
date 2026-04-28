@@ -182,33 +182,21 @@ export default function EnterprisePage() {
           <button
             type="button"
             onClick={handleWalletButtonClick}
-            disabled={!walletFeatureAvailable || !privyReady}
-            className="btn btn-outline"
+            className="btn btn-primary"
             style={{
               fontSize: 12,
               padding: "10px 18px",
-              opacity: walletFeatureAvailable && privyReady ? 1 : 0.5,
               minWidth: 180,
               justifyContent: "center",
-              background: connectedWallet ? "rgba(74,222,128,0.08)" : "rgba(0,0,0,0.35)",
+              background: connectedWallet ? "rgba(74,222,128,0.12)" : undefined,
               borderColor: connectedWallet ? "rgba(74,222,128,0.3)" : undefined,
-              color: connectedWallet ? "var(--green)" : undefined,
+              color: connectedWallet ? "var(--green)" : "#fff",
             }}
           >
             {connectedWallet
               ? `${connectedWallet.address.slice(0, 6)}...${connectedWallet.address.slice(-4)}`
               : "Connect Wallet"}
           </button>
-          {!walletFeatureAvailable && (
-            <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)", marginTop: 8, textAlign: "right" }}>
-              SPONSOR WALLET DISABLED
-            </div>
-          )}
-          {walletFeatureAvailable && !privyReady && (
-            <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)", marginTop: 8, textAlign: "right" }}>
-              WALLET LOADING
-            </div>
-          )}
         </div>
 
         <PixelStar style={{ top: "12%", left: "8%" }} />
@@ -225,7 +213,7 @@ export default function EnterprisePage() {
         </div>
 
         <h1 style={{
-          fontFamily: "'Space Grotesk', sans-serif", fontSize: "clamp(32px, 5vw, 52px)", fontWeight: 700,
+          fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(14px, 2.5vw, 18px)", fontWeight: 400,
           lineHeight: 1.15, marginBottom: 20,
         }}>
           Stop Hiring.<br />
@@ -280,7 +268,7 @@ export default function EnterprisePage() {
                 }}>
                   STEP {step.icon}
                 </div>
-                <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 600, marginBottom: 10, marginTop: 12 }}>
+                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 12, fontWeight: 400, marginBottom: 10, marginTop: 12 }}>
                   {step.title}
                 </h3>
                 <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{step.desc}</p>
@@ -303,7 +291,7 @@ export default function EnterprisePage() {
                 background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "24px 20px",
               }}>
                 <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--green)", marginBottom: 12 }}>{uc.icon}</div>
-                <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{uc.title}</h3>
+                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 11, fontWeight: 400, marginBottom: 6 }}>{uc.title}</h3>
                 <p style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{uc.desc}</p>
               </div>
             ))}
@@ -353,7 +341,7 @@ export default function EnterprisePage() {
               padding: "40px 32px", textAlign: "center",
             }}>
               <div className="pixel-font" style={{ fontSize: 16, fontWeight: 400, color: "var(--green)", marginBottom: 16 }}>GG!</div>
-              <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+              <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, fontWeight: 400, marginBottom: 8 }}>
                 Challenge Submitted
               </h3>
               <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7, marginBottom: 24 }}>
@@ -580,18 +568,13 @@ export default function EnterprisePage() {
                     {/* Step 1: Connect Wallet */}
                     <div>
                       <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8 }}>STEP 1 — CONNECT WALLET</div>
-                      {!walletFeatureAvailable ? (
-                        <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)", lineHeight: 1.8 }}>
-                          SET `NEXT_PUBLIC_PRIVY_APP_ID` TO ENABLE SPONSOR WALLET FUNDING.
-                        </div>
-                      ) : !authenticated ? (
-                        <button type="button" onClick={openWalletModal} disabled={!privyReady} className="btn btn-outline" style={{
+                      {!connectedWallet ? (
+                        <button type="button" onClick={openWalletModal} className="btn btn-primary" style={{
                           fontSize: 12, padding: "10px 20px",
-                          opacity: privyReady ? 1 : 0.5,
                         }}>
-                          Connect Wallet
+                          {authenticated ? "Link Wallet" : "Connect Wallet"}
                         </button>
-                      ) : connectedWallet ? (
+                      ) : (
                         <div style={{
                           display: "flex", alignItems: "center", gap: 8,
                           padding: "10px 14px", background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.2)",
@@ -600,10 +583,6 @@ export default function EnterprisePage() {
                           <code style={{ fontSize: 11, color: "var(--green)" }}>
                             {connectedWallet.address.slice(0, 6)}...{connectedWallet.address.slice(-4)}
                           </code>
-                        </div>
-                      ) : (
-                        <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)" }}>
-                          Connecting wallet...
                         </div>
                       )}
                     </div>
@@ -754,7 +733,7 @@ export default function EnterprisePage() {
             <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--green)", marginBottom: 12 }}>
               WALLET CONNECTED
             </div>
-            <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, margin: "0 0 10px" }}>
+            <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, fontWeight: 400, margin: "0 0 10px" }}>
               Sponsor wallet
             </h3>
             <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7, margin: "0 0 18px" }}>
