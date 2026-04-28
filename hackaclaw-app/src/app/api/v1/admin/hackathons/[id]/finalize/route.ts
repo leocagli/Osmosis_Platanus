@@ -15,7 +15,9 @@ function getConfiguredChainId(): number | null {
 }
 
 /**
- * POST /api/v1/admin/hackathons/:id/finalize — Manually select a winner and optional scores.
+ * POST /api/v1/admin/hackathons/:id/finalize — Select a winning team and finalize on-chain.
+ *
+ * Body: { winner_team_id } or { winner_agent_id } (backward compat)
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!authenticateAdminRequest(req)) {
@@ -28,49 +30,79 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!hackathon) return notFound("Hackathon");
 
   const body = await req.json().catch(() => ({}));
+  let winnerTeamId = sanitizeString(body.winner_team_id, 64);
   const winnerAgentId = sanitizeString(body.winner_agent_id, 64);
-  if (!winnerAgentId) return error("winner_agent_id is required", 400);
+
+  if (!winnerTeamId && !winnerAgentId) {
+    return error("winner_team_id or winner_agent_id is required", 400);
+  }
 
   const meta = parseHackathonMeta(hackathon.judging_criteria);
   if (!meta.contract_address) {
     return error("Hackathon does not have a configured contract address", 400);
   }
 
-  const { data: winningMembership } = await supabaseAdmin
+  // If only winner_agent_id provided, look up their team (backward compat)
+  if (!winnerTeamId && winnerAgentId) {
+    const { data: membership } = await supabaseAdmin
+      .from("team_members")
+      .select("team_id, teams!inner(hackathon_id)")
+      .eq("agent_id", winnerAgentId)
+      .eq("teams.hackathon_id", hackathonId)
+      .single();
+
+    if (!membership) return error("winner_agent_id is not registered in this hackathon", 400);
+    winnerTeamId = membership.team_id;
+  }
+
+  // Load all active team members with their wallets
+  const { data: members } = await supabaseAdmin
     .from("team_members")
-    .select("team_id, teams!inner(hackathon_id), agents!inner(wallet_address)")
-    .eq("agent_id", winnerAgentId)
-    .eq("teams.hackathon_id", hackathonId)
-    .single();
+    .select("agent_id, revenue_share_pct, role, agents!inner(wallet_address)")
+    .eq("team_id", winnerTeamId!)
+    .eq("status", "active");
 
-  if (!winningMembership) return error("winner_agent_id is not registered in this hackathon", 400);
-
-  const { data: winningTeam } = await supabaseAdmin
-    .from("teams")
-    .select("id, hackathon_id")
-    .eq("id", winningMembership.team_id)
-    .eq("hackathon_id", hackathonId)
-    .single();
-
-  if (!winningTeam) return error("winner_agent_id is not registered in this hackathon", 400);
-
-  const winningAgent = winningMembership.agents as { wallet_address?: string | null } | null;
-  if (!winningAgent?.wallet_address) {
-    return error("Winning agent does not have a registered wallet address", 400);
+  if (!members || members.length === 0) {
+    return error("Winning team has no active members", 400);
   }
 
-  let winnerWallet: string;
-  try {
-    winnerWallet = normalizeAddress(winningAgent.wallet_address);
-  } catch {
-    return error("Winning agent wallet address is invalid", 400);
+  // Validate every member has a wallet
+  const missingWallets = members.filter((m) => {
+    const agent = m.agents as unknown as { wallet_address?: string | null } | null;
+    return !agent?.wallet_address;
+  });
+  if (missingWallets.length > 0) {
+    const ids = missingWallets.map((m) => m.agent_id).join(", ");
+    return error(
+      `Team members missing wallet addresses: ${ids}. All members must have wallets for on-chain prize splitting.`,
+      400,
+    );
   }
+
+  // Convert revenue_share_pct (0-100) to basis points (0-10000) with rounding
+  const rawBps = members.map((m) => Math.round(m.revenue_share_pct * 100));
+  const totalRaw = rawBps.reduce((sum, v) => sum + v, 0);
+  // Adjust last member to ensure exact sum of 10000
+  if (totalRaw !== 10000) {
+    rawBps[rawBps.length - 1] += 10000 - totalRaw;
+  }
+
+  const winners = members.map((m, i) => {
+    const agent = m.agents as unknown as { wallet_address: string };
+    let wallet: string;
+    try {
+      wallet = normalizeAddress(agent.wallet_address);
+    } catch {
+      throw new Error(`Invalid wallet address for agent ${m.agent_id}`);
+    }
+    return { wallet, shareBps: rawBps[i], agent_id: m.agent_id };
+  });
 
   let finalizeResult;
   try {
     finalizeResult = await finalizeHackathonOnChain({
       contractAddress: meta.contract_address,
-      winnerWallet,
+      winners: winners.map((w) => ({ wallet: w.wallet, shareBps: w.shareBps })),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to finalize hackathon on-chain";
@@ -79,6 +111,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const finalizedAt = new Date().toISOString();
   const notes = sanitizeString(body.notes, 4000);
+  const leaderAgentId = members.find((m) => m.role === "leader")?.agent_id ?? members[0].agent_id;
 
   const { data: updatedHackathon, error: updateErr } = await supabaseAdmin
     .from("hackathons")
@@ -88,8 +121,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       judging_criteria: serializeHackathonMeta({
         ...meta,
         chain_id: meta.chain_id ?? getConfiguredChainId(),
-        winner_agent_id: winnerAgentId,
-        winner_team_id: winningTeam.id,
+        winner_agent_id: leaderAgentId,
+        winner_team_id: winnerTeamId,
+        winners: winners.map((w) => ({
+          agent_id: w.agent_id,
+          wallet: w.wallet,
+          share_bps: w.shareBps,
+        })),
         finalization_notes: notes,
         finalized_at: finalizedAt,
         finalize_tx_hash: finalizeResult.txHash,
@@ -102,18 +140,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   if (updateErr) return error("Failed to finalize hackathon", 500);
 
-  await supabaseAdmin.from("teams").update({ status: "judged" }).eq("id", winningTeam.id);
+  await supabaseAdmin.from("teams").update({ status: "judged" }).eq("id", winnerTeamId!);
 
   await supabaseAdmin.from("activity_log").insert({
     id: uuid(),
     hackathon_id: hackathonId,
-    team_id: winningTeam.id,
-    agent_id: winnerAgentId,
+    team_id: winnerTeamId,
+    agent_id: leaderAgentId,
     event_type: "hackathon_finalized",
     event_data: {
-      winner_agent_id: winnerAgentId,
-      winner_team_id: winningTeam.id,
-      winner_wallet: winnerWallet,
+      winner_team_id: winnerTeamId,
+      winners: winners.map((w) => ({
+        agent_id: w.agent_id,
+        wallet: w.wallet,
+        share_bps: w.shareBps,
+      })),
       finalize_tx_hash: finalizeResult.txHash,
       contract_address: meta.contract_address,
       notes,
@@ -125,9 +166,9 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   // Notify Telegram (fire-and-forget)
   try {
     let winnerName: string | null = null;
-    if (winnerAgentId) {
+    if (leaderAgentId) {
       const { data: agentRow } = await supabaseAdmin
-        .from("agents").select("display_name, name").eq("id", winnerAgentId).single();
+        .from("agents").select("display_name, name").eq("id", leaderAgentId).single();
       winnerName = agentRow?.display_name || agentRow?.name || null;
     }
     telegramHackathonFinalized({
@@ -139,8 +180,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   return success({
     hackathon: formatHackathon(updatedHackathon as Record<string, unknown>),
-    winner_agent_id: winnerAgentId,
-    winner_team_id: winningTeam.id,
+    winner_team_id: winnerTeamId,
+    winners: winners.map((w) => ({
+      agent_id: w.agent_id,
+      wallet: w.wallet,
+      share_bps: w.shareBps,
+    })),
     notes,
     leaderboard,
   });

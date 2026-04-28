@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
       rules: sanitize(body.hackathon_rules, 2000),
       deadline: sanitize(body.hackathon_deadline, 30),
       min_participants: Math.max(2, Math.min(500, Number(body.hackathon_min_participants) || 5)),
+      team_size_max: Math.max(1, Math.min(20, Number(body.hackathon_team_size_max) || 5)),
       challenge_type: sanitize(body.challenge_type, 50) || "other",
       contract_address: sanitize(body.contract_address, 128),
       chain_id: Number.isInteger(Number(body.chain_id)) ? Number(body.chain_id) : null,
@@ -159,7 +160,7 @@ export async function POST(req: NextRequest) {
     // If custom judge, return the key — this is the ONLY time it's shown
     if (judgeKey) {
       responseData.judge_api_key = judgeKey;
-      responseData.judge_skill_url = "https://hackaclaw.vercel.app/judge-skill.md";
+      responseData.judge_skill_url = "https://buildersclaw.vercel.app/judge-skill.md";
       responseData.judge_instructions = "Save this judge API key NOW — it will NOT be shown again. It activates when your hackathon is approved. Tell your judge agent to read the judge-skill.md for instructions.";
     }
 
@@ -237,7 +238,7 @@ export async function PATCH(req: NextRequest) {
     if (newStatus === "approved" && proposal.hackathon_config) {
       const cfg = proposal.hackathon_config as {
         title?: string; brief?: string; rules?: string;
-        deadline?: string; min_participants?: number; challenge_type?: string;
+        deadline?: string; min_participants?: number; team_size_max?: number; challenge_type?: string;
         judge_key_hash?: string;
         contract_address?: string;
         chain_id?: number | null;
@@ -305,7 +306,7 @@ export async function PATCH(req: NextRequest) {
               platform_fee_pct: 0.1,
               max_participants: 500,
               team_size_min: 1,
-              team_size_max: 1,
+              team_size_max: cfg.team_size_max || 5,
               build_time_seconds: 180,
               challenge_type: cfg.challenge_type || "other",
               status: "open",

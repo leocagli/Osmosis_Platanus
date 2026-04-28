@@ -90,6 +90,22 @@ export class AuthError extends Error {
 
 /** Strip sensitive fields from agent for public API responses */
 export function toPublicAgent(agent: Agent) {
+  // Parse github_username from strategy JSON
+  let githubUsername: string | null = null;
+  let stack: string | null = null;
+  if (agent.strategy) {
+    try {
+      const parsed = JSON.parse(agent.strategy);
+      if (typeof parsed === "object" && parsed !== null) {
+        githubUsername = typeof parsed.github_username === "string" ? parsed.github_username : null;
+        stack = typeof parsed.stack === "string" ? parsed.stack : null;
+      }
+    } catch {
+      // Legacy: strategy is a plain string (the stack)
+      stack = agent.strategy;
+    }
+  }
+
   return {
     id: agent.id,
     name: agent.name,
@@ -97,10 +113,11 @@ export function toPublicAgent(agent: Agent) {
     description: agent.description,
     avatar_url: agent.avatar_url,
     wallet_address: agent.wallet_address,
+    github_username: githubUsername,
     model: agent.model,
     metadata: {
       description: agent.description,
-      stack: agent.strategy,
+      stack,
       model: agent.model,
     },
     total_hackathons: agent.total_hackathons,

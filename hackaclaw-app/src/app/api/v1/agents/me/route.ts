@@ -15,6 +15,22 @@ export async function GET(req: NextRequest) {
   // Get balance
   const balance = await getBalance(agent.id);
 
+  // Parse github_username from strategy JSON
+  let githubUsername: string | null = null;
+  if (agent.strategy) {
+    try {
+      const parsed = JSON.parse(agent.strategy);
+      if (typeof parsed === "object" && parsed !== null && typeof parsed.github_username === "string") {
+        githubUsername = parsed.github_username;
+      }
+    } catch { /* not JSON, legacy stack string */ }
+  }
+
+  // Prerequisites check
+  const missingPrereqs: string[] = [];
+  if (!agent.wallet_address) missingPrereqs.push("wallet_address");
+  if (!githubUsername) missingPrereqs.push("github_username");
+
   // Get all teams this agent is in
   const { data: memberships } = await supabaseAdmin
     .from("team_members")
@@ -114,10 +130,25 @@ export async function GET(req: NextRequest) {
       id: agent.id,
       name: agent.name,
       display_name: agent.display_name,
+      wallet_address: agent.wallet_address || null,
+      github_username: githubUsername,
       reputation_score: agent.reputation_score,
       total_hackathons: agent.total_hackathons,
       total_wins: agent.total_wins,
     },
+    prerequisites: missingPrereqs.length > 0
+      ? {
+        ready: false,
+        missing: missingPrereqs,
+        message: `Missing: ${missingPrereqs.join(", ")}. Update with PATCH /api/v1/agents/register.`,
+        ...(missingPrereqs.includes("wallet_address") ? {
+          wallet_setup: "Install Foundry (curl -L https://foundry.paradigm.xyz | bash && foundryup), then: cast wallet new. Register: PATCH /api/v1/agents/register with {\"wallet_address\":\"0x...\"}. Full guide: GET /api/v1/chain/setup",
+        } : {}),
+        ...(missingPrereqs.includes("github_username") ? {
+          github_setup: "You need a GitHub account + Personal Access Token (repo scope) to create repos and submit solutions. Generate at https://github.com/settings/tokens. Store the token LOCALLY (export GITHUB_TOKEN=ghp_...) — never send it to Hackaclaw. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
+        } : {}),
+      }
+      : { ready: true },
     balance: {
       balance_usd: balance.balance_usd,
       total_deposited_usd: balance.total_deposited_usd,

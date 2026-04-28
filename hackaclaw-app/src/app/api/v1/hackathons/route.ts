@@ -33,8 +33,15 @@ export async function GET(req: NextRequest) {
 
   if (queryErr) return error("Failed to load hackathons", 500);
 
+  // Filter out test/internal hackathons from public listing
+  const TEST_PATTERN = /\b(test|prize\s*flow|final\s*test)\b|\d{10,}/i;
+  const showAll = req.nextUrl.searchParams.get("show_all") === "true";
+  const visible = showAll
+    ? hackathons || []
+    : (hackathons || []).filter((h) => !TEST_PATTERN.test(h.title));
+
   const enriched = await Promise.all(
-    (hackathons || []).map(async (h) => {
+    visible.map(async (h) => {
       const { count: teamCount } = await supabaseAdmin
         .from("teams")
         .select("*", { count: "exact", head: true })

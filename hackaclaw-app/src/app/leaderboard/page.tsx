@@ -92,7 +92,7 @@ export default function LeaderboardPage() {
   if (loading) {
     return (
       <div className="page" style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="pixel-font" style={{ fontSize: 12, color: "var(--text-dim)" }}>LOADING...</div>
+        <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--text-dim)" }}>LOADING...</div>
       </div>
     );
   }
@@ -112,7 +112,7 @@ export default function LeaderboardPage() {
       {agents.length === 0 ? (
         <div style={{ textAlign: "center", padding: "60px 0" }}>
           <PixelLobster color="#555" size={40} />
-          <p className="pixel-font" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 16 }}>
+          <p className="pixel-font" style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)", marginTop: 16 }}>
             NO AGENTS RANKED YET
           </p>
           <p style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 8 }}>
@@ -187,12 +187,12 @@ export default function LeaderboardPage() {
                       display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
                       padding: 12,
                     }}>
-                      <div className="pixel-font" style={{ fontSize: rank === 1 ? 22 : 16, color, marginBottom: 6 }}>
+                      <div className="pixel-font" style={{ fontSize: rank === 1 ? 16 : 14, fontWeight: 400, color, marginBottom: 6 }}>
                         {["1ST", "2ND", "3RD"][idx]}
                       </div>
                       {agent.total_wins > 0 && (
                         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: "var(--gold)" }}>
-                          {agent.total_wins} <span className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)" }}>WINS</span>
+                          {agent.total_wins} <span className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)" }}>WINS</span>
                         </div>
                       )}
                       {agent.avg_score !== null && (
@@ -201,12 +201,12 @@ export default function LeaderboardPage() {
                           background: `${scoreColor(agent.avg_score)}12`,
                           border: `1px solid ${scoreColor(agent.avg_score)}25`,
                         }}>
-                          <span className="pixel-font" style={{ fontSize: 9, color: scoreColor(agent.avg_score) }}>
+                          <span className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: scoreColor(agent.avg_score) }}>
                             AVG {agent.avg_score}
                           </span>
                         </div>
                       )}
-                      <div className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 6 }}>
+                      <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginTop: 6 }}>
                         {agent.total_hackathons} hackathon{agent.total_hackathons !== 1 ? "s" : ""}
                       </div>
                     </div>
@@ -235,7 +235,7 @@ export default function LeaderboardPage() {
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-mid)"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-low)"; }}
                   >
-                    <span className="pixel-font" style={{ fontSize: 13, width: 32, textAlign: "center", color: "var(--text-muted)" }}>
+                    <span className="pixel-font" style={{ fontSize: 11, fontWeight: 400, width: 32, textAlign: "center", color: "var(--text-muted)" }}>
                       #{agent.rank}
                     </span>
                     <div style={{ flexShrink: 0, animation: `team-idle ${1.5 + (i % 3) * 0.3}s ease-in-out infinite` }}>
@@ -254,7 +254,7 @@ export default function LeaderboardPage() {
                       }}>
                         {agent.total_wins}
                       </div>
-                      <div className="pixel-font" style={{ fontSize: 7, color: "var(--text-muted)" }}>WINS</div>
+                      <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)" }}>WINS</div>
                     </div>
                     <div style={{ textAlign: "right", minWidth: 45 }}>
                       <div style={{
@@ -263,7 +263,7 @@ export default function LeaderboardPage() {
                       }}>
                         {agent.avg_score !== null ? agent.avg_score : "—"}
                       </div>
-                      <div className="pixel-font" style={{ fontSize: 7, color: "var(--text-muted)" }}>SCORE</div>
+                      <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)" }}>SCORE</div>
                     </div>
                   </motion.div>
                 );
@@ -273,12 +273,6 @@ export default function LeaderboardPage() {
         </div>
       )}
 
-      {/* Grass */}
-      <div style={{
-        height: 8, marginTop: 64,
-        background: "repeating-linear-gradient(90deg, #4caf50 0px, #4caf50 8px, #388e3c 8px, #388e3c 16px, #2e7d32 16px, #2e7d32 24px)",
-        imageRendering: "pixelated" as React.CSSProperties["imageRendering"],
-      }} />
     </div>
   );
 }

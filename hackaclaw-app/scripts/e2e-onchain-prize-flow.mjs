@@ -216,6 +216,7 @@ function deployEscrow(deadlineUnix, organizerAddress) {
       ENTRY_FEE_WEI.toString(),
       deadlineUnix.toString(),
       organizerAddress,
+      organizerAddress,
     ];
 
     try {
@@ -237,7 +238,8 @@ function deployEscrow(deadlineUnix, organizerAddress) {
 async function main() {
   const organizerAddress = getAddressFromPrivateKey(ORGANIZER_PRIVATE_KEY);
   const organizerBalance = getBalance(organizerAddress);
-  const minimumRequired = BOUNTY_WEI + PARTICIPANT_FUNDING_WEI;
+  // Need funds for 2 escrow deploys (2x bounty) + 3 wallet fundings (leader, hired, single-winner participant)
+  const minimumRequired = BOUNTY_WEI * 2n + PARTICIPANT_FUNDING_WEI * 3n;
   if (organizerBalance <= minimumRequired) {
     throw new Error(
       `Organizer wallet ${organizerAddress} is underfunded. Need more than ${minimumRequired} wei, have ${organizerBalance} wei.`
@@ -317,6 +319,7 @@ async function main() {
   assertEqual(contractState.data.contract_address, escrowAddress, "contract endpoint address");
   assertEqual(contractState.data.status.entry_fee_wei, ENTRY_FEE_WEI.toString(), "entry_fee_wei");
   assertEqual(contractState.data.status.prize_pool_wei, expectedPrizePoolBeforeFinalize, "prize_pool_wei before finalize");
+  assertEqual(contractState.data.status.winner_count, 0, "winner_count before finalize");
   assertEqual(callContract(escrowAddress, "hasJoined(address)(bool)", [participantWallet.address]), "true", "on-chain joined flag");
   console.log(`Prize pool before finalize: ${contractState.data.status.prize_pool_wei} wei`);
 
@@ -324,10 +327,10 @@ async function main() {
   const finalizeResponse = await api(
     "POST",
     `/admin/hackathons/${hackathonId}/finalize`,
-    { winner_agent_id: participantAgentId, notes: "Automated on-chain prize flow test winner." },
+    { winner_team_id: joinResponse.data.team.id, notes: "Automated on-chain prize flow test winner." },
     ADMIN_API_KEY
   );
-  console.log(`Finalize winner: ${finalizeResponse.data.winner_agent_id}`);
+  console.log(`Finalize winner team: ${finalizeResponse.data.winner_team_id}`);
 
   logStep("10.", "Claiming the funded prize from the fresh participant wallet");
   const claimTx = sendTx(participantWallet.privateKey, escrowAddress, 0n, ["claim()"], 3);
@@ -337,13 +340,204 @@ async function main() {
   await waitForPrizePoolZero(hackathonId);
   console.log("Prize pool after claim: 0 wei");
 
-  console.log("\nDone.");
+  console.log("\n--- Single-winner scenario complete ---");
   console.log(`- Hackathon: ${hackathonId}`);
   console.log(`- Escrow: ${escrowAddress}`);
   console.log(`- Participant wallet: ${participantWallet.address}`);
   console.log(`- Funding tx: ${fundingTx.transactionHash}`);
   console.log(`- Join tx: ${joinTx.transactionHash}`);
   console.log(`- Claim tx: ${claimTx.transactionHash}`);
+
+  // =========================================================================
+  // Multi-winner marketplace scenario
+  // =========================================================================
+  console.log("\n========== MULTI-WINNER MARKETPLACE SCENARIO ==========");
+
+  const mwDeadlineUnix = Math.floor(Date.now() / 1000) + DURATION_HOURS * 60 * 60;
+  const mwEndsAt = new Date(mwDeadlineUnix * 1000).toISOString();
+
+  logStep("12.", "Deploying a fresh escrow for multi-winner scenario");
+  const { escrowAddress: mwEscrow } = deployEscrow(mwDeadlineUnix, organizerAddress);
+  console.log(`Multi-winner escrow: ${mwEscrow}`);
+
+  logStep("13.", "Creating hackathon via proposal + approval");
+  const mwProposal = await api("POST", "/proposals", {
+    company: `Multi-Winner Test Co ${Date.now()}`,
+    email: `mw-test-${Date.now()}@example.com`,
+    track: "api",
+    problem: "Verify multi-winner marketplace hire, finalize, and split claim flow.",
+    judge_agent: "platform",
+    prize_amount: "0",
+    judging_priorities: "Multi-winner integration reliability.",
+    tech_requirements: "Contract-backed hackathon with marketplace hiring.",
+    hackathon_title: `Multi-Winner Flow ${Date.now()}`,
+    hackathon_brief: "E2E test: leader joins on-chain, hires teammate via marketplace, both claim split prizes.",
+    hackathon_rules: "Leader must join on-chain. Hired member joins via marketplace only.",
+    hackathon_deadline: mwEndsAt,
+    hackathon_min_participants: 2,
+    hackathon_team_size_max: 5,
+    challenge_type: "api",
+    contract_address: mwEscrow,
+    chain_id: Number(process.env.CHAIN_ID),
+  });
+  const mwProposalId = mwProposal.data.id;
+
+  const mwApproval = await api("PATCH", "/proposals", {
+    id: mwProposalId,
+    status: "approved",
+    notes: "Automated multi-winner E2E approval.",
+  }, ADMIN_API_KEY);
+  const mwHackathonId = mwApproval.data.hackathon_id;
+  assertEqual(mwApproval.data.contract_address, mwEscrow, "mw approved contract_address");
+  console.log(`Hackathon: ${mwHackathonId}`);
+
+  logStep("14.", "Registering leader agent with fresh wallet");
+  const leaderWallet = generateParticipantWallet();
+  const leaderFundTx = sendTx(ORGANIZER_PRIVATE_KEY, leaderWallet.address, PARTICIPANT_FUNDING_WEI);
+  console.log(`Leader wallet: ${leaderWallet.address}`);
+  console.log(`Leader funding tx: ${leaderFundTx.transactionHash}`);
+
+  const leaderReg = await api("POST", "/agents/register", {
+    name: makeAgentName("mw_leader"),
+    display_name: "Multi-Winner Leader",
+    model: "openai",
+    wallet_address: leaderWallet.address,
+  });
+  const leaderKey = leaderReg.data.agent.api_key;
+  const leaderAgentId = leaderReg.data.agent.id;
+  console.log(`Leader agent: ${leaderAgentId}`);
+
+  logStep("15.", "Leader joins on-chain + backend");
+  const leaderJoinTx = sendTx(leaderWallet.privateKey, mwEscrow, ENTRY_FEE_WEI, ["join()"]);
+  console.log(`Leader join tx: ${leaderJoinTx.transactionHash}`);
+
+  const leaderJoinResp = await api("POST", `/hackathons/${mwHackathonId}/join`, {
+    tx_hash: leaderJoinTx.transactionHash,
+    wallet_address: leaderWallet.address,
+  }, leaderKey);
+  const mwTeamId = leaderJoinResp.data.team.id;
+  console.log(`Team: ${mwTeamId}`);
+
+  logStep("16.", "Registering hired agent with fresh wallet");
+  const hiredWallet = generateParticipantWallet();
+  console.log(`Hired wallet: ${hiredWallet.address}`);
+
+  const hiredReg = await api("POST", "/agents/register", {
+    name: makeAgentName("mw_hired"),
+    display_name: "Multi-Winner Hired Member",
+    model: "openai",
+    wallet_address: hiredWallet.address,
+  });
+  const hiredKey = hiredReg.data.agent.api_key;
+  const hiredAgentId = hiredReg.data.agent.id;
+  console.log(`Hired agent: ${hiredAgentId}`);
+
+  logStep("17.", "Hired agent creates marketplace listing");
+  const listing = await api("POST", "/marketplace", {
+    hackathon_id: mwHackathonId,
+    skills: "Solidity, TypeScript, Testing",
+    asking_share_pct: 30,
+    description: "E2E test hired member",
+  }, hiredKey);
+  const listingId = listing.data.id;
+  console.log(`Listing: ${listingId}`);
+
+  logStep("18.", "Leader sends hire offer (40% share)");
+  const offer = await api("POST", "/marketplace/offers", {
+    listing_id: listingId,
+    team_id: mwTeamId,
+    offered_share_pct: 40,
+    role: "backend",
+    message: "Join us for the multi-winner E2E test.",
+  }, leaderKey);
+  const offerId = offer.data.id;
+  assertEqual(offer.data.leader_share_after, 60, "leader_share_after on offer");
+  console.log(`Offer: ${offerId}, leader share after: ${offer.data.leader_share_after}%`);
+
+  logStep("19.", "Hired agent accepts the offer");
+  const acceptResp = await api("PATCH", `/marketplace/offers/${offerId}`, {
+    action: "accept",
+  }, hiredKey);
+  assertEqual(acceptResp.data.status, "accepted", "offer status");
+  assertEqual(acceptResp.data.your_share_pct, 40, "hired share_pct");
+  assertEqual(acceptResp.data.leader_share_after, 60, "leader_share_after on accept");
+  console.log(`Accepted: hired gets ${acceptResp.data.your_share_pct}%, leader keeps ${acceptResp.data.leader_share_after}%`);
+
+  logStep("20.", "Submitting repo from the team");
+  await api("POST", `/hackathons/${mwHackathonId}/teams/${mwTeamId}/submit`, {
+    repo_url: "https://github.com/hackaclaw/multi-winner-e2e-test",
+    notes: "Automated multi-winner E2E test submission.",
+  }, leaderKey);
+  console.log("Submission recorded");
+
+  logStep("21.", "Finalizing with winner_team_id (multi-winner split)");
+  const mwFinalizeResp = await api(
+    "POST",
+    `/admin/hackathons/${mwHackathonId}/finalize`,
+    { winner_team_id: mwTeamId, notes: "Automated multi-winner prize flow test." },
+    ADMIN_API_KEY
+  );
+  assertEqual(mwFinalizeResp.data.winners.length, 2, "winners count");
+  console.log(`Finalize tx: ${mwFinalizeResp.data.hackathon?.finalize_tx_hash || "in metadata"}`);
+  console.log("Winners:");
+  for (const w of mwFinalizeResp.data.winners) {
+    console.log(`  ${w.wallet}: ${w.share_bps} bps`);
+  }
+
+  // Verify on-chain state
+  const mwContractState = await api("GET", `/hackathons/${mwHackathonId}/contract`);
+  assertEqual(mwContractState.data.status.winner_count, 2, "on-chain winner_count");
+  console.log(`On-chain prize pool at finalize: ${mwContractState.data.status.total_prize_at_finalize_wei} wei`);
+
+  logStep("22.", "Both members claim their prizes independently");
+  // Fund hired wallet for gas (they never called join, so they have no funds)
+  const hiredGasTx = sendTx(ORGANIZER_PRIVATE_KEY, hiredWallet.address, PARTICIPANT_FUNDING_WEI);
+  console.log(`Hired gas funding tx: ${hiredGasTx.transactionHash}`);
+
+  const leaderBalBefore = getBalance(leaderWallet.address);
+  const hiredBalBefore = getBalance(hiredWallet.address);
+
+  // Leader claims
+  const leaderClaimTx = sendTx(leaderWallet.privateKey, mwEscrow, 0n, ["claim()"], 3);
+  console.log(`Leader claim tx: ${leaderClaimTx.transactionHash}`);
+
+  // Hired member claims — this proves non-joined addresses can claim after finalize
+  const hiredClaimTx = sendTx(hiredWallet.privateKey, mwEscrow, 0n, ["claim()"], 3);
+  console.log(`Hired claim tx: ${hiredClaimTx.transactionHash}`);
+
+  const leaderBalAfter = getBalance(leaderWallet.address);
+  const hiredBalAfter = getBalance(hiredWallet.address);
+
+  // Calculate expected prizes from the bounty
+  const totalPrize = BOUNTY_WEI + ENTRY_FEE_WEI;
+  const expectedLeaderPrize = (totalPrize * 6000n) / 10000n;
+  const expectedHiredPrize = (totalPrize * 4000n) / 10000n;
+
+  // Balance increase = prize - gas cost, so just verify balance went up by at least 90% of expected
+  const leaderGain = leaderBalAfter - leaderBalBefore;
+  const hiredGain = hiredBalAfter - hiredBalBefore;
+  if (leaderGain < (expectedLeaderPrize * 90n) / 100n) {
+    throw new Error(`Leader prize too low: gained ${leaderGain} wei, expected ~${expectedLeaderPrize} wei`);
+  }
+  if (hiredGain < (expectedHiredPrize * 90n) / 100n) {
+    throw new Error(`Hired prize too low: gained ${hiredGain} wei, expected ~${expectedHiredPrize} wei`);
+  }
+  console.log(`Leader gained: ${leaderGain} wei (expected ~${expectedLeaderPrize})`);
+  console.log(`Hired gained: ${hiredGain} wei (expected ~${expectedHiredPrize})`);
+
+  logStep("23.", "Verifying prize pool emptied after both claims");
+  await waitForPrizePoolZero(mwHackathonId);
+  console.log("Prize pool after both claims: 0 wei");
+
+  console.log("\n--- Multi-winner marketplace scenario complete ---");
+  console.log(`- Hackathon: ${mwHackathonId}`);
+  console.log(`- Escrow: ${mwEscrow}`);
+  console.log(`- Leader wallet: ${leaderWallet.address}`);
+  console.log(`- Hired wallet: ${hiredWallet.address} (never called join())`);
+  console.log(`- Leader claim tx: ${leaderClaimTx.transactionHash}`);
+  console.log(`- Hired claim tx: ${hiredClaimTx.transactionHash}`);
+
+  console.log("\n========== ALL SCENARIOS PASSED ==========");
 }
 
 main().catch((error) => {

@@ -5,23 +5,37 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
-  defineChain,
   http,
   parseEther,
   type Hash,
 } from "viem";
 import { ESCROW_ABI, ESCROW_BYTECODE } from "@/lib/escrow-bytecode";
+import { publicChain, publicChainId, publicChainName, publicChainRpcUrl } from "@/lib/public-chain";
 
-const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || "31337");
-const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545";
 const platformWallet = process.env.NEXT_PUBLIC_PLATFORM_WALLET;
 
-const appChain = defineChain({
-  id: chainId,
-  name: "hackaclaw",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: [rpcUrl] } },
-});
+type Eip1193Provider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+async function ensureProviderChain(provider: Eip1193Provider) {
+  const currentChainHex = await provider.request({ method: "eth_chainId" });
+  const currentChainId = typeof currentChainHex === "string" ? Number.parseInt(currentChainHex, 16) : NaN;
+
+  if (currentChainId === publicChainId) return;
+
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: `0x${publicChainId.toString(16)}` }],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    throw new Error(
+      `Switch your wallet to chain ${publicChainId} (${publicChainName}) and retry. ${message}`
+    );
+  }
+}
 
 interface DeployResult {
   contractAddress: string;
@@ -50,15 +64,18 @@ export function useDeployEscrow() {
           throw new Error("Platform wallet not configured (NEXT_PUBLIC_PLATFORM_WALLET)");
         }
 
+        const provider = options.provider as Eip1193Provider;
+        await ensureProviderChain(provider);
+
         const walletClient = createWalletClient({
           account: options.sponsorAddress as `0x${string}`,
-          chain: appChain,
-          transport: custom(options.provider as Parameters<typeof custom>[0]),
+          chain: publicChain,
+          transport: custom(provider as Parameters<typeof custom>[0]),
         });
 
         const publicClient = createPublicClient({
-          chain: appChain,
-          transport: http(rpcUrl),
+          chain: publicChain,
+          transport: http(publicChainRpcUrl),
         });
 
         const prizeWei = parseEther(options.prizeAmountEth);

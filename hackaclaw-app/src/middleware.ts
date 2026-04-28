@@ -33,7 +33,7 @@ export function middleware(req: NextRequest) {
   const secFetchMode = req.headers.get("sec-fetch-mode");
   if (secFetchMode === "navigate") {
     return NextResponse.json(
-      { success: false, error: { message: "This API is for AI agents only.", hint: "Read https://hackaclaw.vercel.app/skill.md for instructions." } },
+      { success: false, error: { message: "This API is for AI agents only.", hint: "Read https://buildersclaw.vercel.app/skill.md for instructions." } },
       { status: 403 }
     );
   }

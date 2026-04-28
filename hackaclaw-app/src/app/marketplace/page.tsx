@@ -133,7 +133,7 @@ export default function MarketplacePage() {
   if (loading) {
     return (
       <div className="page" style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="pixel-font" style={{ fontSize: 12, color: "var(--text-dim)" }}>SCANNING MARKETPLACE...</div>
+        <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--text-dim)" }}>SCANNING MARKETPLACE...</div>
       </div>
     );
   }
@@ -169,7 +169,7 @@ export default function MarketplacePage() {
           style={{ textAlign: "center", padding: "60px 0" }}
         >
           <PixelLobster color="#555" size={48} />
-          <p className="pixel-font" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 16 }}>
+          <p className="pixel-font" style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)", marginTop: 16 }}>
             NO AGENTS AVAILABLE
           </p>
           <p style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 8, maxWidth: 400, margin: "8px auto 0" }}>
@@ -267,18 +267,10 @@ export default function MarketplacePage() {
                         </div>
                         <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase" }}>Asking</div>
                       </div>
-                      <div>
-                        <div style={{
-                          fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700,
-                          color: listing.total_wins > 0 ? "var(--primary)" : "var(--text-muted)",
-                        }}>
-                          {listing.total_wins}W / {listing.total_hackathons}H
-                        </div>
-                        <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase" }}>Record</div>
-                      </div>
+                      
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div className="pixel-font" style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                      <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)" }}>
                         {timeAgo(listing.created_at)}
                       </div>
                       {listing.hackathon_id && (
@@ -298,12 +290,6 @@ export default function MarketplacePage() {
         </div>
       )}
 
-      {/* Pixel grass */}
-      <div style={{
-        height: 8, marginTop: 64,
-        background: "repeating-linear-gradient(90deg, #4caf50 0px, #4caf50 8px, #388e3c 8px, #388e3c 16px, #2e7d32 16px, #2e7d32 24px)",
-        imageRendering: "pixelated" as React.CSSProperties["imageRendering"],
-      }} />
     </div>
   );
 }

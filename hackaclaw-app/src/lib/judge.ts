@@ -3,6 +3,11 @@ import { generateCode } from "./llm";
 import { slugify } from "./github";
 import { fetchRepoForJudging, formatRepoForPrompt, parseGitHubUrl } from "./repo-fetcher";
 import { Hackathon, Submission } from "./types";
+import {
+  runGenLayerJudging,
+  isGenLayerAvailable,
+  type GenLayerContender,
+} from "./genlayer";
 
 export interface EvaluationResult {
   functionality_score: number;
@@ -318,29 +323,107 @@ export async function judgeHackathon(hackathonId: string) {
         .upsert(evaluationsToUpsert, { onConflict: "submission_id" });
     }
 
-    // Determine winner (highest total_score)
+    // Determine winner: top 3 from Gemini → GenLayer on-chain consensus
     evaluationsToUpsert.sort((a, b) => b.total_score - a.total_score);
-    const winningEval = evaluationsToUpsert[0];
-    const winningSub = submissions.find((s) => s.id === winningEval.submission_id);
 
-    if (winningSub && winningEval.total_score > 0) {
+    // ── GenLayer impartial judging for top contenders ──
+    const TOP_N = 3;
+    const topEvals = evaluationsToUpsert
+      .filter((e) => e.total_score > 0)
+      .slice(0, TOP_N);
+
+    let winnerTeamId: string | null = null;
+    let winnerAgentId: string | null = null;
+    let genlayerUsed = false;
+
+    // Only use GenLayer if there are 2+ viable contenders and GenLayer is reachable
+    if (topEvals.length >= 2 && (await isGenLayerAvailable())) {
+      try {
+        // Build contender data for GenLayer — exhaustive descriptions
+        const contenders: GenLayerContender[] = [];
+        for (const ev of topEvals) {
+          const sub = submissions.find((s) => s.id === ev.submission_id);
+          if (!sub) continue;
+          const teamData = sub.teams as { name?: string } | undefined;
+          const repoUrl = getSubmissionRepoUrl(sub);
+
+          // Fetch repo content again for the summary (GenLayer needs it)
+          let repoSummary = "";
+          if (repoUrl) {
+            try {
+              const analysis = await fetchRepoForJudging(repoUrl, 30, 50_000);
+              repoSummary = formatRepoForPrompt(analysis);
+            } catch {
+              repoSummary = `Repo: ${repoUrl} (could not fetch)`;
+            }
+          }
+
+          contenders.push({
+            team_id: sub.team_id,
+            team_name: teamData?.name || sub.team_id,
+            repo_url: repoUrl || "",
+            repo_summary: repoSummary,
+            gemini_score: ev.total_score,
+            gemini_feedback: (ev.judge_feedback || "").slice(0, 2000),
+          });
+        }
+
+        if (contenders.length >= 2) {
+          console.log(`GenLayer: sending ${contenders.length} top contenders for on-chain judging`);
+
+          const glResult = await runGenLayerJudging(
+            hackathonId,
+            hackathon.title,
+            hackathon.brief,
+            contenders,
+          );
+
+          if (glResult.finalized && glResult.winner_team_id) {
+            winnerTeamId = glResult.winner_team_id;
+            genlayerUsed = true;
+            updatedMeta.genlayer_result = glResult;
+            updatedMeta.genlayer_reasoning = glResult.reasoning;
+            console.log(`GenLayer: winner is ${glResult.winner_team_name} (${glResult.winner_team_id})`);
+          }
+        }
+      } catch (glErr) {
+        console.error("GenLayer judging failed, falling back to Gemini ranking:", glErr);
+        // Fall through to Gemini-only winner selection below
+      }
+    }
+
+    // Fallback: if GenLayer didn't run or failed, use Gemini's top scorer
+    if (!winnerTeamId) {
+      const winningEval = evaluationsToUpsert[0];
+      const winningSub = submissions.find((s) => s.id === winningEval.submission_id);
+      if (winningSub && winningEval.total_score > 0) {
+        winnerTeamId = winningSub.team_id;
+      }
+    }
+
+    // Resolve winner agent
+    if (winnerTeamId) {
       const { data: teamMembers } = await supabaseAdmin
         .from("team_members")
         .select("agent_id")
-        .eq("team_id", winningSub.team_id)
+        .eq("team_id", winnerTeamId)
         .eq("role", "leader")
         .single();
 
       if (teamMembers?.agent_id) {
-        updatedMeta.winner_agent_id = teamMembers.agent_id;
-        updatedMeta.winner_team_id = winningSub.team_id;
+        winnerAgentId = teamMembers.agent_id;
+        updatedMeta.winner_agent_id = winnerAgentId;
+        updatedMeta.winner_team_id = winnerTeamId;
       }
     }
 
     updatedMeta.finalized_at = new Date().toISOString();
-    updatedMeta.notes = submissions.length === 1
-      ? "Won by default (only participant). Judged for feedback."
-      : "Automatically judged by AI. Code repositories were analyzed.";
+    updatedMeta.judge_method = genlayerUsed ? "gemini+genlayer" : "gemini";
+    updatedMeta.notes = genlayerUsed
+      ? `Gemini pre-scored ${submissions.length} submissions. Top ${topEvals.length} went to GenLayer on-chain consensus. Winner verified by 5 independent validators.`
+      : submissions.length === 1
+        ? "Won by default (only participant). Judged for feedback."
+        : "Automatically judged by Gemini AI. Code repositories were analyzed.";
 
     await supabaseAdmin
       .from("hackathons")

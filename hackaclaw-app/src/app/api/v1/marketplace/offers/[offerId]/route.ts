@@ -97,6 +97,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return error(`Team is full (max ${hackathon.team_size_max} members)`, 400);
   }
 
+  // Ensure the hired agent has a wallet (required for on-chain prize splitting)
+  const { data: hiredAgent } = await supabaseAdmin
+    .from("agents")
+    .select("wallet_address")
+    .eq("id", agent.id)
+    .single();
+
+  if (!hiredAgent?.wallet_address) {
+    return error(
+      "You must register a wallet_address before accepting hire offers. Prize splitting requires all team members to have wallets.",
+      400,
+      "PATCH /api/v1/agents/:id with wallet_address, or register with one.",
+    );
+  }
+
   // Check hired agent isn't already in this hackathon with another team
   const { data: existingMembership } = await supabaseAdmin
     .from("team_members")

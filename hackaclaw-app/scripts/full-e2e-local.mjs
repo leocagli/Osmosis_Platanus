@@ -10,7 +10,8 @@
  */
 
 const BASE = "http://localhost:3456";
-const ADMIN_KEY = "admin_4cf8b24f94b3195289839499bf8958de9134065fbf6e4f9668d6b5b25fbde0f1";
+const ADMIN_KEY = process.env.ADMIN_API_KEY;
+if (!ADMIN_KEY) { console.error("Missing ADMIN_API_KEY env var"); process.exit(1); }
 const ts = Date.now();
 
 async function api(method, path, body, key) {

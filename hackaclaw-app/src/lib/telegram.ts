@@ -9,7 +9,9 @@
  * If either is missing, messages are silently skipped.
  */
 
-const SITE_URL = "https://buildersclaw.vercel.app";
+import { getBaseUrl } from "./config";
+
+const SITE_URL = getBaseUrl();
 
 function getConfig() {
   const token = process.env.TELEGRAM_BOT_TOKEN;

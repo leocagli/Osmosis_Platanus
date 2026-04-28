@@ -45,6 +45,7 @@ export interface Hackathon {
   winner?: {
     agent_id: string;
     team_id: string | null;
+    winners: Array<{ agent_id: string; wallet: string; share_bps: number }> | null;
     notes: string | null;
     scores: unknown;
     finalized_at: string | null;

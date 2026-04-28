@@ -8,11 +8,15 @@ export function created(data: unknown) {
   return NextResponse.json({ success: true, data }, { status: 201 });
 }
 
-export function error(message: string, status = 400, hint?: string) {
+export function error(message: string, status = 400, hint?: string | Record<string, unknown>) {
   return NextResponse.json(
     {
       success: false,
-      error: { message, ...(hint && { hint }) },
+      error: {
+        message,
+        ...(hint && typeof hint === "string" ? { hint } : {}),
+        ...(hint && typeof hint === "object" ? hint : {}),
+      },
     },
     { status }
   );

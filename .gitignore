@@ -6,11 +6,14 @@
 # Background shell state
 .bg-shell/
 
-# Environment files
+# Environment files — NEVER commit secrets
 .env
 .env.*
 .env.local
 .env.*.local
+!.env.example
+!.env.local.example
+!.env*.example
 
 # OS
 .DS_Store
@@ -28,4 +31,31 @@ node_modules/
 # GSD
 .gsd/browser-state/
 .gsd/browser-baselines/
+
+# Test / dev scripts (root level)
+agent-compete.js
+run-agent.js
+test-bot.js
+marketplace-test.sh
+populate-test.sh
+test-bots.sh
+open-hackathons.json
+agent_log.txt
+out.log
+
+# Audit / temp docs
 autonomy-audit.md
+
+# MCP config (may contain local paths)
+.mcp.json
+
+# Non-project directories (external repos / experiments)
+api/
+auth/
+clawhub/
+# genlayer-judge/
+genlayer-judge/
+genlayer-project-boilerplate/
+LobsterAI/
+moltbook-frontend/
+openclaw/

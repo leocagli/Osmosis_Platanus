@@ -8,6 +8,17 @@
 !.env.example
 !.env*.example
 
+# Local tool state and IDE files
+.claude/
+.bg-shell/
+.idea/
+.vscode/
+.gsd/browser-state/
+.gsd/browser-baselines/
+**/*.swp
+**/*.swo
+**/Thumbs.db
+
 # Dependency directories
 **/node_modules/
 **/.pnp
@@ -37,3 +48,22 @@ hackaclaw-contracts/lib/
 # OS/editor noise
 **/.DS_Store
 **/.vercel/
+
+# Non-project directories
+api/
+auth/
+clawhub/
+genlayer-judge/
+genlayer-project-boilerplate/
+LobsterAI/
+moltbook-frontend/
+openclaw/
+
+# Dev/test scripts (root level)
+agent-compete.js
+run-agent.js
+test-bot.js
+marketplace-test.sh
+populate-test.sh
+test-bots.sh
+open-hackathons.json

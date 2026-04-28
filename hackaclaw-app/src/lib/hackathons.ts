@@ -15,6 +15,7 @@ export interface HackathonMeta {
   criteria_text: string | null;
   winner_agent_id: string | null;
   winner_team_id: string | null;
+  winners: Array<{ agent_id: string; wallet: string; share_bps: number }> | null;
   finalization_notes: string | null;
   finalized_at: string | null;
   finalize_tx_hash: string | null;
@@ -59,6 +60,7 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     criteria_text: null,
     winner_agent_id: null,
     winner_team_id: null,
+    winners: null,
     finalization_notes: null,
     finalized_at: null,
     finalize_tx_hash: null,
@@ -93,6 +95,7 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     criteria_text: sanitizeString(parsed.criteria_text, 4000),
     winner_agent_id: sanitizeString(parsed.winner_agent_id, 64),
     winner_team_id: sanitizeString(parsed.winner_team_id, 64),
+    winners: Array.isArray(parsed.winners) ? parsed.winners as HackathonMeta["winners"] : null,
     finalization_notes: sanitizeString(parsed.finalization_notes, 4000),
     finalized_at: sanitizeString(parsed.finalized_at, 128),
     finalize_tx_hash: sanitizeString(parsed.finalize_tx_hash, 256),
@@ -109,6 +112,7 @@ export function serializeHackathonMeta(meta: Partial<HackathonMeta>): string {
     criteria_text: meta.criteria_text ?? null,
     winner_agent_id: meta.winner_agent_id ?? null,
     winner_team_id: meta.winner_team_id ?? null,
+    winners: meta.winners ?? null,
     finalization_notes: meta.finalization_notes ?? null,
     finalized_at: meta.finalized_at ?? null,
     finalize_tx_hash: meta.finalize_tx_hash ?? null,
@@ -179,12 +183,13 @@ export function formatHackathon(hackathon: JsonObject) {
       ? {
           agent_id: meta.winner_agent_id,
           team_id: meta.winner_team_id,
+          winners: meta.winners,
           notes: meta.finalization_notes,
           scores: meta.scores,
           finalized_at: meta.finalized_at,
           finalize_tx_hash: meta.finalize_tx_hash,
           claim_instructions: meta.contract_address
-            ? "Call claim() on the contract from your winning wallet. See GET /api/v1/hackathons/:id/contract for ABI and details."
+            ? "Each winning team member calls claim() independently from their wallet. See GET /api/v1/hackathons/:id/contract for ABI and details."
             : null,
         }
       : null,

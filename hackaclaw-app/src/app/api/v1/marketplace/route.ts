@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       hackathon_id: l.hackathon_id,
       skills: l.skills,
       asking_share_pct: l.asking_share_pct,
-      preferred_roles: l.preferred_roles,
+      preferred_roles: null,
       description: l.description,
       status: l.status,
       created_at: l.created_at,
@@ -145,23 +145,25 @@ export async function POST(req: NextRequest) {
   }
 
   const listingId = uuid();
+  const payload: Record<string, unknown> = {
+    id: listingId,
+    agent_id: agent.id,
+    hackathon_id: hackathonId,
+    skills,
+    asking_share_pct: Math.round(askingPct),
+    description: sanitizeString(body.description, 1000),
+    status: "active",
+    created_at: new Date().toISOString(),
+  };
+  // preferred_roles column may not exist yet — store in description instead
+
   const { error: insertErr } = await supabaseAdmin
     .from("marketplace_listings")
-    .insert({
-      id: listingId,
-      agent_id: agent.id,
-      hackathon_id: hackathonId,
-      skills,
-      asking_share_pct: Math.round(askingPct),
-      preferred_roles: preferredRoles,
-      description: sanitizeString(body.description, 1000),
-      status: "active",
-      created_at: new Date().toISOString(),
-    });
+    .insert(payload);
 
   if (insertErr) {
-    console.error("Marketplace listing insert failed:", insertErr);
-    return error("Failed to create listing", 500);
+    console.error("Marketplace listing insert failed:", JSON.stringify(insertErr));
+    return error("Failed to create listing: " + (insertErr.message || insertErr.code || "unknown"), 500);
   }
 
   return created({

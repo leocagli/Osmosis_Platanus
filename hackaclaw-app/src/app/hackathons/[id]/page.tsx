@@ -819,29 +819,34 @@ function WalkingLobster({ member, palette, floorWidth, seed }: {
 
   // 4 waypoints across the floor — always walking, never idle
   const w1 = Math.round(5 + r1 * 15);
-  const w2 = Math.round(35 + r3 * 25);
-  const w3 = Math.round(10 + r4 * 20);
-  const w4 = Math.round(55 + r5 * 35);
+  const w2 = Math.round(30 + r3 * 20);
+  const w3 = Math.round(8 + r4 * 18);
+  const w4 = Math.round(45 + r5 * 30);
+
+  // Distances relative to start, in percentage points (not vw)
+  const d2 = w2 - w1;
+  const d3 = w3 - w1;
+  const d4 = w4 - w1;
 
   return (
     <div className="absolute bottom-1" style={{ left: `${w1}%` }}>
       <style>{`
         @keyframes ${animId} {
-          0%   { transform: translateX(0%) scaleX(1); }
-          24%  { transform: translateX(${w2 - w1}vw) scaleX(1); }
-          25%  { transform: translateX(${w2 - w1}vw) scaleX(-1); }
-          49%  { transform: translateX(${w3 - w1}vw) scaleX(-1); }
-          50%  { transform: translateX(${w3 - w1}vw) scaleX(1); }
-          74%  { transform: translateX(${w4 - w1}vw) scaleX(1); }
-          75%  { transform: translateX(${w4 - w1}vw) scaleX(-1); }
-          100% { transform: translateX(0%) scaleX(-1); }
+          0%   { transform: translateX(0) scaleX(1); }
+          24%  { transform: translateX(${d2}cqw) scaleX(1); }
+          25%  { transform: translateX(${d2}cqw) scaleX(-1); }
+          49%  { transform: translateX(${d3}cqw) scaleX(-1); }
+          50%  { transform: translateX(${d3}cqw) scaleX(1); }
+          74%  { transform: translateX(${d4}cqw) scaleX(1); }
+          75%  { transform: translateX(${d4}cqw) scaleX(-1); }
+          100% { transform: translateX(0) scaleX(-1); }
         }
       `}</style>
       <div style={{ animation: `${animId} ${dur}s linear ${startDelay}s infinite` }}>
         <PixelLobster
           color={palette.lobster}
           darkColor={palette.lobsterDark}
-          size={36}
+          size={46}
           name={member.agent_display_name || member.agent_name}
           role={member.role}
           borderColor={palette.lobster}
@@ -888,7 +893,7 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
       transition={{ delay: index * 0.12 }}
     >
       <div
-        className="relative overflow-hidden"
+        className="relative overflow-x-hidden"
         role={teamProjectUrl(team) ? "link" : undefined}
         tabIndex={teamProjectUrl(team) ? 0 : undefined}
         onClick={() => { const url = teamProjectUrl(team); if (url) window.open(url, "_blank", "noopener,noreferrer"); }}
@@ -959,7 +964,7 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
         </div>
 
         {/* Walking lobsters layer */}
-        <div className="relative" style={{ height: 50, overflow: "hidden" }}>
+        <div className="relative" style={{ height: 60, containerType: "inline-size" }}>
           {team.members.map((member, mi) => (
             <WalkingLobster
               key={member.agent_id}
@@ -1163,10 +1168,31 @@ function HackathonBadge({
                 )}
               </div>
 
+              {hackathon.brief && (
+                <div className="mt-4 border-t border-white/10 pt-3">
+                  <span className="pixel-font text-[var(--text-muted)]" style={{ fontSize: 8 }}>BRIEF</span>
+                  <p className="mt-1 text-xs text-[var(--text-secondary)] leading-relaxed">
+                    {hackathon.brief}
+                  </p>
+                </div>
+              )}
+
+              {hackathon.rules && (
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <span className="pixel-font text-[var(--text-muted)]" style={{ fontSize: 8 }}>RULES</span>
+                  <p className="mt-1 text-xs text-[var(--text-secondary)] leading-relaxed">
+                    {hackathon.rules}
+                  </p>
+                </div>
+              )}
+
               {hackathon.description && (
-                <p className="mt-4 text-xs text-[var(--text-secondary)] leading-relaxed border-t border-white/10 pt-3">
-                  {hackathon.description}
-                </p>
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <span className="pixel-font text-[var(--text-muted)]" style={{ fontSize: 8 }}>DESCRIPTION</span>
+                  <p className="mt-1 text-xs text-[var(--text-secondary)] leading-relaxed">
+                    {hackathon.description}
+                  </p>
+                </div>
               )}
             </motion.div>
           </motion.div>

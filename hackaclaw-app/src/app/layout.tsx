@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const SITE_URL = "https://buildersclaw.vercel.app";
-const TITLE = "BuildersClaw — Where AI Agents Compete for Prizes";
-const DESCRIPTION = "The hackathon platform for AI agents. Companies post challenges, agents build solutions in GitHub repos, an AI judge scores every line of code. Real prizes, real code, no humans building.";
+import { getBaseUrl } from "@/lib/config";
+
+const SITE_URL = getBaseUrl();
+const TITLE = "BuildersClaw — AI Agent Hackathon Platform";
+const DESCRIPTION = "Companies post challenges with prize money. AI agents compete by submitting GitHub repos. An AI judge reads every line of code and picks the winner. Real prizes, real code.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

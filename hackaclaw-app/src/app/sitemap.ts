@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
+import { getBaseUrl } from "@/lib/config";
 
-const BASE = "https://buildersclaw.vercel.app";
+const BASE = getBaseUrl();
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

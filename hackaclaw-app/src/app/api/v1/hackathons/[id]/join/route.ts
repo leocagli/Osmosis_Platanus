@@ -6,6 +6,7 @@ import { created, error, notFound, unauthorized } from "@/lib/responses";
 import { createSingleAgentTeam, sanitizeString, toPublicHackathonStatus, calculatePrizePool, parseHackathonMeta } from "@/lib/hackathons";
 import { getBalance } from "@/lib/balance";
 import { verifyJoinTransaction } from "@/lib/chain";
+import { getJoinTransactionGuide, getChainSetupGuide, checkAgentChainReadiness } from "@/lib/chain-prerequisites";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -84,10 +85,45 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (meta.contract_address) {
     // ── On-chain hackathon: verify join() transaction ──
     if (!wallet || !txHash) {
+      // Read contract state for the guide
+      let entryFeeWei = "0";
+      try {
+        const { getPublicChainClient, normalizeAddress } = await import("@/lib/chain");
+        const { parseAbi } = await import("viem");
+        const pc = getPublicChainClient();
+        const fee = await pc.readContract({
+          address: normalizeAddress(meta.contract_address) as `0x${string}`,
+          abi: parseAbi(["function entryFee() view returns (uint256)"]),
+          functionName: "entryFee",
+        });
+        entryFeeWei = (fee as bigint).toString();
+      } catch { /* best-effort */ }
+
+      const txGuide = getJoinTransactionGuide({
+        contractAddress: meta.contract_address,
+        entryFeeWei,
+        chainId: meta.chain_id,
+        rpcUrl: process.env.RPC_URL || null,
+        hackathonId,
+      });
+
+      const agentReadiness = checkAgentChainReadiness(agent);
+
       return error(
-        "wallet and tx_hash are required for on-chain hackathons. Call join() on the contract first.",
+        "This is a contract-backed hackathon. You must call join() on-chain first, then submit wallet_address + tx_hash here.",
         400,
-        "See GET /api/v1/hackathons/:id/contract for contract ABI and details."
+        {
+          what_you_need: "Foundry's `cast` CLI and a funded wallet on the correct chain.",
+          setup_guide: "GET /api/v1/chain/setup for full Foundry installation + key management instructions.",
+          transaction: txGuide,
+          agent_wallet_status: agentReadiness,
+          chain: {
+            chain_id: meta.chain_id ?? (process.env.CHAIN_ID ? Number(process.env.CHAIN_ID) : null),
+            rpc_url: process.env.RPC_URL || null,
+            entry_fee_wei: entryFeeWei,
+          },
+          contract_details: `GET /api/v1/hackathons/${hackathonId}/contract`,
+        },
       );
     }
 
@@ -99,7 +135,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Join transaction verification failed";
-      return error(message, 400);
+      return error(message, 400, {
+        help: "Make sure you called join() on the correct contract with the correct entry fee.",
+        contract_details: `GET /api/v1/hackathons/${hackathonId}/contract`,
+        setup_guide: "GET /api/v1/chain/setup",
+      });
     }
   } else if (entryFee > 0) {
     // ── Off-chain paid hackathon: charge from USD balance ──

@@ -1,5 +1,7 @@
 import { Resend } from "resend";
 
+import { getBaseUrl } from "./config";
+
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "BuildersClaw <noreply@buildersclaw.com>";
 
@@ -23,7 +25,7 @@ export async function sendApprovalEmail(params: ApprovalEmailParams): Promise<bo
   }
 
   const { to, company, hackathonTitle, hackathonUrl, judgeType, judgeApiKey } = params;
-  const fullUrl = `https://buildersclaw.vercel.app${hackathonUrl}`;
+  const fullUrl = `${getBaseUrl()}${hackathonUrl}`;
 
   const judgeSection = judgeType === "custom" && judgeApiKey
     ? `
@@ -35,8 +37,8 @@ export async function sendApprovalEmail(params: ApprovalEmailParams): Promise<bo
         </div>
         <p style="color:#999;font-size:12px;margin:16px 0 0;">
           Tell your judge agent to read the instructions at:<br/>
-          <a href="https://buildersclaw.vercel.app/judge-skill.md" style="color:#4ade80;">
-            https://buildersclaw.vercel.app/judge-skill.md
+          <a href="${getBaseUrl()}/judge-skill.md" style="color:#4ade80;">
+            ${getBaseUrl()}/judge-skill.md
           </a>
         </p>
       </div>`

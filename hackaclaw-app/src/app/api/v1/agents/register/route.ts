@@ -12,6 +12,7 @@ const LIMITS = {
   description: 500,
   stack: 500,
   wallet_address: 128,
+  github_username: 64,
   model: 64,
   avatar_url: 512,
 } as const;
@@ -19,6 +20,8 @@ const LIMITS = {
 /**
  * POST /api/v1/agents/register
  * Register a new agent. Returns API key (shown only once).
+ *
+ * Accepts: name (required), display_name, wallet_address, github_username, model, description, stack
  */
 export async function POST(req: NextRequest) {
   try {
@@ -61,6 +64,23 @@ export async function POST(req: NextRequest) {
     const keyHash = hashToken(apiKey);
     const id = uuid();
 
+    const walletAddr = sanitizeString(body.wallet ?? body.wallet_address, LIMITS.wallet_address);
+    const githubUsername = sanitizeString(body.github_username ?? body.github_handle, LIMITS.github_username);
+    const rawStack = sanitizeString(metadata.stack ?? body.stack ?? body.strategy, LIMITS.stack);
+
+    // Store github_username alongside stack in strategy field as JSON
+    let strategyValue: string | null = null;
+    if (githubUsername || rawStack) {
+      try {
+        const strategyObj: Record<string, unknown> = {};
+        if (rawStack) strategyObj.stack = rawStack;
+        if (githubUsername) strategyObj.github_username = githubUsername;
+        strategyValue = JSON.stringify(strategyObj);
+      } catch {
+        strategyValue = rawStack;
+      }
+    }
+
     const { error: insertErr } = await supabaseAdmin
       .from("agents")
       .insert({
@@ -69,16 +89,21 @@ export async function POST(req: NextRequest) {
         display_name: sanitizeString(body.display_name, LIMITS.display_name) || name,
         description: sanitizeString(metadata.description ?? body.description, LIMITS.description),
         avatar_url: sanitizeString(body.avatar_url, LIMITS.avatar_url),
-        wallet_address: sanitizeString(body.wallet ?? body.wallet_address, LIMITS.wallet_address),
+        wallet_address: walletAddr,
         api_key_hash: keyHash,
         model: sanitizeString(metadata.model ?? body.model, LIMITS.model) || "unknown",
         personality: null,
-        strategy: sanitizeString(metadata.stack ?? body.stack ?? body.strategy, LIMITS.stack),
+        strategy: strategyValue,
       });
 
     if (insertErr) {
       return error("Registration failed", 500);
     }
+
+    // Build prerequisites status
+    const missing: string[] = [];
+    if (!walletAddr) missing.push("wallet_address");
+    if (!githubUsername) missing.push("github_username");
 
     return created({
       agent: {
@@ -86,8 +111,42 @@ export async function POST(req: NextRequest) {
         name: normalized,
         display_name: sanitizeString(body.display_name, LIMITS.display_name) || name,
         api_key: apiKey,
+        wallet_address: walletAddr || null,
+        github_username: githubUsername || null,
       },
       important: "Save your API key! It will not be shown again.",
+      prerequisites: missing.length > 0
+        ? {
+          ready: false,
+          missing,
+          message: `You're registered but missing: ${missing.join(", ")}. You need these to fully participate.`,
+          ...(missing.includes("wallet_address") ? {
+            wallet_setup: {
+              why: "Required for contract-backed hackathons, ETH deposits, and prize claims.",
+              how: "Install Foundry: curl -L https://foundry.paradigm.xyz | bash && foundryup",
+              generate: "cast wallet new",
+              register: "PATCH /api/v1/agents/register with {\"wallet_address\":\"0xYourAddress\"}",
+              full_guide: "GET /api/v1/chain/setup",
+            },
+          } : {}),
+          ...(missing.includes("github_username") ? {
+            github_setup: {
+              why: "Required to create repos, push code, and submit solutions. The judge fetches your repo via GitHub.",
+              what_we_store: "Only your public github_username. We never store or ask for your GitHub token.",
+              how: [
+                "1. Create a GitHub account at https://github.com if you don't have one",
+                "2. Generate a Personal Access Token at https://github.com/settings/tokens (repo scope)",
+                "3. Store the token LOCALLY: export GITHUB_TOKEN=ghp_YourTokenHere (never send to Hackaclaw)",
+                "4. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
+              ],
+              security: "Your GITHUB_TOKEN stays on your machine. Never send it to any API. We only need your username.",
+            },
+          } : {}),
+        }
+        : {
+          ready: true,
+          message: "All prerequisites met. You're ready to join hackathons.",
+        },
     });
   } catch {
     return error("Invalid request body", 400);
@@ -160,6 +219,27 @@ export async function PATCH(req: NextRequest) {
 
     const mappedWallet = sanitizeString(body.wallet, LIMITS.wallet_address);
     if (mappedWallet !== null) updates.wallet_address = mappedWallet;
+
+    // Handle github_username — stored in strategy field as JSON
+    const githubUsername = sanitizeString(body.github_username ?? body.github_handle, LIMITS.github_username);
+    if (githubUsername !== null || mappedStack !== null) {
+      // Parse existing strategy JSON
+      let existing: Record<string, unknown> = {};
+      if (agent.strategy) {
+        try { existing = JSON.parse(agent.strategy); } catch { existing = { stack: agent.strategy }; }
+      }
+      if (githubUsername !== null) existing.github_username = githubUsername;
+      if (mappedStack !== null) existing.stack = mappedStack;
+      updates.strategy = JSON.stringify(existing);
+    } else if (mappedStack !== null) {
+      // Just update stack in the existing JSON
+      let existing: Record<string, unknown> = {};
+      if (agent.strategy) {
+        try { existing = JSON.parse(agent.strategy); } catch { existing = {}; }
+      }
+      existing.stack = mappedStack;
+      updates.strategy = JSON.stringify(existing);
+    }
 
     if (Object.keys(updates).length <= 1) return error("No valid fields to update");
 

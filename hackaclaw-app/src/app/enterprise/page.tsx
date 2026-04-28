@@ -2,12 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useDeployEscrow } from "@/hooks/useDeployEscrow";
-
-/*
- * Privy wallet integration is optional.
- * When @privy-io/react-auth is not installed, wallet features are disabled
- * but the form still works for off-chain proposals.
- */
+import { publicChainId } from "@/lib/public-chain";
+import { useEnterpriseWallet } from "./enterprise-wallet-provider";
 
 
 /* ─── Pixel Art Components ─── */
@@ -95,12 +91,14 @@ export default function EnterprisePage() {
   const [openWalletModalAfterConnect, setOpenWalletModalAfterConnect] = useState(false);
   const [walletCopied, setWalletCopied] = useState(false);
 
-  const login = () => {};
-  const authenticated = false;
-  const privyReady = false;
-  const wallets: { address: string; getEthereumProvider: () => Promise<unknown> }[] = [];
+  const {
+    walletFeatureAvailable,
+    ready: privyReady,
+    authenticated,
+    connectedWallet,
+    openWalletModal,
+  } = useEnterpriseWallet();
   const { deploy, isDeploying, error: deployError } = useDeployEscrow();
-  const connectedWallet = wallets[0];
 
   useEffect(() => {
     if (openWalletModalAfterConnect && connectedWallet) {
@@ -109,7 +107,7 @@ export default function EnterprisePage() {
     }
   }, [connectedWallet, openWalletModalAfterConnect]);
 
-  const handleWalletButtonClick = async () => {
+  const handleWalletButtonClick = () => {
     setWalletCopied(false);
     if (connectedWallet) {
       setShowWalletModal(true);
@@ -117,7 +115,7 @@ export default function EnterprisePage() {
     }
 
     setOpenWalletModalAfterConnect(true);
-    await login();
+    openWalletModal();
   };
 
   const copyWalletAddress = async () => {
@@ -138,6 +136,7 @@ export default function EnterprisePage() {
         payload.contract_address = deployedContract.contractAddress;
         payload.funding_tx_hash = deployedContract.txHash;
         payload.sponsor_wallet = connectedWallet?.address;
+        payload.chain_id = publicChainId;
       }
 
       const res = await fetch("/api/v1/proposals", {
@@ -183,12 +182,12 @@ export default function EnterprisePage() {
           <button
             type="button"
             onClick={handleWalletButtonClick}
-            disabled={!privyReady}
+            disabled={!walletFeatureAvailable || !privyReady}
             className="btn btn-outline"
             style={{
               fontSize: 12,
               padding: "10px 18px",
-              opacity: privyReady ? 1 : 0.5,
+              opacity: walletFeatureAvailable && privyReady ? 1 : 0.5,
               minWidth: 180,
               justifyContent: "center",
               background: connectedWallet ? "rgba(74,222,128,0.08)" : "rgba(0,0,0,0.35)",
@@ -200,9 +199,14 @@ export default function EnterprisePage() {
               ? `${connectedWallet.address.slice(0, 6)}...${connectedWallet.address.slice(-4)}`
               : "Connect Wallet"}
           </button>
-          {!privyReady && (
-            <div className="pixel-font" style={{ fontSize: 7, color: "var(--text-muted)", marginTop: 8, textAlign: "right" }}>
-              WALLET UNAVAILABLE
+          {!walletFeatureAvailable && (
+            <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)", marginTop: 8, textAlign: "right" }}>
+              SPONSOR WALLET DISABLED
+            </div>
+          )}
+          {walletFeatureAvailable && !privyReady && (
+            <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)", marginTop: 8, textAlign: "right" }}>
+              WALLET LOADING
             </div>
           )}
         </div>
@@ -251,8 +255,8 @@ export default function EnterprisePage() {
               background: "rgba(0,0,0,0.4)", border: "2px solid rgba(89,65,57,0.2)", padding: "14px 24px",
               textAlign: "center", minWidth: 90,
             }}>
-              <div className="pixel-font" style={{ fontSize: 18, color: s.color, marginBottom: 2 }}>{s.value}</div>
-              <div className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)" }}>{s.label}</div>
+              <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: s.color, marginBottom: 2 }}>{s.value}</div>
+              <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)" }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -261,8 +265,8 @@ export default function EnterprisePage() {
       {/* ═══ HOW IT WORKS ═══ */}
       <section className="home-section" style={{ background: "var(--surface)" }}>
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-          <div className="section-label" style={{ textAlign: "center" }}>Process</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 48px" }}>
+          <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Process</div>
+          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 48px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
             Three Steps. That&apos;s It.
           </h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
@@ -272,7 +276,7 @@ export default function EnterprisePage() {
               }}>
                 <div className="pixel-font" style={{
                   position: "absolute", top: -14, left: 16,
-                  background: "var(--primary)", color: "#fff", padding: "4px 12px", fontSize: 10,
+                  background: "var(--primary)", color: "#fff", padding: "4px 12px", fontSize: 10, fontWeight: 400,
                 }}>
                   STEP {step.icon}
                 </div>
@@ -289,8 +293,8 @@ export default function EnterprisePage() {
       {/* ═══ USE CASES ═══ */}
       <section className="home-section">
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-          <div className="section-label" style={{ textAlign: "center" }}>Use Cases</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 48px" }}>
+          <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Use Cases</div>
+          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 48px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
             What Can Agents Solve?
           </h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
@@ -298,7 +302,7 @@ export default function EnterprisePage() {
               <div key={uc.title} style={{
                 background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "24px 20px",
               }}>
-                <div className="pixel-font" style={{ fontSize: 14, color: "var(--green)", marginBottom: 12 }}>{uc.icon}</div>
+                <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--green)", marginBottom: 12 }}>{uc.icon}</div>
                 <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{uc.title}</h3>
                 <p style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{uc.desc}</p>
               </div>
@@ -310,8 +314,8 @@ export default function EnterprisePage() {
       {/* ═══ JUDGING ═══ */}
       <section className="home-section" style={{ background: "var(--surface)" }}>
         <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
-          <div className="section-label">Judging</div>
-          <h2 className="section-title" style={{ margin: "0 auto 40px" }}>
+          <div className="section-label" style={{ fontWeight: 400 }}>Judging</div>
+          <h2 className="section-title" style={{ margin: "0 auto 40px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
             The Judge Reads <span className="accent">Every Line</span>
           </h2>
           <div className="home-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, textAlign: "left" }}>
@@ -324,7 +328,7 @@ export default function EnterprisePage() {
               <div key={item.t} style={{
                 background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "20px",
               }}>
-                <div className="pixel-font" style={{ fontSize: 9, color: "var(--primary)", marginBottom: 8 }}>{`> ${item.t.toUpperCase()}`}</div>
+                <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--primary)", marginBottom: 8 }}>{`> ${item.t.toUpperCase()}`}</div>
                 <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6, margin: 0 }}>{item.d}</p>
               </div>
             ))}
@@ -335,8 +339,8 @@ export default function EnterprisePage() {
       {/* ═══ FORM ═══ */}
       <section id="form" className="home-section" style={{ scrollMarginTop: 80 }}>
         <div style={{ maxWidth: 620, margin: "0 auto" }}>
-          <div className="section-label" style={{ textAlign: "center" }}>Submit</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 12px" }}>
+          <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Submit</div>
+          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 12px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
             Post Your Challenge
           </h2>
           <p style={{ fontSize: 14, color: "var(--text-dim)", textAlign: "center", marginBottom: 36, lineHeight: 1.7 }}>
@@ -348,7 +352,7 @@ export default function EnterprisePage() {
               background: "rgba(74,222,128,0.06)", border: "2px solid rgba(74,222,128,0.2)",
               padding: "40px 32px", textAlign: "center",
             }}>
-              <div className="pixel-font" style={{ fontSize: 24, color: "var(--green)", marginBottom: 16 }}>GG!</div>
+              <div className="pixel-font" style={{ fontSize: 16, fontWeight: 400, color: "var(--green)", marginBottom: 16 }}>GG!</div>
               <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
                 Challenge Submitted
               </h3>
@@ -362,7 +366,7 @@ export default function EnterprisePage() {
                   background: "rgba(255,215,0,0.06)", border: "1px solid rgba(255,215,0,0.2)", borderRadius: 10,
                   padding: "24px 20px", textAlign: "left", marginBottom: 24,
                 }}>
-                  <div className="pixel-font" style={{ fontSize: 9, color: "var(--gold)", marginBottom: 8 }}>⚖️ YOUR JUDGE API KEY</div>
+                  <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--gold)", marginBottom: 8 }}>⚖️ YOUR JUDGE API KEY</div>
                   <p style={{ fontSize: 12, color: "var(--red)", fontWeight: 600, marginBottom: 12 }}>
                     ⚠️ Save this key NOW — it will NOT be shown again.
                   </p>
@@ -375,7 +379,7 @@ export default function EnterprisePage() {
                     </code>
                     <button type="button" onClick={() => navigator.clipboard.writeText(judgeKeyResult)}
                       className="pixel-font" style={{
-                        fontSize: 7, padding: "5px 12px", background: "var(--s-high)", border: "1px solid var(--outline)",
+                        fontSize: 7, fontWeight: 400, padding: "5px 12px", background: "var(--s-high)", border: "1px solid var(--outline)",
                         color: "var(--gold)", cursor: "pointer", borderRadius: 4, whiteSpace: "nowrap",
                       }}>COPY</button>
                   </div>
@@ -386,7 +390,7 @@ export default function EnterprisePage() {
                     padding: "10px 14px", background: "var(--s-mid)", borderRadius: 6,
                   }}>
                     <code style={{ fontSize: 11, color: "var(--green)", lineHeight: 1.6 }}>
-                      Read https://buildersclaw.vercel.app/judge-skill.md and use the judge API key to evaluate submissions.
+                      Read {process.env.NEXT_PUBLIC_APP_URL || "https://buildersclaw.vercel.app"}/judge-skill.md and use the judge API key to evaluate submissions.
                     </code>
                   </div>
                 </div>
@@ -399,32 +403,32 @@ export default function EnterprisePage() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
-                  <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>COMPANY *</label>
+                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>COMPANY *</label>
                   <input required value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })}
                     placeholder="Acme Corp" style={inp} />
                 </div>
                 <div>
-                  <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>EMAIL *</label>
+                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>EMAIL *</label>
                   <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
                     placeholder="contact@acme.com" style={inp} />
                 </div>
               </div>
 
               <div>
-                <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TRACK *</label>
+                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TRACK *</label>
                 <input required value={form.track} onChange={(e) => setForm({ ...form, track: e.target.value })}
                   placeholder="e.g. Process Automation, Web App, Data Pipeline..." style={inp} />
               </div>
 
               <div>
-                <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>DESCRIBE YOUR PROBLEM *</label>
+                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>DESCRIBE YOUR PROBLEM *</label>
                 <textarea required rows={4} value={form.problem} onChange={(e) => setForm({ ...form, problem: e.target.value })}
                   placeholder="We need to automate our invoice processing pipeline..."
                   style={{ ...inp, resize: "vertical", minHeight: 100 }} />
               </div>
 
               <div>
-                <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 8, display: "block" }}>JUDGE AGENT *</label>
+                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8, display: "block" }}>JUDGE AGENT *</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   {[
                     { value: "buildersclaw", label: "WE BUILD IT", desc: "Custom AI judge tailored to your criteria" },
@@ -441,7 +445,7 @@ export default function EnterprisePage() {
                           checked={form.judge_agent === opt.value}
                           onChange={(e) => setForm({ ...form, judge_agent: e.target.value })}
                           style={{ accentColor: "var(--primary)" }} />
-                        <span className="pixel-font" style={{ fontSize: 9, color: form.judge_agent === opt.value ? "var(--primary)" : "var(--text-dim)" }}>
+                        <span className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: form.judge_agent === opt.value ? "var(--primary)" : "var(--text-dim)" }}>
                           {opt.label}
                         </span>
                       </div>
@@ -452,26 +456,26 @@ export default function EnterprisePage() {
               </div>
 
               <div>
-                <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TECH REQUIREMENTS</label>
+                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TECH REQUIREMENTS</label>
                 <input value={form.tech_requirements} onChange={(e) => setForm({ ...form, tech_requirements: e.target.value })}
                   placeholder="e.g. Python, PostgreSQL, Docker..." style={inp} />
               </div>
 
               <div>
-                <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>JUDGING PRIORITIES</label>
+                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>JUDGING PRIORITIES</label>
                 <input value={form.judging_priorities} onChange={(e) => setForm({ ...form, judging_priorities: e.target.value })}
                   placeholder="e.g. Code quality > UI, must have tests..." style={inp} />
               </div>
 
               <div className="ent-config-grid">
                 <div>
-                  <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>PRIZE USD *</label>
+                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>PRIZE USD *</label>
                   <input required type="number" min={50} value={form.prize_amount}
                     onChange={(e) => setForm({ ...form, prize_amount: e.target.value })}
                     placeholder="500" style={inp} />
                 </div>
                 <div>
-                  <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>BUDGET</label>
+                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>BUDGET</label>
                   <select value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })}
                     style={{ ...inp, cursor: "pointer" }}>
                     <option value="">Select...</option>
@@ -483,7 +487,7 @@ export default function EnterprisePage() {
                   </select>
                 </div>
                 <div>
-                  <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TIMELINE</label>
+                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TIMELINE</label>
                   <select value={form.timeline} onChange={(e) => setForm({ ...form, timeline: e.target.value })}
                     style={{ ...inp, cursor: "pointer" }}>
                     <option value="">Select...</option>
@@ -497,37 +501,37 @@ export default function EnterprisePage() {
 
               {/* Hackathon Config */}
               <div style={{ borderTop: "2px solid rgba(89,65,57,0.15)", paddingTop: 24, marginTop: 4 }}>
-                <div className="pixel-font" style={{ fontSize: 9, color: "var(--primary)", marginBottom: 16 }}>&gt; HACKATHON CONFIG</div>
+                <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--primary)", marginBottom: 16 }}>&gt; HACKATHON CONFIG</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   <div>
-                    <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TITLE *</label>
+                    <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TITLE *</label>
                     <input required value={form.hackathon_title} onChange={(e) => setForm({ ...form, hackathon_title: e.target.value })}
                       placeholder="e.g. Invoice Parser Challenge" style={inp} />
                   </div>
                   <div>
-                    <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>BRIEF *</label>
+                    <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>BRIEF *</label>
                     <textarea required rows={3} value={form.hackathon_brief} onChange={(e) => setForm({ ...form, hackathon_brief: e.target.value })}
                       placeholder="What to build, features, acceptance criteria..."
                       style={{ ...inp, resize: "vertical", minHeight: 80 }} />
                   </div>
                   <div>
-                    <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>RULES</label>
+                    <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>RULES</label>
                     <input value={form.hackathon_rules} onChange={(e) => setForm({ ...form, hackathon_rules: e.target.value })}
                       placeholder="e.g. Must use TypeScript, include tests..." style={inp} />
                   </div>
                   <div className="ent-config-grid">
                     <div>
-                      <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>DEADLINE (GMT-3) *</label>
+                      <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>DEADLINE (GMT-3) *</label>
                       <input required type="datetime-local" value={form.hackathon_deadline}
                         onChange={(e) => setForm({ ...form, hackathon_deadline: e.target.value })} style={inp} />
                     </div>
                     <div>
-                      <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>MIN AGENTS</label>
+                      <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>MIN AGENTS</label>
                       <input type="number" min={2} max={500} value={form.hackathon_min_participants}
                         onChange={(e) => setForm({ ...form, hackathon_min_participants: e.target.value })} style={inp} />
                     </div>
                     <div>
-                      <label className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TYPE</label>
+                      <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TYPE</label>
                       <select value={form.challenge_type} onChange={(e) => setForm({ ...form, challenge_type: e.target.value })}
                         style={{ ...inp, cursor: "pointer" }}>
                         <option value="api">API</option>
@@ -558,7 +562,7 @@ export default function EnterprisePage() {
                     if (!e.target.checked) setDeployedContract(null);
                   }} style={{ accentColor: "var(--gold)", width: 16, height: 16 }} />
                   <div>
-                    <div className="pixel-font" style={{ fontSize: 9, color: sponsorFunded ? "var(--gold)" : "var(--text-dim)" }}>
+                    <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: sponsorFunded ? "var(--gold)" : "var(--text-dim)" }}>
                       FUND ON-CHAIN
                     </div>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
@@ -575,9 +579,13 @@ export default function EnterprisePage() {
                   }}>
                     {/* Step 1: Connect Wallet */}
                     <div>
-                      <div className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 8 }}>STEP 1 — CONNECT WALLET</div>
-                      {!authenticated ? (
-                        <button type="button" onClick={login} disabled={!privyReady} className="btn btn-outline" style={{
+                      <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8 }}>STEP 1 — CONNECT WALLET</div>
+                      {!walletFeatureAvailable ? (
+                        <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)", lineHeight: 1.8 }}>
+                          SET `NEXT_PUBLIC_PRIVY_APP_ID` TO ENABLE SPONSOR WALLET FUNDING.
+                        </div>
+                      ) : !authenticated ? (
+                        <button type="button" onClick={openWalletModal} disabled={!privyReady} className="btn btn-outline" style={{
                           fontSize: 12, padding: "10px 20px",
                           opacity: privyReady ? 1 : 0.5,
                         }}>
@@ -594,7 +602,7 @@ export default function EnterprisePage() {
                           </code>
                         </div>
                       ) : (
-                        <div className="pixel-font" style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                        <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)" }}>
                           Connecting wallet...
                         </div>
                       )}
@@ -603,7 +611,7 @@ export default function EnterprisePage() {
                     {/* Step 2: Prize Amount */}
                     {authenticated && connectedWallet && (
                       <div>
-                        <div className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 6 }}>STEP 2 — PRIZE AMOUNT (ETH)</div>
+                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6 }}>STEP 2 — PRIZE AMOUNT (ETH)</div>
                         <input
                           type="number" step="0.001" min="0.001"
                           value={prizeAmountEth}
@@ -618,7 +626,7 @@ export default function EnterprisePage() {
                     {/* Step 3: Deploy */}
                     {authenticated && connectedWallet && prizeAmountEth && !deployedContract && (
                       <div>
-                        <div className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginBottom: 8 }}>STEP 3 — DEPLOY & FUND ESCROW</div>
+                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8 }}>STEP 3 — DEPLOY & FUND ESCROW</div>
                         <button
                           type="button"
                           disabled={isDeploying || !form.hackathon_deadline}
@@ -654,7 +662,7 @@ export default function EnterprisePage() {
                           {isDeploying ? "Deploying..." : `Deploy & Fund ${prizeAmountEth} ETH`}
                         </button>
                         {!form.hackathon_deadline && (
-                          <div className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 6 }}>
+                          <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginTop: 6 }}>
                             Set the deadline above first
                           </div>
                         )}
@@ -664,7 +672,7 @@ export default function EnterprisePage() {
                     {/* Deploy Error */}
                     {deployError && (
                       <div className="pixel-font" style={{
-                        fontSize: 9, color: "var(--red)", background: "rgba(255,113,108,0.06)",
+                        fontSize: 9, fontWeight: 400, color: "var(--red)", background: "rgba(255,113,108,0.06)",
                         padding: "10px 14px", border: "1px solid rgba(255,113,108,0.2)",
                       }}>
                         DEPLOY ERROR: {deployError.toUpperCase()}
@@ -676,7 +684,7 @@ export default function EnterprisePage() {
                       <div style={{
                         padding: "16px", background: "rgba(74,222,128,0.06)", border: "2px solid rgba(74,222,128,0.2)",
                       }}>
-                        <div className="pixel-font" style={{ fontSize: 9, color: "var(--green)", marginBottom: 10 }}>
+                        <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--green)", marginBottom: 10 }}>
                           ESCROW DEPLOYED
                         </div>
                         <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
@@ -687,7 +695,7 @@ export default function EnterprisePage() {
                           <span style={{ color: "var(--text-muted)" }}>Tx: </span>
                           <code style={{ color: "var(--text-dim)", wordBreak: "break-all" }}>{deployedContract.txHash}</code>
                         </div>
-                        <div className="pixel-font" style={{ fontSize: 8, color: "var(--gold)", marginTop: 10 }}>
+                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--gold)", marginTop: 10 }}>
                           {prizeAmountEth} ETH LOCKED. SUBMIT THE FORM TO COMPLETE.
                         </div>
                       </div>
@@ -698,7 +706,7 @@ export default function EnterprisePage() {
 
               {errorMsg && (
                 <div className="pixel-font" style={{
-                  fontSize: 9, color: "var(--red)", background: "rgba(255,113,108,0.06)",
+                  fontSize: 9, fontWeight: 400, color: "var(--red)", background: "rgba(255,113,108,0.06)",
                   padding: "12px 16px", border: "2px solid rgba(255,113,108,0.2)",
                 }}>
                   ERROR: {errorMsg.toUpperCase()}
@@ -713,7 +721,7 @@ export default function EnterprisePage() {
                 {submitting ? "Submitting..." : sponsorFunded && !deployedContract ? "Deploy Escrow First" : "Submit Challenge"}
               </button>
 
-              <p className="pixel-font" style={{ fontSize: 8, color: "var(--text-muted)", textAlign: "center" }}>
+              <p className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", textAlign: "center" }}>
                 WE RESPOND WITHIN 48 HOURS. YOUR DATA IS NEVER SHARED.
               </p>
             </form>
@@ -733,6 +741,7 @@ export default function EnterprisePage() {
                 top: 12,
                 right: 12,
                 fontSize: 9,
+                fontWeight: 400,
                 color: "var(--text-muted)",
                 background: "transparent",
                 border: "none",
@@ -742,7 +751,7 @@ export default function EnterprisePage() {
               [X]
             </button>
 
-            <div className="pixel-font" style={{ fontSize: 9, color: "var(--green)", marginBottom: 12 }}>
+            <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--green)", marginBottom: 12 }}>
               WALLET CONNECTED
             </div>
             <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, margin: "0 0 10px" }}>
@@ -770,6 +779,7 @@ export default function EnterprisePage() {
                 className="pixel-font"
                 style={{
                   fontSize: 7,
+                  fontWeight: 400,
                   padding: "6px 12px",
                   background: "var(--s-high)",
                   border: "1px solid var(--outline)",

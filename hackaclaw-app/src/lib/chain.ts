@@ -3,14 +3,15 @@ import {
   createPublicClient,
   createWalletClient,
   decodeFunctionData,
-  defineChain,
   getAddress,
   http,
   isAddress,
   parseAbi,
   type Address,
+  type Chain,
   type Hash,
 } from "viem";
+import { resolveChain } from "@/lib/chain-config";
 
 const factoryAbi = parseAbi([
   "function createHackathon(uint256 _entryFee, uint256 _deadline) payable returns (address)",
@@ -23,19 +24,23 @@ const escrowAbi = parseAbi([
   "function entryFee() view returns (uint256)",
   "function hasJoined(address) view returns (bool)",
   "function finalized() view returns (bool)",
-  "function winner() view returns (address)",
   "function owner() view returns (address)",
   "function sponsor() view returns (address)",
   "function deadline() view returns (uint256)",
   "function prizePool() view returns (uint256)",
+  "function getWinners() view returns (address[])",
+  "function getWinnerShare(address) view returns (uint256)",
+  "function winnerCount() view returns (uint256)",
+  "function hasClaimed(address) view returns (bool)",
+  "function totalPrizeAtFinalize() view returns (uint256)",
   "function join() payable",
-  "function finalize(address _winner)",
+  "function finalize(address[] _winners, uint256[] _sharesBps)",
   "function abort()",
 ]);
 
-let cachedChain: ReturnType<typeof defineChain> | null = null;
-let cachedPublicClient: any = null;
-let cachedWalletClient: any = null;
+let cachedChain: Chain | null = null;
+let cachedPublicClient: ReturnType<typeof createPublicClient> | null = null;
+let cachedWalletClient: ReturnType<typeof createWalletClient> | null = null;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -55,11 +60,12 @@ function getChain() {
   if (cachedChain) return cachedChain;
 
   const rpcUrl = requireEnv("RPC_URL");
-  cachedChain = defineChain({
-    id: getConfiguredChainId(),
-    name: "hackaclaw",
-    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-    rpcUrls: { default: { http: [rpcUrl] } },
+  cachedChain = resolveChain({
+    chainId: getConfiguredChainId(),
+    rpcUrl,
+    fallbackName: process.env.CHAIN_NAME || "hackaclaw",
+    fallbackCurrencyName: process.env.CHAIN_CURRENCY_NAME || "Ether",
+    fallbackCurrencySymbol: process.env.CHAIN_CURRENCY_SYMBOL || "ETH",
   });
   return cachedChain;
 }
@@ -70,7 +76,7 @@ export function getPublicChainClient() {
     chain: getChain(),
     transport: http(requireEnv("RPC_URL")),
   });
-  cachedPublicClient = client as ReturnType<typeof createPublicClient>;
+  cachedPublicClient = client;
   return cachedPublicClient;
 }
 
@@ -84,7 +90,7 @@ export function getOrganizerWalletClient() {
     chain: getChain(),
     transport: http(requireEnv("RPC_URL")),
   });
-  cachedWalletClient = client as ReturnType<typeof createWalletClient>;
+  cachedWalletClient = client;
   return cachedWalletClient;
 }
 
@@ -167,7 +173,7 @@ export async function verifyDepositTransaction(options: {
 
   // Verify it was sent to our platform wallet
   const organizerWallet = getOrganizerWalletClient();
-  const platformAddress = normalizeAddress(organizerWallet.account.address);
+  const platformAddress = normalizeAddress(organizerWallet.account!.address);
 
   if (!transaction.to || !sameAddress(transaction.to, platformAddress)) {
     throw new Error(
@@ -200,12 +206,19 @@ export async function getContractPrizePool(contractAddress: string): Promise<big
 
 export async function finalizeHackathonOnChain(options: {
   contractAddress: string;
-  winnerWallet: string;
+  winners: { wallet: string; shareBps: number }[];
 }) {
   const publicClient = getPublicChainClient();
   const walletClient = getOrganizerWalletClient();
   const contractAddress = normalizeAddress(options.contractAddress);
-  const winnerWallet = normalizeAddress(options.winnerWallet);
+
+  if (options.winners.length === 0) throw new Error("No winners provided");
+
+  const totalBps = options.winners.reduce((sum, w) => sum + w.shareBps, 0);
+  if (totalBps !== 10000) throw new Error(`Winner shares must sum to 10000, got ${totalBps}`);
+
+  const winnerAddresses = options.winners.map((w) => normalizeAddress(w.wallet));
+  const winnerShares = options.winners.map((w) => BigInt(w.shareBps));
 
   const finalized = await publicClient.readContract({
     address: contractAddress,
@@ -214,20 +227,12 @@ export async function finalizeHackathonOnChain(options: {
   });
   if (finalized) throw new Error("Hackathon contract is already finalized");
 
-  const winnerHasJoined = await publicClient.readContract({
-    address: contractAddress,
-    abi: escrowAbi,
-    functionName: "hasJoined",
-    args: [winnerWallet],
-  });
-  if (!winnerHasJoined) throw new Error("Winner wallet is not marked as joined on-chain");
-
   const txHash = await walletClient.writeContract({
     address: contractAddress,
     abi: escrowAbi,
     functionName: "finalize",
-    args: [winnerWallet],
-    account: walletClient.account,
+    args: [winnerAddresses, winnerShares],
+    account: walletClient.account!,
     chain: walletClient.chain,
   });
 
@@ -259,7 +264,7 @@ export async function deployHackathonEscrow(options: {
     functionName: "createHackathon",
     args: [options.entryFeeWei, options.deadlineUnix],
     value: options.fundingWei ?? BigInt(0),
-    account: walletClient.account,
+    account: walletClient.account!,
     chain: walletClient.chain,
   });
 
@@ -304,7 +309,10 @@ export async function verifySponsorFunding(options: {
   if (!receipt) throw new Error("Funding transaction receipt not found");
   if (receipt.status !== "success") throw new Error("Funding transaction failed on-chain");
 
-  if (!transaction.to || !sameAddress(transaction.to, contractAddr)) {
+  const fundedViaDeploy = !transaction.to && !!receipt.contractAddress && sameAddress(receipt.contractAddress, contractAddr);
+  const fundedViaTransfer = !!transaction.to && sameAddress(transaction.to, contractAddr);
+
+  if (!fundedViaDeploy && !fundedViaTransfer) {
     throw new Error("Funding transaction was not sent to the escrow contract");
   }
   if (!sameAddress(transaction.from, sponsorAddr)) {
@@ -326,7 +334,7 @@ export async function verifySponsorFunding(options: {
 
   // Verify platform organizer is set as contract owner
   const organizerWallet = getOrganizerWalletClient();
-  const platformAddress = normalizeAddress(organizerWallet.account.address);
+  const platformAddress = normalizeAddress(organizerWallet.account!.address);
   const onChainOwner = await publicClient.readContract({
     address: contractAddr,
     abi: escrowAbi,
