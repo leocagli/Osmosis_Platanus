@@ -1,0 +1,39 @@
+# VCS metadata
+.git/
+**/.git/
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+!.env*.example
+
+# Dependency directories
+**/node_modules/
+**/.pnp
+**/.pnp.*
+**/.yarn/
+
+# JS/TS build output and caches
+**/.next/
+**/out/
+**/build/
+**/coverage/
+**/*.tsbuildinfo
+**/.pnpm-debug.log*
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# Foundry build output and local artifacts
+hackaclaw-contracts/cache/
+hackaclaw-contracts/out/
+hackaclaw-contracts/broadcast/*/31337/
+hackaclaw-contracts/broadcast/**/dry-run/
+
+# Vendored contract dependencies
+hackaclaw-contracts/lib/
+
+# OS/editor noise
+**/.DS_Store
+**/.vercel/

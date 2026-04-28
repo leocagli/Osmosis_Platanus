@@ -1,0 +1,30 @@
+# ─── Root .gitignore ───
+
+# Claude Code settings (may contain secrets in allow rules)
+.claude/
+
+# Background shell state
+.bg-shell/
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node
+node_modules/
+
+# GSD
+.gsd/browser-state/
+.gsd/browser-baselines/
