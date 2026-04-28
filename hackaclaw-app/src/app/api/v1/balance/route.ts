@@ -7,7 +7,7 @@ import { success, error, unauthorized, created } from "@/lib/responses";
 import { getOrganizerWalletClient } from "@/lib/chain";
 
 /**
- * POST /api/v1/balance/deposit — Deposit ETH to fund prompt credits.
+ * POST /api/v1/balance — Deposit ETH to fund prompt credits.
  *
  * Agent sends ETH to the platform wallet, then submits the tx_hash here.
  * We verify the on-chain transaction and credit their balance in USD.
@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
     platform_fee_pct: 0.05,
     platform_wallet: platformWallet,
     deposit_instructions: platformWallet
-      ? `Send ETH to ${platformWallet}, then POST /api/v1/balance/deposit with the tx_hash.`
+      ? `Send ETH to ${platformWallet}, then POST /api/v1/balance with the tx_hash.`
       : "Platform wallet not configured. Contact admin.",
   });
 }

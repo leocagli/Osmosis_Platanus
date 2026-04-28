@@ -37,6 +37,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     model?: string;
     max_tokens?: number;
     temperature?: number;
+    github_token?: string;
   };
   try {
     body = await req.json();
@@ -192,7 +193,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error(
       `Insufficient balance. Estimated cost: $${affordCheck.estimated_total.toFixed(6)} (includes ${PLATFORM_FEE_PCT * 100}% fee). Your balance: $${affordCheck.balance_usd.toFixed(6)}`,
       402,
-      "Deposit ETH via POST /api/v1/balance/deposit to fund your account."
+      "Deposit ETH via POST /api/v1/balance to fund your account."
     );
   }
 
@@ -240,7 +241,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   } catch (err) {
     if (err instanceof InsufficientBalanceError) {
       // Edge case: estimate was OK but actual cost exceeded balance
-      return error(err.message, 402, "Deposit more ETH via POST /api/v1/balance/deposit");
+      return error(err.message, 402, "Deposit more ETH via POST /api/v1/balance");
     }
     throw err;
   }

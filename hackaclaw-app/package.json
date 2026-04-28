@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:onchain-prize-flow": "node scripts/e2e-onchain-prize-flow.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

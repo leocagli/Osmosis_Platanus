@@ -1,74 +1,171 @@
 import { supabaseAdmin } from "./supabase";
 import { generateCode } from "./llm";
 import { slugify } from "./github";
+import { fetchRepoForJudging, formatRepoForPrompt, parseGitHubUrl } from "./repo-fetcher";
 import { Hackathon, Submission } from "./types";
 
 export interface EvaluationResult {
   functionality_score: number;
   brief_compliance_score: number;
-  visual_quality_score: number;
-  cta_quality_score: number;
-  copy_clarity_score: number;
-  completeness_score: number;
   code_quality_score: number;
   architecture_score: number;
   innovation_score: number;
-  deploy_success_score: number;
+  completeness_score: number;
+  documentation_score: number;
+  testing_score: number;
+  security_score: number;
+  deploy_readiness_score: number;
   total_score: number;
   judge_feedback: string;
+}
+
+/**
+ * Build a judge system prompt that is fully personalized to the enterprise's
+ * problem description, judging criteria, rules, and challenge type.
+ */
+function buildJudgeSystemPrompt(hackathon: Hackathon): string {
+  // Parse enterprise context from judging_criteria (may contain JSON with enterprise context)
+  let enterpriseContext = "";
+  let customCriteria = "";
+
+  if (hackathon.judging_criteria) {
+    try {
+      const parsed = JSON.parse(hackathon.judging_criteria);
+      if (parsed.enterprise_problem) {
+        enterpriseContext = `\nORIGINAL ENTERPRISE PROBLEM:\n${parsed.enterprise_problem}\n`;
+      }
+      if (parsed.enterprise_requirements) {
+        enterpriseContext += `\nENTERPRISE REQUIREMENTS:\n${parsed.enterprise_requirements}\n`;
+      }
+      if (parsed.criteria_text) {
+        customCriteria = `\nCUSTOM JUDGING CRITERIA:\n${parsed.criteria_text}\n`;
+      }
+    } catch {
+      // Not JSON — treat as plain text criteria
+      customCriteria = `\nCUSTOM JUDGING CRITERIA:\n${hackathon.judging_criteria}\n`;
+    }
+  }
+
+  return `You are an elite software engineering judge for an AI agent hackathon on BuildersClaw.
+
+YOUR MISSION: Evaluate a code repository submission. You will receive the FULL source code of the submitted project. You must analyze the actual code quality, architecture, and whether it genuinely solves the stated problem.
+
+═══ HACKATHON CONTEXT ═══
+Title: ${hackathon.title}
+Challenge Type: ${hackathon.challenge_type || "general"}
+${enterpriseContext}
+CHALLENGE BRIEF (what the enterprise/organizer asked for):
+${hackathon.brief}
+
+${hackathon.description ? `ADDITIONAL DESCRIPTION:\n${hackathon.description}\n` : ""}
+${hackathon.rules ? `RULES & CONSTRAINTS:\n${hackathon.rules}\n` : ""}
+${customCriteria}
+
+═══ EVALUATION CRITERIA ═══
+Score each criterion 0-100. Be strict and fair. 100 = exceptional, 70 = good, 50 = mediocre, below 30 = failing.
+
+1. **functionality_score**: Does the code actually work? Does it implement the core features described in the brief?
+2. **brief_compliance_score**: How well does the submission address the specific problem/requirements stated in the challenge brief? This is the MOST IMPORTANT criterion.
+3. **code_quality_score**: Clean code, proper naming, no obvious bugs, follows language idioms and best practices.
+4. **architecture_score**: Good project structure, separation of concerns, appropriate patterns, scalability considerations.
+5. **innovation_score**: Creative approaches, clever solutions, use of modern tools/techniques, going beyond minimum requirements.
+6. **completeness_score**: Is the project complete or half-done? Are there TODOs, placeholder code, missing features?
+7. **documentation_score**: README quality, code comments where needed, setup instructions, API docs if applicable.
+8. **testing_score**: Are there tests? Test coverage? Do they test meaningful scenarios?
+9. **security_score**: No hardcoded secrets, input validation, proper auth patterns, no obvious vulnerabilities.
+10. **deploy_readiness_score**: Could this be deployed? Proper configs, environment handling, build scripts, CI/CD?
+
+═══ OUTPUT FORMAT ═══
+Return ONLY a valid JSON object (no markdown fences, no commentary):
+{
+  "functionality_score": <0-100>,
+  "brief_compliance_score": <0-100>,
+  "code_quality_score": <0-100>,
+  "architecture_score": <0-100>,
+  "innovation_score": <0-100>,
+  "completeness_score": <0-100>,
+  "documentation_score": <0-100>,
+  "testing_score": <0-100>,
+  "security_score": <0-100>,
+  "deploy_readiness_score": <0-100>,
+  "judge_feedback": "2-4 paragraph detailed feedback explaining scores, highlighting strengths, identifying weaknesses, and providing actionable improvement suggestions. Reference specific files and code when possible."
+}`;
+}
+
+/**
+ * Build the user prompt with the actual repository content.
+ */
+function buildJudgeUserPrompt(repoContent: string, submission: Submission): string {
+  const parts: string[] = [];
+
+  parts.push("═══ SUBMISSION TO EVALUATE ═══\n");
+
+  if (submission.preview_url) {
+    parts.push(`Submitted Repo URL: ${submission.preview_url}`);
+  }
+
+  // Parse build_log for repo_url and notes
+  try {
+    const meta = JSON.parse(submission.build_log || "{}");
+    if (meta.repo_url) parts.push(`Repository URL: ${meta.repo_url}`);
+    if (meta.notes) parts.push(`Submitter Notes: ${meta.notes}`);
+  } catch { /* ignore */ }
+
+  parts.push("\n═══ REPOSITORY SOURCE CODE ═══\n");
+  parts.push(repoContent);
+  parts.push("\n═══ END OF SUBMISSION ═══");
+  parts.push("\nEvaluate this submission now. Return ONLY the JSON object.");
+
+  return parts.join("\n");
+}
+
+/**
+ * Extract the repo URL from a submission.
+ * Priority: build_log.repo_url > build_log.project_url > preview_url
+ */
+function getSubmissionRepoUrl(submission: Submission): string | null {
+  // Try build_log first
+  try {
+    const meta = JSON.parse(submission.build_log || "{}");
+    if (meta.repo_url && parseGitHubUrl(meta.repo_url)) return meta.repo_url;
+    if (meta.project_url && parseGitHubUrl(meta.project_url)) return meta.project_url;
+  } catch { /* ignore */ }
+
+  // Try preview_url
+  if (submission.preview_url && parseGitHubUrl(submission.preview_url)) {
+    return submission.preview_url;
+  }
+
+  return null;
 }
 
 export async function judgeSubmission(
   submission: Submission,
   hackathon: Hackathon,
-  teamSlug?: string
+  teamSlug?: string,
 ): Promise<EvaluationResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY not configured for platform judging");
   }
 
-  const systemPrompt = `You are an expert software engineer, UI/UX designer, and AI hackathon judge.
-You are evaluating a submission for a hackathon.
+  // ── Fetch repository code ──
+  const repoUrl = getSubmissionRepoUrl(submission);
+  let repoContent: string;
 
-HACKATHON CONTEXT:
-Title: ${hackathon.title}
-Brief: ${hackathon.brief}
-Description: ${hackathon.description || "N/A"}
-Rules: ${hackathon.rules || "N/A"}
-Judging Criteria: ${hackathon.judging_criteria || "N/A"}
-${hackathon.github_repo && teamSlug ? `GitHub Repository: ${hackathon.github_repo}\nTeam Folder: ${hackathon.github_repo}/tree/main/${teamSlug}\n(Note: You can use these links to verify if code was properly deployed/structured if relevant to the criteria)` : ""}
+  if (repoUrl) {
+    const analysis = await fetchRepoForJudging(repoUrl, 40, 200_000);
+    repoContent = formatRepoForPrompt(analysis);
+  } else if (submission.html_content) {
+    // Fallback: inline HTML content (legacy submissions)
+    repoContent = `[LEGACY SUBMISSION - Inline HTML Only]\n\n\`\`\`html\n${submission.html_content}\n\`\`\``;
+  } else {
+    repoContent = "[ERROR] No repository URL or code content provided in this submission.";
+  }
 
-Your task is to analyze the provided submission details, including its source code (HTML/JS/CSS), and grade it on a scale of 0 to 100 for several criteria.
-You should be a strict judge. 100 is absolute perfection. 50 is average. 0 is missing or broken.
-
-Please provide your evaluation in strict JSON format matching exactly this structure (no markdown fences, just the JSON object):
-{
-  "functionality_score": 0,
-  "brief_compliance_score": 0,
-  "visual_quality_score": 0,
-  "cta_quality_score": 0,
-  "copy_clarity_score": 0,
-  "completeness_score": 0,
-  "code_quality_score": 0,
-  "architecture_score": 0,
-  "innovation_score": 0,
-  "deploy_success_score": 0,
-  "judge_feedback": "Detailed explanation of the scores, highlighting strong points and areas for improvement."
-}
-`;
-
-  const userPrompt = `SUBMISSION DETAILS:
-Project HTML Source Code:
-\`\`\`html
-${submission.html_content || "No HTML provided"}
-\`\`\`
-
-Preview URL: ${submission.preview_url || `/api/v1/submissions/${submission.id}/preview`}
-
-Note: Because you are an AI, you cannot visit the live preview URL, but you can see the raw HTML provided above. Assume the deploy success is high if the HTML is well-formed and valid.
-
-Evaluate the submission now and return ONLY the JSON object.`;
+  // ── Build prompts contextualized to the enterprise's problem ──
+  const systemPrompt = buildJudgeSystemPrompt(hackathon);
+  const userPrompt = buildJudgeUserPrompt(repoContent, submission);
 
   try {
     const result = await generateCode({
@@ -76,47 +173,51 @@ Evaluate the submission now and return ONLY the JSON object.`;
       apiKey,
       systemPrompt,
       userPrompt,
-      maxTokens: 1024,
-      temperature: 0.2, // Low temperature for more consistent, deterministic judging
+      maxTokens: 2048,
+      temperature: 0.15, // Very low for consistent, deterministic judging
     });
 
     const jsonStr = result.text.replace(/```json/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(jsonStr) as Omit<EvaluationResult, "total_score">;
 
-    // Calculate total score (simple average of all 10 criteria)
-    const total_score = Math.round(
-      (parsed.functionality_score +
-        parsed.brief_compliance_score +
-        parsed.visual_quality_score +
-        parsed.cta_quality_score +
-        parsed.copy_clarity_score +
-        parsed.completeness_score +
-        parsed.code_quality_score +
-        parsed.architecture_score +
-        parsed.innovation_score +
-        parsed.deploy_success_score) /
-        10
-    );
-
-    return {
-      ...parsed,
-      total_score,
+    // Weighted total score: brief_compliance is worth 2x
+    const weights = {
+      functionality_score: 1.5,
+      brief_compliance_score: 2.0,  // Most important
+      code_quality_score: 1.0,
+      architecture_score: 1.0,
+      innovation_score: 0.8,
+      completeness_score: 1.2,
+      documentation_score: 0.6,
+      testing_score: 0.8,
+      security_score: 0.8,
+      deploy_readiness_score: 0.7,
     };
+
+    const weightedSum = Object.entries(weights).reduce((sum, [key, weight]) => {
+      const score = (parsed as unknown as Record<string, number>)[key] || 0;
+      return sum + score * weight;
+    }, 0);
+
+    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+    const total_score = Math.round(weightedSum / totalWeight);
+
+    return { ...parsed, total_score };
   } catch (error: unknown) {
     console.error("Judging failed for submission", submission.id, error);
     const errMsg = error instanceof Error ? error.message : String(error);
-    // Fallback zero scores if parsing fails or API errors
+
     return {
       functionality_score: 0,
       brief_compliance_score: 0,
-      visual_quality_score: 0,
-      cta_quality_score: 0,
-      copy_clarity_score: 0,
-      completeness_score: 0,
       code_quality_score: 0,
       architecture_score: 0,
       innovation_score: 0,
-      deploy_success_score: 0,
+      completeness_score: 0,
+      documentation_score: 0,
+      testing_score: 0,
+      security_score: 0,
+      deploy_readiness_score: 0,
       total_score: 0,
       judge_feedback: "Error evaluating submission: " + errMsg,
     };
@@ -137,25 +238,56 @@ export async function judgeHackathon(hackathonId: string) {
     .select("*, teams(name)")
     .eq("hackathon_id", hackathonId);
 
-  await supabaseAdmin.from("hackathons").update({ status: "judging", internal_status: "judging" }).eq("id", hackathonId);
+  await supabaseAdmin
+    .from("hackathons")
+    .update({ status: "judging", internal_status: "judging" })
+    .eq("id", hackathonId);
 
-  // Parse existing judging metadata safely to attach the winner output
-  const updatedMeta = hackathon.judging_criteria ? typeof hackathon.judging_criteria === "string" ? JSON.parse(hackathon.judging_criteria) : hackathon.judging_criteria : {};
+  // Parse existing judging metadata
+  let updatedMeta: Record<string, unknown> = {};
+  if (hackathon.judging_criteria) {
+    try {
+      updatedMeta = typeof hackathon.judging_criteria === "string"
+        ? JSON.parse(hackathon.judging_criteria)
+        : hackathon.judging_criteria;
+    } catch { /* ignore */ }
+  }
 
   if (!submissions || submissions.length === 0) {
-    // 0 submissions: no winner, set completion directly
-    updatedMeta.notes = "Ended with 0 participants.";
-    await supabaseAdmin.from("hackathons").update({ 
-      status: "completed", 
-      internal_status: "completed", 
-      judging_criteria: updatedMeta 
-    }).eq("id", hackathonId);
+    updatedMeta.notes = "Ended with 0 submissions.";
+    await supabaseAdmin
+      .from("hackathons")
+      .update({ status: "completed", internal_status: "completed", judging_criteria: updatedMeta })
+      .eq("id", hackathonId);
     return true;
   }
 
   if (submissions.length === 1) {
-    // 1 submission: automatic win
+    // 1 submission: still judge it for feedback, but auto-win
     const winningSub = submissions[0];
+    const teamData = winningSub.teams as { name?: string } | undefined;
+    const teamSlug = teamData?.name ? slugify(teamData.name) : undefined;
+
+    // Still run judging for the feedback
+    const result = await judgeSubmission(winningSub, hackathon, teamSlug);
+
+    await supabaseAdmin.from("evaluations").upsert([{
+      submission_id: winningSub.id,
+      functionality_score: result.functionality_score,
+      brief_compliance_score: result.brief_compliance_score,
+      code_quality_score: result.code_quality_score,
+      architecture_score: result.architecture_score,
+      innovation_score: result.innovation_score,
+      completeness_score: result.completeness_score,
+      documentation_score: result.documentation_score,
+      testing_score: result.testing_score,
+      security_score: result.security_score,
+      deploy_readiness_score: result.deploy_readiness_score,
+      total_score: result.total_score,
+      judge_feedback: result.judge_feedback,
+      raw_response: JSON.stringify(result),
+    }], { onConflict: "submission_id" });
+
     const { data: teamMembers } = await supabaseAdmin
       .from("team_members")
       .select("agent_id")
@@ -166,35 +298,35 @@ export async function judgeHackathon(hackathonId: string) {
     updatedMeta.winner_agent_id = teamMembers?.agent_id;
     updatedMeta.winner_team_id = winningSub.team_id;
     updatedMeta.finalized_at = new Date().toISOString();
-    updatedMeta.notes = "Won by default (only participant).";
+    updatedMeta.notes = "Won by default (only participant). Judged for feedback.";
 
-    await supabaseAdmin.from("hackathons").update({ 
-      status: "completed", 
-      internal_status: "completed", 
-      judging_criteria: updatedMeta 
-    }).eq("id", hackathonId);
+    await supabaseAdmin
+      .from("hackathons")
+      .update({ status: "completed", internal_status: "completed", judging_criteria: updatedMeta })
+      .eq("id", hackathonId);
     return true;
   }
 
+  // Multiple submissions: judge all and rank
   const evaluationsToUpsert = [];
 
-  for (const submission of submissions || []) {
+  for (const submission of submissions) {
     const teamData = submission.teams as { name?: string } | undefined;
     const teamSlug = teamData?.name ? slugify(teamData.name) : undefined;
     const result = await judgeSubmission(submission, hackathon, teamSlug);
-    
+
     evaluationsToUpsert.push({
       submission_id: submission.id,
       functionality_score: result.functionality_score,
       brief_compliance_score: result.brief_compliance_score,
-      visual_quality_score: result.visual_quality_score,
-      cta_quality_score: result.cta_quality_score,
-      copy_clarity_score: result.copy_clarity_score,
-      completeness_score: result.completeness_score,
       code_quality_score: result.code_quality_score,
       architecture_score: result.architecture_score,
       innovation_score: result.innovation_score,
-      deploy_success_score: result.deploy_success_score,
+      completeness_score: result.completeness_score,
+      documentation_score: result.documentation_score,
+      testing_score: result.testing_score,
+      security_score: result.security_score,
+      deploy_readiness_score: result.deploy_readiness_score,
       total_score: result.total_score,
       judge_feedback: result.judge_feedback,
       raw_response: JSON.stringify(result),
@@ -202,48 +334,36 @@ export async function judgeHackathon(hackathonId: string) {
   }
 
   if (evaluationsToUpsert.length > 0) {
-    // Upsert on submission_id
-    await supabaseAdmin.from("evaluations").upsert(evaluationsToUpsert, { onConflict: "submission_id" });
+    await supabaseAdmin
+      .from("evaluations")
+      .upsert(evaluationsToUpsert, { onConflict: "submission_id" });
   }
 
-  // Determine winner
-  let winner = null;
-  if (evaluationsToUpsert.length > 0) {
-    evaluationsToUpsert.sort((a, b) => b.total_score - a.total_score);
-    const winningEval = evaluationsToUpsert[0];
-    const winningSub = submissions?.find((s) => s.id === winningEval.submission_id);
-    if (winningSub) {
-      // Find the leader of the winning team
-      const { data: teamMembers } = await supabaseAdmin
-        .from("team_members")
-        .select("agent_id")
-        .eq("team_id", winningSub.team_id)
-        .eq("role", "leader")
-        .single();
-      
-      const winnerAgentId = teamMembers?.agent_id;
-      
-      if (winnerAgentId) {
-        winner = {
-          winner_agent_id: winnerAgentId,
-          winner_team_id: winningSub.team_id,
-          finalized_at: new Date().toISOString(),
-          notes: "Automatically judged by AI",
-        };
-      }
+  // Determine winner (highest total_score)
+  evaluationsToUpsert.sort((a, b) => b.total_score - a.total_score);
+  const winningEval = evaluationsToUpsert[0];
+  const winningSub = submissions.find((s) => s.id === winningEval.submission_id);
+
+  if (winningSub) {
+    const { data: teamMembers } = await supabaseAdmin
+      .from("team_members")
+      .select("agent_id")
+      .eq("team_id", winningSub.team_id)
+      .eq("role", "leader")
+      .single();
+
+    if (teamMembers?.agent_id) {
+      updatedMeta.winner_agent_id = teamMembers.agent_id;
+      updatedMeta.winner_team_id = winningSub.team_id;
+      updatedMeta.finalized_at = new Date().toISOString();
+      updatedMeta.notes = "Automatically judged by AI. Code repositories were analyzed.";
     }
   }
 
-  if (winner) {
-    Object.assign(updatedMeta, winner);
-  }
-
-  // Update hackathon status to completed and set winner
-  await supabaseAdmin.from("hackathons").update({ 
-    status: "completed", 
-    internal_status: "completed", 
-    judging_criteria: updatedMeta 
-  }).eq("id", hackathonId);
+  await supabaseAdmin
+    .from("hackathons")
+    .update({ status: "completed", internal_status: "completed", judging_criteria: updatedMeta })
+    .eq("id", hackathonId);
 
   return true;
 }

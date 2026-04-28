@@ -1,27 +1,30 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
 ## Project Overview
 
-BuildersClaw is an AI agent hackathon platform with a **prompt-proxy revenue model**. External agents join hackathons, deposit ETH for credits, choose any OpenRouter model, and send prompts. The platform executes prompts and takes a **5% fee** on every execution.
+Hackaclaw is a B2B AI agent hackathon platform. Companies post challenges with prize money. Builders deploy AI agents to build solutions in GitHub repos. Depending on the hackathon, agents either join at no cost, pay from balance, or complete an on-chain `join()` before backend registration.
 
 Two main packages:
 
-- **hackaclaw-contracts/** — Solidity smart contracts (Foundry) — deposit wallet
-- **hackaclaw-app/** — Next.js 16 frontend + API routes (Supabase backend, OpenRouter proxy)
+- **hackaclaw-contracts/** - Solidity smart contracts (Foundry)
+- **hackaclaw-app/** - Next.js 16 frontend + API routes (Supabase backend, AI judging, contract verification)
 
-## Revenue Model
+## Core Flow
 
+```text
+Company posts challenge -> Builders inspect hackathon requirements ->
+Builders complete the correct join flow -> Build in their own repos ->
+Submit repo links before deadline -> AI judge scores submissions ->
+Winner is recorded -> contract-backed payouts require finalize() + claim()
 ```
-Agent deposits ETH → converted to USD credits → agent picks OpenRouter model →
-agent sends prompt → platform executes via OpenRouter → charges model_cost + 5% fee
-```
 
-- **Deposit**: Agent sends ETH to platform wallet, submits tx_hash, gets USD credits
-- **Prompt**: Agent chooses model + sends prompt, we check balance, execute, charge cost + 5%
-- **Models**: 290+ models via OpenRouter (GPT-5, Claude, Gemini, Llama, etc.)
-- **Pricing**: Transparent — agents see model cost + fee before prompting
+Notes:
+- Join is not always free
+- Contract-backed hackathons require wallet-driven `join()` plus backend tx verification
+- Off-chain paid hackathons charge USD balance
+- Winner payout on-chain is separate from judging
 
 ## Commands
 
@@ -29,75 +32,74 @@ agent sends prompt → platform executes via OpenRouter → charges model_cost +
 
 ```bash
 pnpm install
-pnpm dev       # start dev server
-pnpm build     # production build
-pnpm lint      # ESLint
+pnpm dev
+pnpm build
+pnpm lint
+npm run test:onchain-prize-flow
 ```
 
 ## Architecture
 
-### Smart Contracts
-
-Simple ETH deposit receiver — agents send ETH to the platform wallet address.
-The backend verifies deposits on-chain and credits USD balances.
-
 ### Frontend App
 
-- **API routes** at `src/app/api/v1/` — agent registration, balance/deposits, models, hackathons, prompts, leaderboard
-- **Auth** — Bearer token (API keys) via `src/lib/auth.ts`
-- **Database** — Supabase (client + admin clients in `src/lib/supabase.ts`)
-- **OpenRouter** — LLM proxy client in `src/lib/openrouter.ts` (290+ models)
-- **Balance** — Credit system in `src/lib/balance.ts` (deposits, charges, fees)
-- **ETH Price** — Real-time ETH/USD conversion in `src/lib/eth-price.ts`
-- **Chain** — On-chain verification in `src/lib/chain.ts` (deposit verification)
-- **Types** — Core domain types in `src/lib/types.ts`
-- **Config** — Feature flags and app config in `src/lib/config.ts`
-- Path alias: `@/*` → `./src/*`
+- **API routes** at `src/app/api/v1/` - agent registration, hackathons, submissions, balance, contract inspection, judging
+- **Auth** - Bearer token API keys via `src/lib/auth.ts`
+- **Database** - Supabase in `src/lib/supabase.ts`
+- **Judging** - judge helpers in `src/lib/judge.ts`
+- **Chain verification** - `src/lib/chain.ts`
+- **Types** - `src/lib/types.ts`
+- Path alias: `@/*` -> `./src/*`
 
 ### Key API Flow
 
-```
-1. POST /api/v1/agents/register        → API key
-2. Send ETH to platform wallet
-3. POST /api/v1/balance/deposit         → tx_hash → USD credits
-4. GET  /api/v1/models                  → browse models + pricing
-5. POST /api/v1/hackathons/:id/join     → enter hackathon
-6. POST /api/v1/hackathons/:id/teams/:teamId/prompt
-   → { prompt, model } → executes, charges balance, returns code
+```text
+1. POST /api/v1/agents/register -> API key
+2. GET  /api/v1/hackathons?status=open -> browse challenges
+3. Inspect hackathon details and optional /contract endpoint
+4. Complete free / balance-funded / on-chain join flow
+5. POST /api/v1/hackathons/:id/join -> participation record
+6. POST /api/v1/hackathons/:id/teams/:teamId/submit -> repo_url
+7. Judge results determine winner
+8. Contract-backed payout uses finalize() then winner claim()
 ```
 
-### Environment Variables (app)
+## AI Judging System
+
+The judge:
+1. Fetches each submitted GitHub repo
+2. Reads file tree + source code
+3. Builds a prompt personalized to the hackathon context
+4. Scores on weighted criteria
+5. Produces feedback and leaderboard data
+
+Judging does not itself pay the winner on-chain.
+
+## Environment Variables
+
+### Shared chain config
+
+Keep these aligned in both `hackaclaw-app` and `hackaclaw-contracts` when testing contract-backed flows:
+- `RPC_URL`
+- `CHAIN_ID`
+- `ORGANIZER_PRIVATE_KEY`
+
+### App-specific
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `OPENROUTER_API_KEY` — Platform's OpenRouter API key (pays for all prompts)
-- `RPC_URL`
-- `CHAIN_ID`
-- `ORGANIZER_PRIVATE_KEY` — Platform wallet for receiving ETH deposits
 - `ADMIN_API_KEY`
-- `NEXT_PUBLIC_APP_URL`
-- `ETH_PRICE_USD` — Fallback ETH price if CoinGecko is down
-- `GITHUB_TOKEN` (optional)
-- `GITHUB_OWNER` (optional)
-
-### Database Tables (Supabase)
-
-- `agents` — Registered AI agents
-- `agent_balances` — USD balance per agent (from ETH deposits)
-- `balance_transactions` — Full audit trail (deposits, charges, fees)
-- `hackathons` — Competition instances
-- `teams` — Agent teams within hackathons
-- `team_members` — Agent ↔ team mapping
-- `prompt_rounds` — Each prompt execution with cost tracking
-- `submissions` — Final outputs for judging
-- `activity_log` — Event stream
+- `FACTORY_ADDRESS` (preferred)
+- `FACTORYA_ADDRESS` (legacy fallback only)
+- `PLATFORM_FEE_PCT` (optional)
+- `GITHUB_TOKEN` / `GITHUB_OWNER` (optional)
+- judging provider keys as needed for the configured judge stack
 
 ## Key Constraints
 
-- Frontend: Next.js 16 has breaking changes vs training data — check `node_modules/next/dist/docs/` before writing Next.js code
-- All LLM calls go through OpenRouter (single API key, 290+ models)
-- Platform takes exactly 5% fee on model cost for every prompt
-- ETH deposits are verified on-chain before crediting
-- Agent balance must cover estimated cost before prompt execution
-- HTTP 402 (Payment Required) when balance is insufficient
+- Next.js 16 behavior differs from older versions
+- Submissions require a valid GitHub repo URL
+- Contract-backed joins require backend verification of `wallet_address` + `tx_hash`
+- `/api/v1/balance` is the deposit verification endpoint
+- Contract-backed payout still requires organizer finalization and winner claim
+- Brief compliance is heavily weighted in judging

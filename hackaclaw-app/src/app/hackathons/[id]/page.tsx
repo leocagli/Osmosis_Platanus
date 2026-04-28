@@ -33,6 +33,8 @@ interface RankedTeam {
   members: TeamMember[];
   github_repo: string | null;
   team_slug: string | null;
+  repo_url: string | null;
+  project_url: string | null;
 }
 
 interface HackathonDetail {
@@ -643,6 +645,13 @@ function ShootingStars() {
 /* ─── Building Floor ─── */
 
 function teamProjectUrl(team: RankedTeam): string | null {
+  // Priority: repo_url (submitted repo) > project_url > github_repo subfolder > preview
+  if (team.repo_url) {
+    return team.repo_url;
+  }
+  if (team.project_url) {
+    return team.project_url;
+  }
   if (team.github_repo && team.team_slug) {
     return `${team.github_repo}/tree/main/${team.team_slug}`;
   }
@@ -771,7 +780,7 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
               textShadow: "1px 1px 0 rgba(0,0,0,0.8)",
             }}
           >
-            {team.github_repo ? "VIEW REPO ↗" : "VIEW PROJECT ↗"}
+            {team.repo_url ? "VIEW REPO ↗" : team.github_repo ? "VIEW REPO ↗" : "VIEW PROJECT ↗"}
           </div>
         )}
       </div>

@@ -4,12 +4,16 @@ import { authenticateRequest } from "@/lib/auth";
 import { sanitizeString, sanitizeUrl, serializeSubmissionMeta, toPublicHackathonStatus } from "@/lib/hackathons";
 import { error, notFound, success, unauthorized } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
+import { parseGitHubUrl } from "@/lib/repo-fetcher";
 
 type RouteParams = { params: Promise<{ id: string; teamId: string }> };
 
 /**
  * POST /api/v1/hackathons/:id/teams/:teamId/submit
- * Store a project URL submission for a single-agent team.
+ *
+ * Submit a GitHub repository link for judging.
+ * The repo_url is REQUIRED — the judge will fetch and analyze the actual code.
+ * Must be submitted before the hackathon ends_at deadline.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const agent = await authenticateRequest(req);
@@ -17,12 +21,28 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const { id: hackathonId, teamId } = await params;
 
-  const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
+  // ── Fetch hackathon ──
+  const { data: hackathon } = await supabaseAdmin
+    .from("hackathons")
+    .select("*")
+    .eq("id", hackathonId)
+    .single();
+
   if (!hackathon) return notFound("Hackathon");
+
   if (toPublicHackathonStatus(hackathon.status) !== "open") {
     return error("Hackathon is not open for submissions", 400);
   }
 
+  // ── Check deadline ──
+  if (hackathon.ends_at) {
+    const deadline = new Date(hackathon.ends_at).getTime();
+    if (Date.now() > deadline) {
+      return error("Submission deadline has passed", 400);
+    }
+  }
+
+  // ── Verify team membership ──
   const { data: team } = await supabaseAdmin
     .from("teams")
     .select("*")
@@ -41,18 +61,28 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   if (!membership) return error("You are not the participant for this team", 403);
 
+  // ── Parse body ──
   const body = await req.json().catch(() => ({}));
+
   const requestedAgentId = sanitizeString(body.agent_id, 64);
   if (requestedAgentId && requestedAgentId !== agent.id) {
     return error("agent_id must match the authenticated agent", 403);
   }
 
-  const projectUrl = sanitizeUrl(body.project_url);
   const repoUrl = sanitizeUrl(body.repo_url);
+  const projectUrl = sanitizeUrl(body.project_url);
   const notes = sanitizeString(body.notes, 4000);
 
-  if (!projectUrl) return error("project_url is required and must be a valid http(s) URL", 400);
+  // ── Validate repo_url (REQUIRED, must be a valid GitHub URL) ──
+  if (!repoUrl) {
+    return error("repo_url is required — submit a GitHub repository link", 400);
+  }
 
+  if (!parseGitHubUrl(repoUrl)) {
+    return error("repo_url must be a valid GitHub repository URL (e.g. https://github.com/user/repo)", 400);
+  }
+
+  // ── Check for existing submission (allow updates before deadline) ──
   const { data: existingSub } = await supabaseAdmin
     .from("submissions")
     .select("id")
@@ -60,19 +90,59 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     .eq("hackathon_id", hackathonId)
     .single();
 
-  if (existingSub) return error("Team has already submitted", 409);
-
-  const submissionId = uuid();
   const timestamp = new Date().toISOString();
+
+  if (existingSub) {
+    // Update existing submission (re-submit with new repo link)
+    await supabaseAdmin
+      .from("submissions")
+      .update({
+        preview_url: repoUrl,
+        build_log: serializeSubmissionMeta({
+          project_url: projectUrl || repoUrl,
+          repo_url: repoUrl,
+          notes,
+          submitted_by_agent_id: agent.id,
+        }),
+        completed_at: timestamp,
+      })
+      .eq("id", existingSub.id);
+
+    await supabaseAdmin.from("activity_log").insert({
+      id: uuid(),
+      hackathon_id: hackathonId,
+      team_id: teamId,
+      agent_id: agent.id,
+      event_type: "submission_updated",
+      event_data: {
+        submission_id: existingSub.id,
+        repo_url: repoUrl,
+        project_url: projectUrl,
+      },
+    });
+
+    return success({
+      submission_id: existingSub.id,
+      status: "completed",
+      repo_url: repoUrl,
+      project_url: projectUrl,
+      notes,
+      updated: true,
+      message: "Submission updated. You can resubmit until the deadline.",
+    });
+  }
+
+  // ── Create new submission ──
+  const submissionId = uuid();
 
   await supabaseAdmin.from("submissions").insert({
     id: submissionId,
     team_id: teamId,
     hackathon_id: hackathonId,
     status: "completed",
-    preview_url: projectUrl,
+    preview_url: repoUrl,
     build_log: serializeSubmissionMeta({
-      project_url: projectUrl,
+      project_url: projectUrl || repoUrl,
       repo_url: repoUrl,
       notes,
       submitted_by_agent_id: agent.id,
@@ -81,7 +151,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     completed_at: timestamp,
   });
 
-  await supabaseAdmin.from("teams").update({ status: "submitted" }).eq("id", teamId);
+  await supabaseAdmin
+    .from("teams")
+    .update({ status: "submitted" })
+    .eq("id", teamId);
 
   await supabaseAdmin.from("activity_log").insert({
     id: uuid(),
@@ -91,16 +164,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     event_type: "submission_received",
     event_data: {
       submission_id: submissionId,
-      project_url: projectUrl,
       repo_url: repoUrl,
+      project_url: projectUrl,
     },
   });
 
   return success({
     submission_id: submissionId,
     status: "completed",
-    project_url: projectUrl,
     repo_url: repoUrl,
+    project_url: projectUrl,
     notes,
+    message: "Submission received. You can update it by resubmitting before the deadline.",
   });
 }

@@ -1,5 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getContractPrizePool } from "@/lib/chain";
 import type { Agent } from "@/lib/types";
 
 const META_VERSION = "hackaclaw-mvp-v1";
@@ -10,6 +11,7 @@ type JsonObject = Record<string, unknown>;
 export interface HackathonMeta {
   chain_id: number | null;
   contract_address: string | null;
+  sponsor_address: string | null;
   criteria_text: string | null;
   winner_agent_id: string | null;
   winner_team_id: string | null;
@@ -53,6 +55,7 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
   const base: HackathonMeta = {
     chain_id: null,
     contract_address: null,
+    sponsor_address: null,
     criteria_text: null,
     winner_agent_id: null,
     winner_team_id: null,
@@ -73,6 +76,7 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     return {
       chain_id: typeof parsed.chain_id === "number" ? parsed.chain_id : null,
       contract_address: sanitizeString(parsed.contract_address, 128),
+      sponsor_address: sanitizeString(parsed.sponsor_address, 128),
       criteria_text: sanitizeString(parsed.criteria_text, 4000),
       winner_agent_id: sanitizeString(parsed.winner_agent_id, 64),
       winner_team_id: sanitizeString(parsed.winner_team_id, 64),
@@ -91,6 +95,7 @@ export function serializeHackathonMeta(meta: Partial<HackathonMeta>): string {
     _format: META_VERSION,
     chain_id: meta.chain_id ?? null,
     contract_address: meta.contract_address ?? null,
+    sponsor_address: meta.sponsor_address ?? null,
     criteria_text: meta.criteria_text ?? null,
     winner_agent_id: meta.winner_agent_id ?? null,
     winner_team_id: meta.winner_team_id ?? null,
@@ -157,6 +162,7 @@ export function formatHackathon(hackathon: JsonObject) {
     status: toPublicHackathonStatus(hackathon.status),
     judging_criteria: meta.criteria_text,
     contract_address: meta.contract_address,
+    chain_id: meta.chain_id,
     winner: meta.winner_agent_id
       ? {
           agent_id: meta.winner_agent_id,
@@ -164,6 +170,10 @@ export function formatHackathon(hackathon: JsonObject) {
           notes: meta.finalization_notes,
           scores: meta.scores,
           finalized_at: meta.finalized_at,
+          finalize_tx_hash: meta.finalize_tx_hash,
+          claim_instructions: meta.contract_address
+            ? "Call claim() on the contract from your winning wallet. See GET /api/v1/hackathons/:id/contract for ABI and details."
+            : null,
         }
       : null,
   };
@@ -180,9 +190,10 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
   platform_cut_pct: number;
   platform_cut: number;
   prize_pool: number;
+  sponsored: boolean;
 }> {
   const { data: hackathon } = await supabaseAdmin
-    .from("hackathons").select("entry_fee").eq("id", hackathonId).single();
+    .from("hackathons").select("entry_fee, judging_criteria").eq("id", hackathonId).single();
 
   const entryFee = hackathon?.entry_fee ?? 0;
 
@@ -192,8 +203,33 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
     .eq("hackathon_id", hackathonId);
 
   const participantCount = count || 0;
+
+  // Sponsored mode: entry_fee is 0 and contract holds the bounty
+  if (entryFee === 0) {
+    const meta = parseHackathonMeta(hackathon?.judging_criteria);
+    let prizePool = 0;
+    if (meta.contract_address) {
+      try {
+        const balanceWei = await getContractPrizePool(meta.contract_address);
+        prizePool = Number(balanceWei) / 1e18;
+      } catch {
+        // Fallback to DB prize_pool if chain is unreachable
+      }
+    }
+    return {
+      entry_fee: 0,
+      participant_count: participantCount,
+      total_pot: prizePool,
+      platform_cut_pct: 0,
+      platform_cut: 0,
+      prize_pool: prizePool,
+      sponsored: true,
+    };
+  }
+
+  // Paid mode: prize = entry fees minus 10% platform cut
   const totalPot = entryFee * participantCount;
-  const platformCutPct = 0.10; // 10% platform cut on prize
+  const platformCutPct = 0.10;
   const platformCut = totalPot * platformCutPct;
   const prizePool = totalPot - platformCut;
 
@@ -204,6 +240,7 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
     platform_cut_pct: platformCutPct,
     platform_cut: platformCut,
     prize_pool: Math.max(0, prizePool),
+    sponsored: false,
   };
 }
 

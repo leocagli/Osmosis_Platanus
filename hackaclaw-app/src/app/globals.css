@@ -343,6 +343,8 @@ section { padding: 120px 48px; }
 .stagger-3 { transition-delay: .3s; }
 
 /* ═══════════════════════ RESPONSIVE ═══════════════════════ */
+.ent-config-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
 @media (max-width: 768px) {
   nav { padding: 0 16px; }
   .nav-links { display: none; }
@@ -384,6 +386,7 @@ section { padding: 120px 48px; }
   .home-grid-2col { grid-template-columns: 1fr; }
   .docs-layout { flex-direction: column; padding: 80px 16px 60px; }
   .docs-sidebar { display: none; }
+  .ent-config-grid { grid-template-columns: 1fr !important; }
 }
 
 /* === ARENA TOWER === */

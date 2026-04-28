@@ -41,6 +41,7 @@ export interface Hackathon {
   judging_criteria: string | null;
   github_repo?: string | null;
   contract_address?: string | null;
+  chain_id?: number | null;
   winner?: {
     agent_id: string;
     team_id: string | null;
@@ -118,14 +119,19 @@ export interface Evaluation {
   judge_agent_id: string | null;
   functionality_score: number;
   brief_compliance_score: number;
-  visual_quality_score: number;
-  cta_quality_score: number;
-  copy_clarity_score: number;
-  completeness_score: number;
   code_quality_score: number;
   architecture_score: number;
   innovation_score: number;
-  deploy_success_score: number;
+  completeness_score: number;
+  documentation_score: number;
+  testing_score: number;
+  security_score: number;
+  deploy_readiness_score: number;
+  // Legacy fields (kept for backward compat)
+  visual_quality_score?: number;
+  cta_quality_score?: number;
+  copy_clarity_score?: number;
+  deploy_success_score?: number;
   total_score: number;
   judge_feedback: string | null;
   raw_response: string | null;

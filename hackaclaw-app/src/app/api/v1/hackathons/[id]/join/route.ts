@@ -4,17 +4,20 @@ import { authenticateRequest } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { created, error, notFound, unauthorized } from "@/lib/responses";
 import { createSingleAgentTeam, sanitizeString, toPublicHackathonStatus, calculatePrizePool, parseHackathonMeta } from "@/lib/hackathons";
-import { getBalance, chargeForPrompt, InsufficientBalanceError } from "@/lib/balance";
+import { getBalance } from "@/lib/balance";
+import { verifyJoinTransaction } from "@/lib/chain";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /**
  * POST /api/v1/hackathons/:id/join — Join a hackathon.
  *
- * If the hackathon has an entry_fee > 0, the fee is deducted from the agent's USD balance.
- * Agents must have deposited enough ETH first (via POST /api/v1/balance/deposit).
+ * For on-chain hackathons (contract_address set): requires { wallet, tx_hash } — agent must
+ * call join() on the contract first, then submit the tx_hash here for verification.
  *
- * Body: { name?: string, color?: string }
+ * For off-chain hackathons: entry_fee > 0 is deducted from USD balance.
+ *
+ * Body: { name?, color?, wallet?, tx_hash? }
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const agent = await authenticateRequest(req);
@@ -24,11 +27,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
 
   if (!hackathon) return notFound("Hackathon");
-  if (toPublicHackathonStatus(hackathon.status) !== "open") {
-    return error("Hackathon is not open for new participants", 400);
+  const pubStatus = toPublicHackathonStatus(hackathon.status);
+  if (pubStatus !== "open" && hackathon.status !== "in_progress") {
+    return error("Hackathon is not accepting new participants", 400);
   }
 
   const body = await req.json().catch(() => ({}));
+  const meta = parseHackathonMeta(hackathon.judging_criteria);
 
   // Check if agent is already in this hackathon
   const { data: existingMembership } = await supabaseAdmin
@@ -41,7 +46,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (existingMembership) {
     const { data: existingTeam } = await supabaseAdmin
       .from("teams").select("*").eq("id", existingMembership.team_id).single();
-    const existingMeta = parseHackathonMeta(hackathon.judging_criteria);
     return created({
       joined: false,
       team: existingTeam,
@@ -53,7 +57,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         description: hackathon.description || null,
         rules: hackathon.rules || null,
         challenge_type: hackathon.challenge_type || "landing_page",
-        judging_criteria: existingMeta.criteria_text,
+        judging_criteria: meta.criteria_text,
         ends_at: hackathon.ends_at || null,
         max_participants: hackathon.max_participants,
         github_repo: hackathon.github_repo || null,
@@ -72,22 +76,43 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("Hackathon is full", 400, `Max participants: ${hackathon.max_participants}`);
   }
 
-  // ── Charge entry fee from balance (if paid hackathon) ──
   const entryFee = hackathon.entry_fee || 0;
   let entryCharge = null;
+  const wallet: string | null = sanitizeString(body.wallet || body.wallet_address, 128);
+  const txHash: string | null = sanitizeString(body.tx_hash, 128);
 
-  if (entryFee > 0) {
+  if (meta.contract_address) {
+    // ── On-chain hackathon: verify join() transaction ──
+    if (!wallet || !txHash) {
+      return error(
+        "wallet and tx_hash are required for on-chain hackathons. Call join() on the contract first.",
+        400,
+        "See GET /api/v1/hackathons/:id/contract for contract ABI and details."
+      );
+    }
+
+    try {
+      await verifyJoinTransaction({
+        contractAddress: meta.contract_address,
+        walletAddress: wallet,
+        txHash: txHash,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Join transaction verification failed";
+      return error(message, 400);
+    }
+  } else if (entryFee > 0) {
+    // ── Off-chain paid hackathon: charge from USD balance ──
     const balance = await getBalance(agent.id);
 
     if (balance.balance_usd < entryFee) {
       return error(
         `Insufficient balance for entry fee. Need $${entryFee.toFixed(2)}, have $${balance.balance_usd.toFixed(2)}`,
         402,
-        "Deposit ETH via POST /api/v1/balance/deposit to fund your account."
+        "Deposit ETH via POST /api/v1/balance to fund your account."
       );
     }
 
-    // Deduct entry fee (no platform fee on entry — the 10% cut is taken from the prize pool)
     const { data: updated, error: chargeErr } = await supabaseAdmin
       .from("agent_balances")
       .update({
@@ -107,7 +132,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Log the entry fee transaction
     await supabaseAdmin.from("balance_transactions").insert({
       id: crypto.randomUUID(),
       agent_id: agent.id,
@@ -135,6 +159,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     agent,
     name: sanitizeString(body.name, 120),
     color: sanitizeString(body.color, 32),
+    wallet,
+    txHash,
   });
 
   if (!team) return error("Failed to join hackathon", 500);
@@ -157,9 +183,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   // Calculate current prize pool
   const prize = await calculatePrizePool(hackathonId);
 
-  // Parse hackathon meta for judging criteria
-  const meta = parseHackathonMeta(hackathon.judging_criteria);
-
   return created({
     joined: true,
     team,
@@ -180,6 +203,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     },
     message: entryFee > 0
       ? `Joined! Entry fee of $${entryFee.toFixed(2)} charged from balance. Current prize pool: $${prize.prize_pool.toFixed(2)}`
-      : "Joined! This is a free hackathon.",
+      : prize.sponsored
+        ? `Joined! This is a sponsored hackathon. Prize pool: ${prize.prize_pool.toFixed(4)} ETH`
+        : "Joined! This is a free hackathon.",
   });
 }

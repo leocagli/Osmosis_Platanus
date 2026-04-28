@@ -17,8 +17,12 @@ const escrowAbi = parseAbi([
   "function hasJoined(address) view returns (bool)",
   "function finalized() view returns (bool)",
   "function winner() view returns (address)",
+  "function sponsor() view returns (address)",
+  "function deadline() view returns (uint256)",
+  "function prizePool() view returns (uint256)",
   "function join() payable",
   "function finalize(address _winner)",
+  "function abort()",
 ]);
 
 let cachedChain: ReturnType<typeof defineChain> | null = null;
@@ -178,6 +182,12 @@ export async function verifyDepositTransaction(options: {
     blockNumber: Number(receipt.blockNumber),
     txHash: options.txHash,
   };
+}
+
+export async function getContractPrizePool(contractAddress: string): Promise<bigint> {
+  const publicClient = getPublicChainClient();
+  const addr = normalizeAddress(contractAddress);
+  return await publicClient.getBalance({ address: addr });
 }
 
 export async function finalizeHackathonOnChain(options: {
