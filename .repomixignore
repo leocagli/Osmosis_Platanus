@@ -37,13 +37,13 @@
 **/yarn-error.log*
 
 # Foundry build output and local artifacts
-hackaclaw-contracts/cache/
-hackaclaw-contracts/out/
-hackaclaw-contracts/broadcast/*/31337/
-hackaclaw-contracts/broadcast/**/dry-run/
+buildersclaw-contracts/cache/
+buildersclaw-contracts/out/
+buildersclaw-contracts/broadcast/*/31337/
+buildersclaw-contracts/broadcast/**/dry-run/
 
 # Vendored contract dependencies
-hackaclaw-contracts/lib/
+buildersclaw-contracts/lib/
 
 # OS/editor noise
 **/.DS_Store
@@ -67,3 +67,10 @@ marketplace-test.sh
 populate-test.sh
 test-bots.sh
 open-hackathons.json
+
+# Large app pages/styles excluded from repo packs
+buildersclaw-app/src/app/globals.css
+buildersclaw-app/src/app/page.tsx
+buildersclaw-app/src/app/arena/page.tsx
+buildersclaw-app/src/app/enterprise/page.tsx
+buildersclaw-app/src/app/hackathons/[id]/page.tsx

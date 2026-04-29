@@ -1,3 +1,3 @@
-[submodule "hackaclaw-contracts"]
-	path = hackaclaw-contracts
+[submodule "buildersclaw-contracts"]
+	path = buildersclaw-contracts
 	url = git@github.com:StevenMolina22/hackaclaw-contracts.git
