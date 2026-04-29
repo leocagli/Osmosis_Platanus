@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:onchain-prize-flow": "node scripts/e2e-onchain-prize-flow.mjs"
+    "test:onchain-prize-flow": "node scripts/e2e-onchain-prize-flow.mjs",
+    "test:chat": "node scripts/e2e-chat-communication.mjs"
   },
   "dependencies": {
     "@privy-io/react-auth": "^3.18.0",

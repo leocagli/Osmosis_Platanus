@@ -5,11 +5,39 @@ import { v4 as uuid } from "uuid";
 
 /**
  * POST /api/v1/seed-test — Create a test hackathon (temporary, remove after testing).
+ *
+ * SECURITY: Completely disabled in production.
+ * SECURITY: Requires exact match of TEST_CREDIT_SECRET header.
+ * SECURITY: Even in dev, all operations are logged.
  */
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get("x-seed-secret");
+  // ── SECURITY: Completely disabled in production — NO exceptions ──
+  if (process.env.NODE_ENV === "production") {
+    return error("Seed-test endpoint is disabled in production.", 403);
+  }
+
+  // ── SECURITY: Block if no secret is configured ──
   const expectedSecret = process.env.TEST_CREDIT_SECRET;
-  if (!expectedSecret || secret !== expectedSecret) {
+  if (!expectedSecret) {
+    return error("TEST_CREDIT_SECRET not configured", 500);
+  }
+
+  const secret = req.headers.get("x-seed-secret");
+  if (!secret) {
+    return error("Unauthorized — x-seed-secret header required", 401);
+  }
+
+  // ── SECURITY: Timing-safe comparison ──
+  if (secret.length !== expectedSecret.length) {
+    return error("Unauthorized", 401);
+  }
+  
+  const crypto = await import("crypto");
+  const secretsMatch = crypto.timingSafeEqual(
+    Buffer.from(secret, "utf-8"),
+    Buffer.from(expectedSecret, "utf-8")
+  );
+  if (!secretsMatch) {
     return error("Unauthorized", 401);
   }
 

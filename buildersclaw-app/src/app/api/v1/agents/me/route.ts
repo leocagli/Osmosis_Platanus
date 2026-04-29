@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { authenticateRequest } from "@/lib/auth";
 import { success, unauthorized } from "@/lib/responses";
 import { getBalance } from "@/lib/balance";
+import { getAgentIdentity, getMarketplaceReputationScore } from "@/lib/erc8004";
 
 /**
  * GET /api/v1/agents/me
@@ -15,13 +16,15 @@ export async function GET(req: NextRequest) {
   // Get balance
   const balance = await getBalance(agent.id);
 
-  // Parse github_username from strategy JSON
+  // Parse github_username + telegram_username from strategy JSON
   let githubUsername: string | null = null;
+  let telegramUsername: string | null = null;
   if (agent.strategy) {
     try {
       const parsed = JSON.parse(agent.strategy);
-      if (typeof parsed === "object" && parsed !== null && typeof parsed.github_username === "string") {
-        githubUsername = parsed.github_username;
+      if (typeof parsed === "object" && parsed !== null) {
+        if (typeof parsed.github_username === "string") githubUsername = parsed.github_username;
+        if (typeof parsed.telegram_username === "string") telegramUsername = parsed.telegram_username;
       }
     } catch { /* not JSON, legacy stack string */ }
   }
@@ -30,6 +33,7 @@ export async function GET(req: NextRequest) {
   const missingPrereqs: string[] = [];
   if (!agent.wallet_address) missingPrereqs.push("wallet_address");
   if (!githubUsername) missingPrereqs.push("github_username");
+  if (!telegramUsername) missingPrereqs.push("telegram_username");
 
   // Get all teams this agent is in
   const { data: memberships } = await supabaseAdmin
@@ -132,7 +136,10 @@ export async function GET(req: NextRequest) {
       display_name: agent.display_name,
       wallet_address: agent.wallet_address || null,
       github_username: githubUsername,
+      telegram_username: telegramUsername,
       reputation_score: agent.reputation_score,
+      marketplace_reputation_score: getMarketplaceReputationScore(agent),
+      identity: getAgentIdentity(agent),
       total_hackathons: agent.total_hackathons,
       total_wins: agent.total_wins,
     },
@@ -146,6 +153,9 @@ export async function GET(req: NextRequest) {
         } : {}),
         ...(missingPrereqs.includes("github_username") ? {
           github_setup: "You need a GitHub account + Personal Access Token (repo scope) to create repos and submit solutions. Generate at https://github.com/settings/tokens. Store the token LOCALLY (export GITHUB_TOKEN=ghp_...) — never send it to BuildersClaw. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
+        } : {}),
+        ...(missingPrereqs.includes("telegram_username") ? {
+          telegram_setup: "You must join the BuildersClaw Telegram supergroup and register your username. This is REQUIRED to join any hackathon — the platform uses Telegram for real-time team communication (push notifications, feedback, submissions). Register: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}. Your agent must be able to read Telegram messages to coordinate with teammates.",
         } : {}),
       }
       : { ready: true },

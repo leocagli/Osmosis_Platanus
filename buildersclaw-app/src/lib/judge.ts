@@ -8,6 +8,7 @@ import {
   isGenLayerAvailable,
   type GenLayerContender,
 } from "./genlayer";
+import { isViableSubmission } from "./validation";
 
 export interface EvaluationResult {
   functionality_score: number;
@@ -263,12 +264,12 @@ export async function judgeHackathon(hackathonId: string) {
   }
 
   try {
-    const { data: submissions } = await supabaseAdmin
+    const { data: allSubmissions } = await supabaseAdmin
       .from("submissions")
-      .select("*, teams(name)")
+      .select("*, teams(name, status)")
       .eq("hackathon_id", hackathonId);
 
-    if (!submissions || submissions.length === 0) {
+    if (!allSubmissions || allSubmissions.length === 0) {
       updatedMeta.notes = "Ended with 0 submissions.";
       updatedMeta.finalized_at = new Date().toISOString();
       await supabaseAdmin
@@ -276,6 +277,54 @@ export async function judgeHackathon(hackathonId: string) {
         .update({ status: "completed", judging_criteria: updatedMeta })
         .eq("id", hackathonId);
       return true;
+    }
+
+    // ── SECURITY: Filter out non-viable submissions ──
+    // Only judge submissions that have a valid repo URL and are completed.
+    // Teams that never submitted (or submitted garbage) should not waste judge tokens.
+    const viableSubmissions: typeof allSubmissions = [];
+    const skippedSubmissions: Array<{ team_id: string; reason: string }> = [];
+
+    for (const sub of allSubmissions) {
+      const check = isViableSubmission(sub);
+      if (check.viable) {
+        viableSubmissions.push(sub);
+      } else {
+        skippedSubmissions.push({ team_id: sub.team_id, reason: check.reason });
+        console.warn(
+          `[JUDGE] Skipping submission ${sub.id} (team ${sub.team_id}): ${check.reason}`
+        );
+
+        // Record a zero-score evaluation for skipped submissions
+        await supabaseAdmin
+          .from("evaluations")
+          .upsert({
+            submission_id: sub.id,
+            functionality_score: 0, brief_compliance_score: 0, code_quality_score: 0,
+            architecture_score: 0, innovation_score: 0, completeness_score: 0,
+            documentation_score: 0, testing_score: 0, security_score: 0,
+            deploy_readiness_score: 0, total_score: 0,
+            judge_feedback: `Submission skipped: ${check.reason}. Teams must submit a valid GitHub repository URL to be judged.`,
+            raw_response: JSON.stringify({ skipped: true, reason: check.reason }),
+          }, { onConflict: "submission_id" });
+      }
+    }
+
+    if (viableSubmissions.length === 0) {
+      updatedMeta.notes = `Ended with ${allSubmissions.length} submissions but none had viable repos. ${skippedSubmissions.map(s => s.reason).join("; ")}`;
+      updatedMeta.finalized_at = new Date().toISOString();
+      updatedMeta.skipped_submissions = skippedSubmissions;
+      await supabaseAdmin
+        .from("hackathons")
+        .update({ status: "completed", judging_criteria: updatedMeta })
+        .eq("id", hackathonId);
+      return true;
+    }
+
+    const submissions = viableSubmissions;
+    if (skippedSubmissions.length > 0) {
+      updatedMeta.skipped_submissions = skippedSubmissions;
+      console.log(`[JUDGE] ${viableSubmissions.length} viable / ${skippedSubmissions.length} skipped out of ${allSubmissions.length} total submissions`);
     }
 
     // Judge all submissions (with per-submission error handling)

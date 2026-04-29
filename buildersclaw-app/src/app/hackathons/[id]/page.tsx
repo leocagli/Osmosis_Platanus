@@ -90,6 +90,8 @@ function PixelLobster({
   role,
   borderColor,
   isLeader,
+  forceShowName,
+  sharePct,
 }: {
   color: string;
   darkColor: string;
@@ -98,8 +100,11 @@ function PixelLobster({
   role: string;
   borderColor: string;
   isLeader?: boolean;
+  forceShowName?: boolean;
+  sharePct?: number;
 }) {
   const [showName, setShowName] = useState(false);
+  const visible = forceShowName || showName;
 
   // Pixel unit scale
   const px = size / 16;
@@ -112,7 +117,7 @@ function PixelLobster({
       onPointerLeave={() => setShowName(false)}
     >
       <AnimatePresence>
-        {showName && (
+        {visible && (
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
@@ -122,6 +127,7 @@ function PixelLobster({
           >
             {isLeader && "👑 "}{name}
             {role === "leader" && " ★"}
+            {sharePct != null && <span style={{ marginLeft: 4, color: sharePct >= 30 ? "#4ade80" : sharePct >= 15 ? "#ffd700" : "rgba(255,255,255,0.6)" }}>{sharePct}%</span>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -129,17 +135,24 @@ function PixelLobster({
       {/* Crown for team leader */}
       {isLeader && (
         <div style={{ display: "flex", justifyContent: "center", marginBottom: -px }}>
-          <svg viewBox="0 0 12 8" width={px * 12} height={px * 8} style={{ imageRendering: "pixelated" }}>
-            <rect x={0} y={4} width={12} height={4} fill="#ffd700" />
-            <rect x={0} y={2} width={2} height={2} fill="#ffd700" />
-            <rect x={5} y={0} width={2} height={2} fill="#ffd700" />
-            <rect x={10} y={2} width={2} height={2} fill="#ffd700" />
-            <rect x={2} y={3} width={2} height={1} fill="#ffd700" />
-            <rect x={8} y={3} width={2} height={1} fill="#ffd700" />
-            {/* Gems */}
-            <rect x={1} y={5} width={2} height={2} fill="#e53935" />
-            <rect x={5} y={5} width={2} height={2} fill="#4fc3f7" />
-            <rect x={9} y={5} width={2} height={2} fill="#e53935" />
+          <svg viewBox="0 0 14 7" width={px * 14} height={px * 7} style={{ imageRendering: "pixelated" }}>
+            {/* Crown base band */}
+            <rect x={1} y={4} width={12} height={3} fill="#ffd700" />
+            {/* Three pointed tips */}
+            <rect x={1} y={3} width={2} height={1} fill="#ffc107" />
+            <rect x={0} y={2} width={2} height={1} fill="#ffb300" />
+            <rect x={6} y={1} width={2} height={2} fill="#ffb300" />
+            <rect x={6} y={0} width={2} height={1} fill="#ffd700" />
+            <rect x={12} y={3} width={1} height={1} fill="#ffc107" />
+            <rect x={12} y={2} width={2} height={1} fill="#ffb300" />
+            {/* Connecting slopes */}
+            <rect x={3} y={3} width={3} height={1} fill="#ffc107" />
+            <rect x={8} y={3} width={4} height={1} fill="#ffc107" />
+            {/* Single centered gem */}
+            <rect x={6} y={5} width={2} height={1} fill="#e53935" />
+            {/* Highlight */}
+            <rect x={2} y={4} width={1} height={1} fill="#fff9c4" opacity={0.5} />
+            <rect x={10} y={4} width={1} height={1} fill="#fff9c4" opacity={0.5} />
           </svg>
         </div>
       )}
@@ -808,11 +821,12 @@ function PixelDesk({ variant = 0 }: { variant?: number }) {
 
 /* ─── Walking Lobster — always moving ─── */
 
-function WalkingLobster({ member, palette, floorWidth, seed }: {
+function WalkingLobster({ member, palette, floorWidth, seed, floorHovered }: {
   member: { agent_id: string; agent_name: string; agent_display_name: string | null; role: string; revenue_share_pct: number };
   palette: ReturnType<typeof getTeamPalette>;
   floorWidth: number;
   seed: number;
+  floorHovered: boolean;
 }) {
   const hash = (s: number) => { let h = s; h = ((h >> 16) ^ h) * 0x45d9f3b; h = ((h >> 16) ^ h) * 0x45d9f3b; return ((h >> 16) ^ h) & 0x7fffffff; };
   const r1 = hash(seed) / 0x7fffffff;
@@ -864,6 +878,8 @@ function WalkingLobster({ member, palette, floorWidth, seed }: {
           role={member.role}
           borderColor={palette.lobster}
           isLeader={isLeader}
+          forceShowName={floorHovered}
+          sharePct={member.revenue_share_pct}
         />
       </div>
     </div>
@@ -880,6 +896,7 @@ const OFFICE_LAYOUTS = [
 ];
 
 function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
+  const [hovered, setHovered] = useState(false);
   const palette = getTeamPalette(team.team_color);
   const hex = team.team_color.replace("#", "");
   const r = parseInt(hex.substring(0, 2), 16);
@@ -918,12 +935,13 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
           borderLeft: `12px solid ${wallColor}`,
           borderRight: `12px solid ${wallColor}`,
           imageRendering: "pixelated" as CSSProperties["imageRendering"],
-          cursor: teamProjectUrl(team) ? "pointer" : "default",
+          cursor: "pointer",
+          filter: hovered ? "brightness(0.82)" : "none",
           transition: "filter 0.15s ease",
           position: "relative",
         }}
-        onMouseEnter={(e) => { if (teamProjectUrl(team)) (e.currentTarget as HTMLDivElement).style.filter = "brightness(1.12)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.filter = "brightness(1)"; }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
         {/* Ceiling with lights */}
         <div style={{ height: 6, background: ceilingColor, position: "relative" }}>
@@ -986,6 +1004,7 @@ function BuildingFloor({ team, index }: { team: RankedTeam; index: number }) {
               palette={palette}
               floorWidth={floorW}
               seed={index * 1000 + mi * 137 + member.agent_id.charCodeAt(0)}
+              floorHovered={hovered}
             />
           ))}
         </div>

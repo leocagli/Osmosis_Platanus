@@ -31,8 +31,100 @@ import { getBaseUrl } from "./config";
 import { getRole } from "./roles";
 import { supabaseAdmin } from "./supabase";
 import { postChatMessage } from "./chat";
+import { dispatchEventWebhook } from "./agent-webhooks";
 
 const SITE_URL = getBaseUrl();
+
+/**
+ * Parse telegram_username from an agent's strategy JSON.
+ */
+export function parseTelegramUsername(strategy: string | null): string | null {
+  if (!strategy) return null;
+  try {
+    const parsed = JSON.parse(strategy);
+    if (typeof parsed === "object" && parsed !== null && typeof parsed.telegram_username === "string") {
+      return parsed.telegram_username;
+    }
+  } catch { /* not JSON */ }
+  return null;
+}
+
+/**
+ * Verify that a Telegram user (by @username) is a member of the BuildersClaw supergroup.
+ * Uses getChatMember — works for bots and humans.
+ *
+ * Returns:
+ *   { isMember: true }                   — user is in the group
+ *   { isMember: false, reason: string }   — user is NOT in the group, with explanation
+ */
+export async function verifyTelegramMembership(username: string): Promise<{
+  isMember: boolean;
+  reason?: string;
+}> {
+  const chatId = getForumChatId();
+  if (!chatId) {
+    // Telegram not configured — skip check (allow join)
+    return { isMember: true };
+  }
+
+  // Telegram getChatMember accepts numeric user_id, not @username.
+  // We need to resolve the username to a user_id first.
+  // Strategy: search recent messages or use the stored telegram_user_id from webhook.
+  // Simplest approach: try @username — Telegram Bot API does NOT support this directly.
+  // Instead, we check our DB for a known telegram_user_id from past webhook messages.
+
+  // First try: check if this username has ever sent a message in our group (via webhook)
+  const { data: knownMessage } = await supabaseAdmin
+    .from("team_chat")
+    .select("metadata")
+    .eq("sender_type", "telegram")
+    .not("metadata", "is", null)
+    .limit(200);
+
+  let userId: number | null = null;
+  if (knownMessage) {
+    for (const msg of knownMessage) {
+      const meta = msg.metadata as Record<string, unknown> | null;
+      if (meta?.telegram_username === username) {
+        userId = meta.telegram_user_id as number;
+        break;
+      }
+    }
+  }
+
+  if (!userId) {
+    // We can't verify via API without user_id, but we can at least confirm
+    // the supergroup is configured. Trust the username for now — the webhook
+    // will confirm identity when they actually message.
+    // Return true with a note that full verification happens on first message.
+    return { isMember: true };
+  }
+
+  // We have a user_id — verify membership via getChatMember
+  const resp = await tgApi("getChatMember", {
+    chat_id: parseChatId(chatId),
+    user_id: userId,
+  });
+
+  if (!resp.ok) {
+    return {
+      isMember: false,
+      reason: `Could not verify membership for @${username}. Make sure you have joined the BuildersClaw supergroup.`,
+    };
+  }
+
+  const member = resp.result as { status: string };
+  const allowedStatuses = ["creator", "administrator", "member", "restricted"];
+
+  if (allowedStatuses.includes(member.status)) {
+    return { isMember: true };
+  }
+
+  return {
+    isMember: false,
+    reason: `@${username} is not a member of the BuildersClaw supergroup (status: ${member.status}). Join the group first, then try again.`,
+  };
+}
 
 function getBotToken(): string | null {
   return process.env.TELEGRAM_BOT_TOKEN || null;
@@ -40,6 +132,16 @@ function getBotToken(): string | null {
 
 function getForumChatId(): string | null {
   return process.env.TELEGRAM_FORUM_CHAT_ID || process.env.TELEGRAM_CHAT_ID || null;
+}
+
+/**
+ * Parse chat_id to number for Telegram API (numeric IDs must be integers, not strings).
+ * Returns number if parseable, otherwise returns the original string (for @username format).
+ */
+function parseChatId(chatId: string): number | string {
+  const num = Number(chatId);
+  if (Number.isFinite(num) && Number.isSafeInteger(num)) return num;
+  return chatId;
 }
 
 // ─── Low-level Telegram API ───
@@ -53,12 +155,36 @@ async function tgApi(method: string, body: Record<string, unknown>): Promise<{
   if (!token) return { ok: false, description: "No bot token" };
 
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const url = `https://api.telegram.org/bot${token}/${method}`;
+    const requestBody = JSON.stringify(body);
+    
+    // Use native Node.js https to avoid Next.js fetch patching issues
+    const { default: https } = await import("https");
+    // Encode body as UTF-8 Buffer to preserve emojis on Windows
+    const bodyBuffer = Buffer.from(requestBody, "utf-8");
+    const data = await new Promise<{ ok: boolean; result?: unknown; description?: string }>((resolve, reject) => {
+      const urlObj = new URL(url);
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path: urlObj.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Length": bodyBuffer.length,
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf-8");
+          try { resolve(JSON.parse(raw)); } catch { resolve({ ok: false, description: raw }); }
+        });
+      });
+      req.on("error", (err) => reject(err));
+      req.write(bodyBuffer);
+      req.end();
     });
-    const data = await res.json();
+
     if (!data.ok) {
       console.error(`[TELEGRAM] ${method} failed:`, data.description);
     }
@@ -83,7 +209,7 @@ async function sendMessage(
   }
 
   const body: Record<string, unknown> = {
-    chat_id: chatId,
+    chat_id: parseChatId(chatId),
     text,
     parse_mode: "HTML",
     disable_web_page_preview: true,
@@ -114,9 +240,8 @@ async function createTeamTopic(teamId: string, teamName: string, hackathonTitle:
   const topicName = `🦞 ${teamName} — ${hackathonTitle}`.slice(0, 128);
 
   const resp = await tgApi("createForumTopic", {
-    chat_id: chatId,
+    chat_id: parseChatId(chatId),
     name: topicName,
-    icon_custom_emoji_id: undefined, // use default icon
   });
 
   if (!resp.ok || !resp.result) {
@@ -307,6 +432,39 @@ export async function telegramPushNotification(opts: {
     metadata: { commit_sha: opts.commitSha, repo_url: opts.repoUrl, push_number: opts.pushNumber },
   });
 
+  // ─── Dispatch webhook to feedback reviewers and other team members ───
+  const { data: teamMembers } = await supabaseAdmin
+    .from("team_members")
+    .select("agent_id, role")
+    .eq("team_id", opts.teamId)
+    .eq("status", "active")
+    .neq("agent_id", opts.agentId); // Don't notify the pusher
+
+  if (teamMembers) {
+    for (const member of teamMembers) {
+      dispatchEventWebhook({
+        agentId: member.agent_id,
+        event: "push_notify",
+        message: {
+          from: opts.agentName,
+          from_type: "agent",
+          text: `Push #${opts.pushNumber}: ${opts.commitMessage}`,
+          command: member.role === "leader" ? null : "review", // Hint reviewers to review
+          args: {
+            commit_sha: opts.commitSha,
+            commit_message: opts.commitMessage,
+            repo_url: opts.repoUrl,
+            push_number: String(opts.pushNumber),
+          },
+        },
+        teamId: opts.teamId,
+        hackathonId: opts.hackathonId,
+      }).catch((err) => {
+        console.error(`[TELEGRAM] Push webhook dispatch failed for ${member.agent_id}:`, err);
+      });
+    }
+  }
+
   if (threadId) {
     return sendMessage(text, { threadId });
   }
@@ -355,6 +513,39 @@ export async function telegramFeedbackPosted(opts: {
     content: opts.feedback,
     metadata: { verdict: opts.verdict, commit_sha: opts.commitSha },
   });
+
+  // ─── Dispatch webhook to ALL builders on the team ───
+  // When feedback arrives, every builder needs to know
+  const { data: teamMembers } = await supabaseAdmin
+    .from("team_members")
+    .select("agent_id")
+    .eq("team_id", opts.teamId)
+    .eq("status", "active")
+    .neq("agent_id", opts.reviewerId); // Don't notify the reviewer
+
+  if (teamMembers) {
+    for (const member of teamMembers) {
+      dispatchEventWebhook({
+        agentId: member.agent_id,
+        event: "feedback",
+        message: {
+          from: opts.reviewerName,
+          from_type: "agent",
+          text: opts.feedback,
+          command: opts.verdict === "approved" ? "submit" : "iterate",
+          args: {
+            verdict: opts.verdict,
+            commit_sha: opts.commitSha,
+            detail: opts.feedback.slice(0, 500),
+          },
+        },
+        teamId: opts.teamId,
+        hackathonId: opts.hackathonId,
+      }).catch((err) => {
+        console.error(`[TELEGRAM] Webhook dispatch failed for ${member.agent_id}:`, err);
+      });
+    }
+  }
 
   if (threadId) {
     return sendMessage(text, { threadId });

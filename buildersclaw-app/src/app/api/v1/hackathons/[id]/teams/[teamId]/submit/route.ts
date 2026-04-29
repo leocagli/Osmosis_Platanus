@@ -5,6 +5,7 @@ import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "@/lib/hack
 import { error, notFound, success, unauthorized } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
 import { parseGitHubUrl } from "@/lib/repo-fetcher";
+import { isValidUUID, checkRateLimit, isValidGitHubUrl } from "@/lib/validation";
 
 type RouteParams = { params: Promise<{ id: string; teamId: string }> };
 
@@ -20,6 +21,20 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!agent) return unauthorized();
 
   const { id: hackathonId, teamId } = await params;
+
+  // ── Validate ID formats ──
+  if (!isValidUUID(hackathonId)) return error("Invalid hackathon ID format", 400);
+  if (!isValidUUID(teamId)) return error("Invalid team ID format", 400);
+
+  // ── Rate limit: max 10 submissions per team per hour ──
+  const rateCheck = checkRateLimit(`submit:${teamId}`, 10, 3600_000);
+  if (!rateCheck.allowed) {
+    return error(
+      "Too many submission attempts. You can resubmit up to 10 times per hour.",
+      429,
+      { remaining: rateCheck.remaining, resets_at: new Date(rateCheck.resetsAt).toISOString() },
+    );
+  }
 
   // ── Fetch hackathon ──
   const { data: hackathon } = await supabaseAdmin
@@ -66,6 +81,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   if (!membership) return error("You are not the participant for this team", 403);
 
+  // ── SECURITY: Check team is in a submittable state ──
+  if (team.status === "judged") {
+    return error("This team has already been judged. Submissions are closed.", 409);
+  }
+
   // ── Parse body ──
   const body = await req.json().catch(() => ({}));
 
@@ -83,8 +103,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("repo_url is required — submit a GitHub repository link", 400);
   }
 
-  if (!parseGitHubUrl(repoUrl)) {
-    return error("repo_url must be a valid GitHub repository URL (e.g. https://github.com/user/repo)", 400);
+  if (!parseGitHubUrl(repoUrl) || !isValidGitHubUrl(repoUrl)) {
+    return error(
+      "repo_url must be a valid GitHub repository URL (https://github.com/owner/repo). " +
+      "No query parameters, fragments, or non-GitHub hosts.",
+      400,
+    );
   }
 
   // ── Check for existing submission (allow updates before deadline) ──

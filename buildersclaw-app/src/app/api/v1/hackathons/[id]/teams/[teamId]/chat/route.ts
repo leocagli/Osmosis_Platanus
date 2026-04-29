@@ -10,6 +10,8 @@ import { authenticateRequest } from "@/lib/auth";
 import { postChatMessage, getChatMessages, getChatMessagesSince } from "@/lib/chat";
 import { telegramTeamMessage } from "@/lib/telegram";
 import { supabaseAdmin } from "@/lib/supabase";
+import { checkRateLimit, isValidUUID, CHAT_RATE_LIMIT_PER_MIN } from "@/lib/validation";
+import { escapeHtml } from "@/lib/sanitize";
 
 // ─── GET: Read chat messages ───
 
@@ -19,11 +21,34 @@ export async function GET(
 ) {
   const { id: hackathonId, teamId } = await params;
 
+  // ── Validate ID formats ──
+  if (!isValidUUID(hackathonId) || !isValidUUID(teamId)) {
+    return NextResponse.json(
+      { success: false, error: { message: "Invalid ID format" } },
+      { status: 400 },
+    );
+  }
+
   const agent = await authenticateRequest(req);
   if (!agent) {
     return NextResponse.json(
       { success: false, error: { message: "Authentication required." } },
       { status: 401 },
+    );
+  }
+
+  // Verify team belongs to this hackathon
+  const { data: team } = await supabaseAdmin
+    .from("teams")
+    .select("id")
+    .eq("id", teamId)
+    .eq("hackathon_id", hackathonId)
+    .single();
+
+  if (!team) {
+    return NextResponse.json(
+      { success: false, error: { message: "Team not found in this hackathon." } },
+      { status: 404 },
     );
   }
 
@@ -45,12 +70,34 @@ export async function GET(
   const since = req.nextUrl.searchParams.get("since");
 
   if (since) {
-    const messages = await getChatMessagesSince({ teamId, since });
+    // ── SECURITY: Validate since parameter is a valid ISO date ──
+    const sinceDate = new Date(since);
+    if (isNaN(sinceDate.getTime())) {
+      return NextResponse.json(
+        { success: false, error: { message: "Invalid 'since' parameter. Must be ISO 8601 date string." } },
+        { status: 400 },
+      );
+    }
+    const messages = await getChatMessagesSince({ teamId, since: sinceDate.toISOString() });
     return NextResponse.json({ success: true, messages });
   }
 
-  const limit = parseInt(req.nextUrl.searchParams.get("limit") || "50");
+  // ── SECURITY: Clamp limit to prevent abuse ──
+  const rawLimit = parseInt(req.nextUrl.searchParams.get("limit") || "50");
+  const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200);
   const before = req.nextUrl.searchParams.get("before") || undefined;
+  
+  // ── SECURITY: Validate before parameter if provided ──
+  if (before) {
+    const beforeDate = new Date(before);
+    if (isNaN(beforeDate.getTime())) {
+      return NextResponse.json(
+        { success: false, error: { message: "Invalid 'before' parameter. Must be ISO 8601 date string." } },
+        { status: 400 },
+      );
+    }
+  }
+  
   const messages = await getChatMessages({ teamId, limit, before });
   return NextResponse.json({ success: true, messages });
 }
@@ -63,11 +110,34 @@ export async function POST(
 ) {
   const { id: hackathonId, teamId } = await params;
 
+  // ── Validate ID formats ──
+  if (!isValidUUID(hackathonId) || !isValidUUID(teamId)) {
+    return NextResponse.json(
+      { success: false, error: { message: "Invalid ID format" } },
+      { status: 400 },
+    );
+  }
+
   const agent = await authenticateRequest(req);
   if (!agent) {
     return NextResponse.json(
       { success: false, error: { message: "Authentication required." } },
       { status: 401 },
+    );
+  }
+
+  // Verify team belongs to this hackathon
+  const { data: team } = await supabaseAdmin
+    .from("teams")
+    .select("id")
+    .eq("id", teamId)
+    .eq("hackathon_id", hackathonId)
+    .single();
+
+  if (!team) {
+    return NextResponse.json(
+      { success: false, error: { message: "Team not found in this hackathon." } },
+      { status: 404 },
     );
   }
 
@@ -83,6 +153,15 @@ export async function POST(
     return NextResponse.json(
       { success: false, error: { message: "You are not a member of this team." } },
       { status: 403 },
+    );
+  }
+
+  // ── Rate limit: prevent chat spam ──
+  const rateCheck = checkRateLimit(`chat:${agent.id}:${teamId}`, CHAT_RATE_LIMIT_PER_MIN, 60_000);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { success: false, error: { message: `Too many messages. Limit: ${CHAT_RATE_LIMIT_PER_MIN}/minute. Try again shortly.` } },
+      { status: 429 },
     );
   }
 
@@ -111,7 +190,19 @@ export async function POST(
     );
   }
 
-  const messageType = (body.message_type || "text") as "text" | "push" | "feedback" | "approval" | "submission" | "system";
+  // ── SECURITY: Agents cannot send "system" messages — that's platform-only ──
+  const rawMessageType = body.message_type || "text";
+  const agentAllowedTypes = ["text", "push", "feedback", "approval"];
+  const systemOnlyTypes = ["submission", "system"];
+  
+  if (systemOnlyTypes.includes(rawMessageType)) {
+    return NextResponse.json(
+      { success: false, error: { message: `Message type "${rawMessageType}" is reserved for the platform. Agents can use: ${agentAllowedTypes.join(", ")}` } },
+      { status: 403 },
+    );
+  }
+
+  const messageType = rawMessageType as "text" | "push" | "feedback" | "approval" | "submission" | "system";
   const validTypes = ["text", "push", "feedback", "approval", "submission", "system"];
   if (!validTypes.includes(messageType)) {
     return NextResponse.json(
@@ -138,8 +229,10 @@ export async function POST(
     );
   }
 
-  // Bridge to Telegram
-  const tgText = `🤖 <b>${agent.name}</b>\n\n${content}`;
+  // Bridge to Telegram (sanitize HTML to prevent injection)
+  const safeName = escapeHtml(agent.name);
+  const safeContent = escapeHtml(content);
+  const tgText = `🤖 <b>${safeName}</b>\n\n${safeContent}`;
   await telegramTeamMessage(teamId, tgText).catch((err: unknown) => {
     console.error("[CHAT] Telegram bridge failed:", err);
   });

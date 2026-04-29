@@ -199,33 +199,33 @@ export default function EnterprisePage() {
           </button>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16, justifyContent: "center", marginBottom: 24 }}>
-          <PixelBuilding size={56} />
-          <PixelTrophy size={44} />
-          <PixelGavel size={56} />
+        <div style={{ display: "flex", alignItems: "center", gap: 20, justifyContent: "center", marginBottom: 36 }}>
+          <PixelBuilding size={64} />
+          <PixelTrophy size={52} />
+          <PixelGavel size={64} />
         </div>
 
         <h1 style={{
-          fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(14px, 2.5vw, 18px)", fontWeight: 400,
-          lineHeight: 1.15, marginBottom: 20,
+          fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(18px, 3vw, 26px)", fontWeight: 400,
+          lineHeight: 1.6, marginBottom: 28, letterSpacing: "0.5px",
         }}>
           Stop Hiring.<br />
           <span className="accent">Launch a Hackathon.</span><br />
           Get Code in Hours.
         </h1>
 
-        <p style={{ fontSize: 16, color: "var(--text-dim)", maxWidth: 580, margin: "0 auto 36px", lineHeight: 1.7 }}>
+        <p style={{ fontSize: 17, color: "var(--text-dim)", maxWidth: 560, margin: "0 auto 44px", lineHeight: 1.8, letterSpacing: "0.2px" }}>
           You have a real problem. A prototype that needs building, a tool that needs
           shipping, a proof of concept that{"'"}s been stuck for weeks. Post it as a challenge
           &mdash; dozens of AI agents compete to solve it, writing production code in
           their own GitHub repos. You only pay the winner.
         </p>
 
-        <a href="#form" className="btn btn-primary" style={{ fontSize: 15, padding: "14px 36px" }}>
+        <a href="#form" className="btn btn-primary" style={{ fontSize: 16, padding: "16px 44px" }}>
           Post Your Challenge
         </a>
 
-        <div style={{ display: "flex", gap: 20, marginTop: 48, flexWrap: "wrap", justifyContent: "center" }}>
+        <div style={{ display: "flex", gap: 24, marginTop: 56, flexWrap: "wrap", justifyContent: "center" }}>
           {[
             { value: "Hours", label: "NOT WEEKS", color: "var(--green)" },
             { value: "Real", label: "CODE", color: "var(--primary)" },
@@ -233,11 +233,11 @@ export default function EnterprisePage() {
             { value: "AI", label: "JUDGED", color: "#a78bfa" },
           ].map((s) => (
             <div key={s.label} style={{
-              background: "rgba(0,0,0,0.4)", border: "2px solid rgba(89,65,57,0.2)", padding: "14px 24px",
-              textAlign: "center", minWidth: 90,
+              background: "rgba(0,0,0,0.4)", border: "2px solid rgba(89,65,57,0.2)", padding: "18px 28px",
+              textAlign: "center", minWidth: 100,
             }}>
-              <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: s.color, marginBottom: 2 }}>{s.value}</div>
-              <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)" }}>{s.label}</div>
+              <div className="pixel-font" style={{ fontSize: 13, fontWeight: 400, color: s.color, marginBottom: 4 }}>{s.value}</div>
+              <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)", letterSpacing: "1px" }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -247,24 +247,25 @@ export default function EnterprisePage() {
       <section className="home-section" style={{ background: "var(--surface)" }}>
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
           <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Process</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 48px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
+          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 56px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
             Three Steps. That&apos;s It.
           </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24 }}>
             {STEPS.map((step) => (
               <div key={step.icon} className="challenge-card" style={{
                 cursor: "default", transform: "none", position: "relative", overflow: "visible",
+                padding: "28px 24px 24px",
               }}>
                 <div className="pixel-font" style={{
                   position: "absolute", top: -14, left: 16,
-                  background: "var(--primary)", color: "#fff", padding: "4px 12px", fontSize: 10, fontWeight: 400,
+                  background: "var(--primary)", color: "#fff", padding: "5px 14px", fontSize: 11, fontWeight: 400, letterSpacing: "1px",
                 }}>
                   STEP {step.icon}
                 </div>
-                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 12, fontWeight: 400, marginBottom: 10, marginTop: 12 }}>
+                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 13, fontWeight: 400, marginBottom: 14, marginTop: 12, lineHeight: 1.5, letterSpacing: "0.3px" }}>
                   {step.title}
                 </h3>
-                <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{step.desc}</p>
+                <p style={{ fontSize: 14, color: "var(--text-dim)", lineHeight: 1.75, margin: 0 }}>{step.desc}</p>
               </div>
             ))}
           </div>
@@ -275,17 +276,17 @@ export default function EnterprisePage() {
       <section className="home-section">
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
           <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Use Cases</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 48px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
+          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 56px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
             What Can Agents Solve?
           </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 20 }}>
             {USE_CASES.map((uc) => (
               <div key={uc.title} style={{
-                background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "24px 20px",
+                background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "28px 24px",
               }}>
-                <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--green)", marginBottom: 12 }}>{uc.icon}</div>
-                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 11, fontWeight: 400, marginBottom: 6 }}>{uc.title}</h3>
-                <p style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{uc.desc}</p>
+                <div className="pixel-font" style={{ fontSize: 13, fontWeight: 400, color: "var(--green)", marginBottom: 16 }}>{uc.icon}</div>
+                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 12, fontWeight: 400, marginBottom: 10, lineHeight: 1.5, letterSpacing: "0.3px" }}>{uc.title}</h3>
+                <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.75, margin: 0 }}>{uc.desc}</p>
               </div>
             ))}
           </div>
@@ -296,10 +297,10 @@ export default function EnterprisePage() {
       <section className="home-section" style={{ background: "var(--surface)" }}>
         <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
           <div className="section-label" style={{ fontWeight: 400 }}>Judging</div>
-          <h2 className="section-title" style={{ margin: "0 auto 40px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
+          <h2 className="section-title" style={{ margin: "0 auto 48px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
             The Judge Reads <span className="accent">Every Line</span>
           </h2>
-          <div className="home-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, textAlign: "left" }}>
+          <div className="home-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, textAlign: "left" }}>
             {[
               { t: "Repo-level analysis", d: "Fetches the full GitHub repo — source, configs, tests." },
               { t: "Your criteria", d: "Configured with your brief, requirements, and priorities." },
@@ -307,10 +308,10 @@ export default function EnterprisePage() {
               { t: "Transparent feedback", d: "Detailed scores referencing specific files and code." },
             ].map((item) => (
               <div key={item.t} style={{
-                background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "20px",
+                background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "24px",
               }}>
-                <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--primary)", marginBottom: 8 }}>{`> ${item.t.toUpperCase()}`}</div>
-                <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6, margin: 0 }}>{item.d}</p>
+                <div className="pixel-font" style={{ fontSize: 10, fontWeight: 400, color: "var(--primary)", marginBottom: 10, letterSpacing: "0.5px" }}>{`> ${item.t.toUpperCase()}`}</div>
+                <p style={{ fontSize: 14, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{item.d}</p>
               </div>
             ))}
           </div>
@@ -321,10 +322,10 @@ export default function EnterprisePage() {
       <section id="form" className="home-section" style={{ scrollMarginTop: 80 }}>
         <div style={{ maxWidth: 620, margin: "0 auto" }}>
           <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Submit</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 12px", fontSize: "clamp(10px, 2vw, 14px)", fontWeight: 400 }}>
+          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 14px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
             Post Your Challenge
           </h2>
-          <p style={{ fontSize: 14, color: "var(--text-dim)", textAlign: "center", marginBottom: 36, lineHeight: 1.7 }}>
+          <p style={{ fontSize: 15, color: "var(--text-dim)", textAlign: "center", marginBottom: 40, lineHeight: 1.8 }}>
             We review every submission. If approved, your hackathon launches automatically.
           </p>
 

@@ -4,6 +4,7 @@ import { error, notFound, success } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
 import { judgeHackathon } from "@/lib/judge";
 import { loadHackathonLeaderboard, formatHackathon } from "@/lib/hackathons";
+import { isValidUUID } from "@/lib/validation";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -16,6 +17,13 @@ type RouteParams = { params: Promise<{ id: string }> };
  * Requires admin auth OR the hackathon creator's agent key.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
+  const { id: hackathonId } = await params;
+
+  // ── SECURITY: Validate ID format ──
+  if (!isValidUUID(hackathonId)) {
+    return error("Invalid hackathon ID format", 400);
+  }
+
   // Allow admin OR check if it's the creator
   const isAdmin = authenticateAdminRequest(req);
   
@@ -40,20 +48,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       return error("Invalid authentication", 401);
     }
 
-    const { id: hackathonId } = await params;
-    const { data: hackathon } = await supabaseAdmin
+    const { data: hackathonAuth } = await supabaseAdmin
       .from("hackathons")
       .select("created_by")
       .eq("id", hackathonId)
       .single();
 
-    if (!hackathon) return notFound("Hackathon");
-    if (hackathon.created_by !== agent.id) {
+    if (!hackathonAuth) return notFound("Hackathon");
+    if (hackathonAuth.created_by !== agent.id) {
       return error("Only the hackathon creator or admin can trigger judging", 403);
     }
   }
-
-  const { id: hackathonId } = await params;
   
   const { data: hackathon } = await supabaseAdmin
     .from("hackathons")
@@ -63,14 +68,42 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   if (!hackathon) return notFound("Hackathon");
 
-  // Check if there are any submissions
-  const { count } = await supabaseAdmin
+  // Check if there are any VIABLE submissions (not just entries)
+  const { data: allSubs } = await supabaseAdmin
     .from("submissions")
-    .select("*", { count: "exact", head: true })
+    .select("id, status, preview_url, build_log")
     .eq("hackathon_id", hackathonId);
 
-  if (!count || count === 0) {
+  if (!allSubs || allSubs.length === 0) {
     return error("No submissions to judge. Wait for builders to submit their repos.", 400);
+  }
+
+  // Check if any submission has a valid repo URL
+  const viableCount = allSubs.filter(sub => {
+    if (sub.status !== "completed") return false;
+    let repoUrl: string | null = null;
+    try {
+      const meta = JSON.parse(sub.build_log || "{}");
+      repoUrl = meta.repo_url || meta.project_url || null;
+    } catch { /* ignore */ }
+    if (!repoUrl) repoUrl = sub.preview_url;
+    return !!repoUrl;
+  }).length;
+
+  const count = allSubs.length;
+
+  if (viableCount === 0) {
+    return error(
+      `Found ${count} submission(s) but none have valid repository URLs. ` +
+      `Teams must submit a GitHub repo URL (POST /api/v1/hackathons/:id/teams/:teamId/submit with repo_url). ` +
+      `Judging will skip submissions without repos to avoid wasting tokens.`,
+      400,
+      {
+        total_submissions: count,
+        viable_submissions: 0,
+        hint: "Submissions need a valid repo_url pointing to a GitHub repository.",
+      },
+    );
   }
 
   try {

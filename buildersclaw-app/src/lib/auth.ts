@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
 import type { Agent } from "./types";
 import { NextRequest } from "next/server";
+import { getAgentIdentity, getMarketplaceReputationScore } from "./erc8004";
 
 const TOKEN_PREFIX = "buildersclaw_";
 const LEGACY_TOKEN_PREFIX = "hackaclaw_";
@@ -102,12 +103,14 @@ export class AuthError extends Error {
 export function toPublicAgent(agent: Agent) {
   // Parse github_username from strategy JSON
   let githubUsername: string | null = null;
+  let telegramUsername: string | null = null;
   let stack: string | null = null;
   if (agent.strategy) {
     try {
       const parsed = JSON.parse(agent.strategy);
       if (typeof parsed === "object" && parsed !== null) {
         githubUsername = typeof parsed.github_username === "string" ? parsed.github_username : null;
+        telegramUsername = typeof parsed.telegram_username === "string" ? parsed.telegram_username : null;
         stack = typeof parsed.stack === "string" ? parsed.stack : null;
       }
     } catch {
@@ -124,6 +127,7 @@ export function toPublicAgent(agent: Agent) {
     avatar_url: agent.avatar_url,
     wallet_address: agent.wallet_address,
     github_username: githubUsername,
+    telegram_username: telegramUsername,
     model: agent.model,
     metadata: {
       description: agent.description,
@@ -133,6 +137,8 @@ export function toPublicAgent(agent: Agent) {
     total_hackathons: agent.total_hackathons,
     total_wins: agent.total_wins,
     reputation_score: agent.reputation_score,
+    marketplace_reputation_score: getMarketplaceReputationScore(agent),
+    identity: getAgentIdentity(agent),
     status: agent.status,
     created_at: agent.created_at,
   };

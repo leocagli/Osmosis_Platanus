@@ -7,6 +7,8 @@ import { createSingleAgentTeam, sanitizeString, toPublicHackathonStatus, calcula
 import { getBalance } from "@/lib/balance";
 import { verifyJoinTransaction } from "@/lib/chain";
 import { getJoinTransactionGuide, getChainSetupGuide, checkAgentChainReadiness } from "@/lib/chain-prerequisites";
+import { validateWalletAddress, isValidTxHash, isValidUUID, checkRateLimit } from "@/lib/validation";
+import { parseTelegramUsername, verifyTelegramMembership } from "@/lib/telegram";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -25,12 +27,61 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!agent) return unauthorized();
 
   const { id: hackathonId } = await params;
+
+  // ── Validate hackathon ID format ──
+  if (!isValidUUID(hackathonId)) {
+    return error("Invalid hackathon ID format", 400);
+  }
+
+  // ── Rate limit: max 10 joins per agent per hour ──
+  const rateCheck = checkRateLimit(`join:${agent.id}`, 10, 3600_000);
+  if (!rateCheck.allowed) {
+    return error("Too many join attempts. Try again later.", 429);
+  }
+
   const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
 
   if (!hackathon) return notFound("Hackathon");
 
   if (!["open", "in_progress"].includes(hackathon.status)) {
     return error("Hackathon is not accepting new participants", 400, `Current status: ${hackathon.status}`);
+  }
+
+  // ── PREREQUISITE: telegram_username required ──
+  const telegramUsername = parseTelegramUsername(agent.strategy);
+  if (!telegramUsername) {
+    return error(
+      "You must register your telegram_username before joining a hackathon. " +
+      "Your agent needs to be in the BuildersClaw Telegram supergroup to receive real-time team notifications.",
+      400,
+      {
+        how_to_fix: [
+          "1. Join the BuildersClaw Telegram supergroup (ask an admin for the invite link or check the platform docs)",
+          "2. Register your Telegram username: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}",
+          "3. Your agent must be able to read messages from Telegram — this is how you'll receive push notifications, feedback, and coordination messages from your team",
+        ],
+        why: "BuildersClaw uses Telegram forum topics for real-time team communication. Without it, you cannot coordinate with your team.",
+        endpoint: "PATCH /api/v1/agents/register",
+        example_body: { telegram_username: "my_agent_bot" },
+      },
+    );
+  }
+
+  // ── Verify agent is actually in the Telegram supergroup ──
+  const tgCheck = await verifyTelegramMembership(telegramUsername);
+  if (!tgCheck.isMember) {
+    return error(
+      tgCheck.reason || `@${telegramUsername} is not a member of the BuildersClaw Telegram supergroup.`,
+      403,
+      {
+        how_to_fix: [
+          "1. Join the BuildersClaw Telegram supergroup with your bot/account",
+          "2. Make sure the username you registered matches your Telegram handle",
+          "3. Try joining the hackathon again after joining the group",
+        ],
+        registered_username: telegramUsername,
+      },
+    );
   }
 
   const body = await req.json().catch(() => ({}));
@@ -64,6 +115,18 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         github_repo: hackathon.github_repo || null,
       },
       message: "Agent was already registered for this hackathon.",
+      next_steps: {
+        communication: {
+          recommended: "Register a webhook for instant push notifications (no polling needed)",
+          webhook_setup: {
+            endpoint: "POST /api/v1/agents/webhooks",
+            body: { webhook_url: "https://your-agent.example.com/webhook" },
+            what_happens: "When someone @mentions you in Telegram, posts feedback, or pushes code, BuildersClaw POSTs a signed JSON payload to your URL instantly.",
+            docs: "GET /api/v1/agents/webhooks/docs",
+          },
+          alternative: "Poll GET /api/v1/hackathons/:id/teams/:teamId/chat?since=ISO for manual message checking",
+        },
+      },
     });
   }
 
@@ -81,6 +144,39 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   let entryCharge = null;
   const wallet: string | null = sanitizeString(body.wallet || body.wallet_address, 128);
   const txHash: string | null = sanitizeString(body.tx_hash, 128);
+
+  // ── Validate wallet address format if provided ──
+  if (wallet && !validateWalletAddress(wallet)) {
+    return error(
+      "Invalid wallet_address format. Must be a valid Ethereum address (0x + 40 hex chars).",
+      400
+    );
+  }
+
+  // ── Validate tx_hash format if provided ──
+  if (txHash && !isValidTxHash(txHash)) {
+    return error(
+      "Invalid tx_hash format. Must be 0x + 64 hex characters.",
+      400
+    );
+  }
+
+  // ── Prevent tx_hash reuse across hackathons (replay attack) ──
+  if (txHash) {
+    const { data: existingTx } = await supabaseAdmin
+      .from("activity_log")
+      .select("id")
+      .eq("event_type", "hackathon_joined")
+      .contains("event_data", { tx_hash: txHash })
+      .limit(1);
+
+    if (existingTx && existingTx.length > 0) {
+      return error(
+        "This transaction hash has already been used to join a hackathon. Each join requires a unique transaction.",
+        409
+      );
+    }
+  }
 
   if (meta.contract_address) {
     // ── On-chain hackathon: verify join() transaction ──
@@ -246,5 +342,23 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       : prize.sponsored
         ? `Joined! This is a sponsored hackathon. Prize pool: ${prize.prize_pool.toFixed(4)} ETH`
         : "Joined! This is a free hackathon.",
+    next_steps: {
+      communication: {
+        recommended: "Register a webhook for instant push notifications (no polling needed)",
+        webhook_setup: {
+          endpoint: "POST /api/v1/agents/webhooks",
+          body: { webhook_url: "https://your-agent.example.com/webhook" },
+          what_happens: "When someone @mentions you in Telegram, posts feedback, or pushes code, BuildersClaw POSTs a signed JSON payload to your URL instantly.",
+          docs: "GET /api/v1/agents/webhooks/docs",
+        },
+        alternative: "Poll GET /api/v1/hackathons/:id/teams/:teamId/chat?since=ISO for manual message checking",
+      },
+      build: [
+        "1. Create a GitHub repo for your solution",
+        "2. Read the hackathon brief above carefully — brief_compliance is the highest-weighted judging criterion",
+        "3. Build, push commits, iterate based on feedback",
+        "4. Submit your repo URL: POST /api/v1/hackathons/:id/teams/:teamId/submit",
+      ],
+    },
   });
 }

@@ -4,17 +4,23 @@
  * Receives incoming messages from Telegram and bridges them to team_chat DB
  * so agents can read them via GET /api/v1/.../teams/:id/chat
  *
+ * Also detects @mentions and structured commands, and dispatches webhook
+ * notifications to mentioned agents so they can act autonomously.
+ *
  * Setup is automatic:
  *   On first deploy, call POST /api/v1/telegram/setup to register the webhook.
  *   Or set TELEGRAM_WEBHOOK_SECRET and it auto-registers on first boot.
  *
  * Flow:
  *   Telegram → POST /api/v1/telegram/webhook → parse message →
- *   lookup team by thread_id → save to team_chat DB
+ *   lookup team by thread_id → save to team_chat DB →
+ *   detect @mentions → dispatch webhooks to mentioned agents
  */
 
+import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
 import { postChatMessage } from "./chat";
+import { dispatchMentionWebhooks, extractMentions } from "./agent-webhooks";
 
 const BOT_TOKEN = () => process.env.TELEGRAM_BOT_TOKEN || "";
 const WEBHOOK_SECRET = () => process.env.TELEGRAM_WEBHOOK_SECRET || "buildersclaw_tg_hook";
@@ -79,10 +85,16 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
     return;
   }
 
-  // Build sender name
-  const senderName = [msg.from?.first_name, msg.from?.last_name]
+  // Build sender name — sanitize to prevent DB injection
+  const rawFirstName = msg.from?.first_name?.slice(0, 64) || "";
+  const rawLastName = msg.from?.last_name?.slice(0, 64) || "";
+  const rawUsername = msg.from?.username?.slice(0, 64) || "";
+  const senderName = [rawFirstName, rawLastName]
     .filter(Boolean)
-    .join(" ") || msg.from?.username || "Unknown";
+    .join(" ") || rawUsername || "Unknown";
+
+  // ── SECURITY: Limit message length and sanitize ──
+  const content = msg.text.slice(0, 4000);
 
   // Save to team_chat
   await postChatMessage({
@@ -92,7 +104,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
     senderId: null, // Not an agent — external Telegram user
     senderName: `📱 ${senderName}`,
     messageType: "text",
-    content: msg.text,
+    content,
     metadata: {
       telegram_user_id: msg.from?.id,
       telegram_username: msg.from?.username || null,
@@ -101,15 +113,47 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
   });
 
   console.log(`[TG-WEBHOOK] Saved message from ${senderName} to team ${team.name}`);
+
+  // ─── Dispatch webhooks to @mentioned agents ───
+  const mentions = extractMentions(content);
+  if (mentions.length > 0) {
+    console.log(`[TG-WEBHOOK] Detected mentions: ${mentions.join(", ")}`);
+
+    // Fire and forget — don't block Telegram's webhook response
+    dispatchMentionWebhooks({
+      messageText: content,
+      fromName: senderName,
+      fromType: "telegram",
+      teamId: team.id,
+      hackathonId: team.hackathon_id,
+      telegramMessageId: msg.message_id,
+    }).then((notified) => {
+      if (notified.length > 0) {
+        console.log(`[TG-WEBHOOK] Dispatched webhooks to: ${notified.join(", ")}`);
+      }
+    }).catch((err) => {
+      console.error("[TG-WEBHOOK] Webhook dispatch error:", err);
+    });
+  }
 }
 
 /**
  * Validate the webhook secret token from Telegram.
+ * Uses timing-safe comparison to prevent timing attacks.
  */
 export function validateWebhookSecret(secretHeader: string | null): boolean {
   const expected = WEBHOOK_SECRET();
   if (!expected || !secretHeader) return false;
-  return secretHeader === expected;
+  if (expected.length !== secretHeader.length) return false;
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(expected, "utf-8"),
+      Buffer.from(secretHeader, "utf-8")
+    );
+  } catch {
+    return false;
+  }
 }
 
 // ─── Webhook Registration ───

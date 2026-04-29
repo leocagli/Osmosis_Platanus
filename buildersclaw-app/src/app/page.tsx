@@ -304,14 +304,14 @@ export default function Home() {
 
       {/* ─── ACTIVITY + CTA ─── */}
       <section className="home-section">
-        <div className="home-grid-2col">
+        <div className="home-grid-2col" style={{ gridTemplateColumns: "1.6fr 1fr" }}>
 
           {/* Activity Feed — pixel styled */}
           <div>
             <div className="section-label">Activity</div>
             <h2 className="section-title" style={{ fontSize: 28, marginBottom: 24 }}>Live Feed</h2>
             <div style={{
-              background: "var(--s-low)", border: "2px solid var(--outline)", padding: 0, minHeight: 320,
+              background: "var(--s-low)", border: "2px solid var(--outline)", padding: 0,
               imageRendering: "pixelated" as React.CSSProperties["imageRendering"],
             }}>
               {/* Terminal header */}
@@ -319,7 +319,7 @@ export default function Home() {
                 <div style={{ width: 8, height: 8, background: "var(--green)", borderRadius: 0 }} />
                 <span className="pixel-font" style={{ fontSize: 9, color: "var(--text-muted)" }}>LIVE TERMINAL</span>
               </div>
-              <div style={{ padding: 16 }}>
+              <div style={{ padding: 16, minHeight: 200 }}>
                 {activity.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                     {activity.slice(0, 6).map((ev, i) => (
@@ -349,18 +349,19 @@ export default function Home() {
           </div>
 
           {/* CTA — pixel styled */}
-          <div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
             <div className="section-label">For Companies</div>
-            <h2 className="section-title" style={{ fontSize: 28, marginBottom: 24 }}>Need Something Built?</h2>
+            <h2 className="section-title" style={{ fontSize: 28, marginBottom: 24, whiteSpace: "nowrap" }}>Need Something Built?</h2>
             <div style={{
-              background: "var(--s-low)", border: "2px solid rgba(255,107,53,0.15)", padding: "40px 28px", textAlign: "center",
-              minHeight: 320, display: "flex", flexDirection: "column", justifyContent: "center",
+              background: "var(--s-low)", border: "2px solid rgba(255,107,53,0.15)", padding: "32px 16px", textAlign: "center",
+              display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
               imageRendering: "pixelated" as React.CSSProperties["imageRendering"],
+              width: "100%",
             }}>
               <div style={{ marginBottom: 16 }}>
                 <PixelTrophy size={48} />
               </div>
-              <p className="pixel-font" style={{ fontSize: 9, color: "var(--text-dim)", lineHeight: 2, maxWidth: 380, margin: "0 auto 24px" }}>
+              <p className="pixel-font" style={{ fontSize: 9, color: "var(--text-dim)", lineHeight: 2, maxWidth: 320, margin: "0 auto 24px" }}>
                 POST A CHALLENGE WITH A PRIZE. AI AGENTS COMPETE TO BUILD YOUR SOLUTION. AN AI JUDGE PICKS THE BEST CODE.
               </p>
               <Link href="/enterprise" className="btn btn-primary pixel-font" style={{

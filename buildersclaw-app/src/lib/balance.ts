@@ -78,26 +78,70 @@ export async function creditBalance(options: {
 
   if (amountUsd <= 0) throw new Error("Credit amount must be positive");
 
-  // ── Dedup: reject if this tx_hash was already credited ──
+  // ── Dedup: Atomically insert tx record FIRST to prevent race conditions ──
+  // If two identical tx_hash requests arrive simultaneously, only one INSERT succeeds.
   if (referenceId) {
-    const { data: existing } = await supabaseAdmin
+    const txId = uuid();
+    const { error: insertErr } = await supabaseAdmin
       .from("balance_transactions")
-      .select("id")
-      .eq("reference_id", referenceId)
-      .eq("type", "deposit")
-      .single();
+      .insert({
+        id: txId,
+        agent_id: agentId,
+        type: "deposit",
+        amount_usd: amountUsd,
+        balance_after: 0, // Placeholder — updated below
+        reference_id: referenceId,
+        metadata: metadata || null,
+        created_at: new Date().toISOString(),
+      });
 
-    if (existing) {
-      throw new DuplicateDepositError(
-        `Deposit already credited for tx_hash: ${referenceId}`
-      );
+    // If insert fails due to unique constraint on reference_id, it's a duplicate
+    if (insertErr) {
+      // Check if it's actually a duplicate (reference_id conflict)
+      const { data: existing } = await supabaseAdmin
+        .from("balance_transactions")
+        .select("id")
+        .eq("reference_id", referenceId)
+        .eq("type", "deposit")
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        throw new DuplicateDepositError(
+          `Deposit already credited for tx_hash: ${referenceId}`
+        );
+      }
+      // If not a duplicate, it's some other error
+      throw new Error(`Failed to record deposit transaction: ${insertErr.message}`);
     }
+
+    // Transaction record claimed — now safe to update balance
+    const balance = await getBalance(agentId);
+    const newBalance = balance.balance_usd + amountUsd;
+
+    await supabaseAdmin
+      .from("agent_balances")
+      .upsert({
+        agent_id: agentId,
+        balance_usd: newBalance,
+        total_deposited_usd: balance.total_deposited_usd + amountUsd,
+        total_spent_usd: balance.total_spent_usd,
+        total_fees_usd: balance.total_fees_usd,
+        updated_at: new Date().toISOString(),
+      });
+
+    // Update the placeholder balance_after
+    await supabaseAdmin
+      .from("balance_transactions")
+      .update({ balance_after: newBalance })
+      .eq("id", txId);
+
+    return { ...balance, balance_usd: newBalance, total_deposited_usd: balance.total_deposited_usd + amountUsd };
   }
 
+  // No referenceId — direct credit (admin/test only)
   const balance = await getBalance(agentId);
   const newBalance = balance.balance_usd + amountUsd;
 
-  // Update balance
   await supabaseAdmin
     .from("agent_balances")
     .upsert({
@@ -109,14 +153,13 @@ export async function creditBalance(options: {
       updated_at: new Date().toISOString(),
     });
 
-  // Log transaction
   await supabaseAdmin.from("balance_transactions").insert({
     id: uuid(),
     agent_id: agentId,
     type: "deposit",
     amount_usd: amountUsd,
     balance_after: newBalance,
-    reference_id: referenceId || null,
+    reference_id: null,
     metadata: metadata || null,
     created_at: new Date().toISOString(),
   });

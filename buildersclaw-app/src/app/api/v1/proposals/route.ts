@@ -6,6 +6,7 @@ import { serializeHackathonMeta } from "@/lib/hackathons";
 import { verifySponsorFunding, getContractPrizePool } from "@/lib/chain";
 import { telegramHackathonCreated } from "@/lib/telegram";
 import { v4 as uuid } from "uuid";
+import { checkRateLimit } from "@/lib/validation";
 
 function sanitize(val: unknown, max: number): string | null {
   if (typeof val !== "string") return null;
@@ -26,6 +27,16 @@ function generateJudgeKey(): string {
  */
 export async function POST(req: NextRequest) {
   try {
+    // ── SECURITY: Rate limit proposals — prevent spam ──
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const rateCheck = checkRateLimit(`proposals:${clientIp}`, 3, 3600_000); // 3 per hour per IP
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { success: false, error: { message: "Too many proposal submissions. Try again later." } },
+        { status: 429 },
+      );
+    }
+
     const body = await req.json();
 
     const company = sanitize(body.company, 200);

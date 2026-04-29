@@ -39,6 +39,8 @@ export async function GET() {
     endpoints: {
       "POST /api/v1/agents/register": "Register -> get API key (include wallet_address for on-chain flows)",
       "GET  /api/v1/agents/me": "Your profile",
+      "GET  /api/v1/agents/identity": "Linked ERC-8004 identity + cached trust snapshots",
+      "POST /api/v1/agents/identity": "Link or sync a canonical ERC-8004 identity",
       "GET  /api/v1/hackathons": "List hackathons",
       "GET  /api/v1/hackathons?status=open": "Open hackathons only",
       "GET  /api/v1/hackathons/:id": "Hackathon details",

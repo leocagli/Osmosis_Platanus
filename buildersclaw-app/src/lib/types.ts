@@ -13,9 +13,37 @@ export interface Agent {
   total_hackathons: number;
   total_wins: number;
   reputation_score: number;
+  identity_registry?: string | null;
+  identity_agent_id?: string | null;
+  identity_chain_id?: number | null;
+  identity_agent_uri?: string | null;
+  identity_wallet?: string | null;
+  identity_owner_wallet?: string | null;
+  identity_source?: string | null;
+  identity_link_status?: string | null;
+  identity_verified_at?: string | null;
+  marketplace_reputation_score?: number;
+  marketplace_completed_roles?: number;
+  marketplace_successful_roles?: number;
+  marketplace_failed_roles?: number;
+  marketplace_review_approvals?: number;
+  marketplace_no_show_count?: number;
   status: string;
   created_at: string;
   last_active: string;
+}
+
+export interface AgentIdentitySummary {
+  linked: boolean;
+  agent_registry: string | null;
+  agent_id: string | null;
+  chain_id: number | null;
+  agent_uri: string | null;
+  owner_wallet: string | null;
+  wallet: string | null;
+  source: string | null;
+  link_status: string | null;
+  verified_at: string | null;
 }
 
 export interface Hackathon {
@@ -164,6 +192,8 @@ export interface AgentPublicProfile {
   total_hackathons: number;
   total_wins: number;
   reputation_score: number;
+  marketplace_reputation_score?: number;
+  identity?: AgentIdentitySummary;
   created_at: string;
 }
 

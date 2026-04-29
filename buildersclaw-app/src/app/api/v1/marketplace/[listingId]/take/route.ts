@@ -3,6 +3,19 @@ import { v4 as uuid } from "uuid";
 import { authenticateRequest } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { success, error, unauthorized, notFound } from "@/lib/responses";
+import { parseTelegramUsername } from "@/lib/telegram";
+import {
+  isValidUUID,
+  validateWalletAddress,
+  enforceShareIntegrity,
+  autoWithdrawInvalidListings,
+  MEMBER_MIN_SHARE_PCT,
+  LEADER_MIN_KEEP_PCT,
+  checkRateLimit,
+  checkAgentNotAlreadyInHackathon,
+  validateSharePct,
+  generateCostWarning,
+} from "@/lib/validation";
 
 type RouteParams = { params: Promise<{ listingId: string }> };
 
@@ -30,6 +43,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const { listingId } = await params;
 
+  // ── Validate listing ID format ──
+  if (!isValidUUID(listingId)) {
+    return error("Invalid listing ID format", 400);
+  }
+
+  // ── Rate limit: max 10 claims per agent per minute ──
+  const rateCheck = checkRateLimit(`claim:${agent.id}`, 10, 60_000);
+  if (!rateCheck.allowed) {
+    return error("Too many claim attempts. Try again shortly.", 429);
+  }
+
   // ── Load the listing ──
   const { data: listing } = await supabaseAdmin
     .from("marketplace_listings")
@@ -47,6 +71,16 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   // ── Can't take your own listing ──
   if (listing.posted_by === agent.id) {
     return error("You cannot claim your own listing", 400);
+  }
+
+  // ── SECURITY: Check agent is not already on ANY team in this hackathon ──
+  const hackathonCheck = await checkAgentNotAlreadyInHackathon(agent.id, listing.hackathon_id);
+  if (hackathonCheck.alreadyIn) {
+    return error(
+      `You are already on a team in this hackathon (team: ${hackathonCheck.teamId}, role: ${hackathonCheck.role}). ` +
+      `An agent cannot join multiple teams in the same hackathon.`,
+      409,
+    );
   }
 
   // ── Check agent is not already on this team ──
@@ -95,22 +129,52 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   const leaderAfterPct = leaderMember.revenue_share_pct - listing.share_pct;
-  if (leaderAfterPct < 20) {
+  if (leaderAfterPct < LEADER_MIN_KEEP_PCT) {
     return error(
-      `Cannot claim — leader would only have ${leaderAfterPct}% left (minimum 20%). ` +
+      `Cannot claim — leader would only have ${leaderAfterPct}% left (minimum ${LEADER_MIN_KEEP_PCT}%). ` +
       `The team may have added members since this listing was posted.`,
       400
     );
   }
 
+  // ── SECURITY: Ensure the listing's share is valid (not 0%, not below minimum) ──
+  const shareCheck = validateSharePct(listing.share_pct, "member");
+  if (!shareCheck.valid) {
+    return error(
+      shareCheck.message || `Listing share ${listing.share_pct}% is invalid.`,
+      400,
+      {
+        listing_share_pct: listing.share_pct,
+        minimum_share_pct: MEMBER_MIN_SHARE_PCT,
+        action: "This listing should be withdrawn by the poster.",
+      },
+    );
+  }
+
   // Verify claiming agent has a wallet (required for on-chain prize splitting)
   const { data: claimingAgent } = await supabaseAdmin
-    .from("agents").select("wallet_address").eq("id", agent.id).single();
+    .from("agents").select("wallet_address, strategy").eq("id", agent.id).single();
   if (!claimingAgent?.wallet_address) {
     return error(
       "You must register a wallet_address before claiming marketplace roles. " +
       "On-chain prize splitting requires every team member to have a wallet.",
       400
+    );
+  }
+
+  // Verify claiming agent has telegram_username (required for team comms)
+  const claimingTelegram = parseTelegramUsername(claimingAgent.strategy);
+  if (!claimingTelegram) {
+    return error(
+      "You must register your telegram_username before claiming a marketplace role. " +
+      "Your agent needs to be in the BuildersClaw Telegram supergroup to coordinate with the team.",
+      400,
+      {
+        how_to_fix: [
+          "1. Join the BuildersClaw Telegram supergroup",
+          "2. Register: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}",
+        ],
+      },
     );
   }
 
@@ -194,6 +258,30 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     },
   });
 
+  // 5. POST-CLAIM SECURITY: enforce share integrity (auto-correct if drift)
+  const integrity = await enforceShareIntegrity(listing.team_id);
+  if (!integrity.valid) {
+    console.error(`[SECURITY] Share integrity violation after claim on team ${listing.team_id}:`, integrity.issues);
+  }
+
+  // 6. Auto-withdraw stale listings that can no longer be fulfilled
+  const withdrawn = await autoWithdrawInvalidListings(listing.team_id);
+  if (withdrawn.length > 0) {
+    console.warn(`[MARKETPLACE] Auto-withdrew ${withdrawn.length} stale listings for team ${listing.team_id}`);
+  }
+
+  // ── SECURITY: Generate cost/ROI warning for the claiming agent ──
+  const { data: hackathonForCost } = await supabaseAdmin
+    .from("hackathons")
+    .select("prize_pool")
+    .eq("id", listing.hackathon_id)
+    .single();
+  const costWarning = generateCostWarning({
+    prizePool: hackathonForCost?.prize_pool || 0,
+    agentSharePct: listing.share_pct,
+    estimatedCostUsd: 0, // Agent hasn't spent yet — just inform them of their share value
+  });
+
   // Parse repo_url from listing's role_description JSON
   let listingRepoUrl: string | null = null;
   let listingDescription: string | null = null;
@@ -234,6 +322,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     hackathon_id: listing.hackathon_id,
     role: listing.role_title,
     share_pct: listing.share_pct,
+    cost_info: {
+      your_potential_prize: costWarning.agent_potential_prize,
+      warning: costWarning.message,
+      severity: costWarning.severity,
+      note: "You are responsible for your own token spending. If your costs exceed your prize share, you lose money even if you win.",
+    },
     next_steps: {
       message: listingRepoUrl
         ? `Clone the repo and start building. The leader should add you as a collaborator.`

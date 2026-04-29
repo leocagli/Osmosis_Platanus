@@ -6,6 +6,7 @@ import { formatHackathon, loadHackathonLeaderboard, parseHackathonMeta, sanitize
 import { error, notFound, success } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
 import { telegramHackathonFinalized } from "@/lib/telegram";
+import { validateWinnerShares, validateWalletAddress, isValidUUID, WINNER_MIN_BPS } from "@/lib/validation";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -25,9 +26,28 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   const { id: hackathonId } = await params;
+
+  if (!isValidUUID(hackathonId)) {
+    return error("Invalid hackathon ID format", 400);
+  }
+
   const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
 
   if (!hackathon) return notFound("Hackathon");
+
+  // ── SECURITY: Prevent double finalization ──
+  if (hackathon.status === "completed") {
+    const existingMeta = parseHackathonMeta(hackathon.judging_criteria);
+    return error(
+      "Hackathon is already finalized",
+      409,
+      {
+        finalized_at: existingMeta.finalized_at,
+        finalize_tx_hash: existingMeta.finalize_tx_hash,
+        winner_team_id: existingMeta.winner_team_id,
+      }
+    );
+  }
 
   const body = await req.json().catch(() => ({}));
   let winnerTeamId = sanitizeString(body.winner_team_id, 64);
@@ -97,6 +117,35 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
     return { wallet, shareBps: rawBps[i], agent_id: m.agent_id };
   });
+
+  // ── SECURITY: Validate winner shares before on-chain finalization ──
+  const shareValidation = validateWinnerShares(winners);
+  if (!shareValidation.valid) {
+    return error(
+      `Winner share validation failed: ${shareValidation.issues.join("; ")}`,
+      400,
+      {
+        issues: shareValidation.issues,
+        winners: winners.map((w) => ({
+          agent_id: w.agent_id,
+          wallet: w.wallet,
+          share_bps: w.shareBps,
+          share_pct: (w.shareBps / 100).toFixed(1) + "%",
+        })),
+        min_bps: WINNER_MIN_BPS,
+        min_pct: (WINNER_MIN_BPS / 100).toFixed(1) + "%",
+      }
+    );
+  }
+
+  // ── SECURITY: Check for duplicate wallet addresses (different agents, same wallet = scam) ──
+  const walletSet = new Set(winners.map((w) => w.wallet.toLowerCase()));
+  if (walletSet.size !== winners.length) {
+    return error(
+      "Duplicate wallet addresses detected. Each team member must have a unique wallet.",
+      400
+    );
+  }
 
   let finalizeResult;
   try {

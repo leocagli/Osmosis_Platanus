@@ -4,6 +4,7 @@ import { generateApiKey, hashToken, authenticateRequest, toPublicAgent } from "@
 import { success, created, error, unauthorized } from "@/lib/responses";
 import { sanitizeString } from "@/lib/hackathons";
 import { v4 as uuid } from "uuid";
+import { validateWalletAddress, checkRateLimit } from "@/lib/validation";
 
 // Max field lengths to prevent abuse
 const LIMITS = {
@@ -13,6 +14,7 @@ const LIMITS = {
   stack: 500,
   wallet_address: 128,
   github_username: 64,
+  telegram_username: 64,
   model: 64,
   avatar_url: 512,
 } as const;
@@ -25,6 +27,13 @@ const LIMITS = {
  */
 export async function POST(req: NextRequest) {
   try {
+    // ── Rate limit registration: prevent bot spam ──
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const rateCheck = checkRateLimit(`register:${clientIp}`, 5, 3600_000);
+    if (!rateCheck.allowed) {
+      return error("Too many registration attempts from this IP. Try again later.", 429);
+    }
+
     const body = await req.json();
     const metadata: Record<string, unknown> = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
     const name = sanitizeString(body.name, LIMITS.name);
@@ -64,17 +73,27 @@ export async function POST(req: NextRequest) {
     const keyHash = hashToken(apiKey);
     const id = uuid();
 
-    const walletAddr = sanitizeString(body.wallet ?? body.wallet_address, LIMITS.wallet_address);
+    const rawWallet = sanitizeString(body.wallet ?? body.wallet_address, LIMITS.wallet_address);
+    const walletAddr = rawWallet ? validateWalletAddress(rawWallet) : null;
+    if (rawWallet && !walletAddr) {
+      return error(
+        "Invalid wallet_address format. Must be a valid Ethereum address (0x + 40 hex chars).",
+        400,
+      );
+    }
     const githubUsername = sanitizeString(body.github_username ?? body.github_handle, LIMITS.github_username);
+    const telegramUsername = sanitizeString(body.telegram_username, LIMITS.telegram_username)
+      ?.replace(/^@/, ""); // strip leading @ if provided
     const rawStack = sanitizeString(metadata.stack ?? body.stack ?? body.strategy, LIMITS.stack);
 
-    // Store github_username alongside stack in strategy field as JSON
+    // Store github_username + telegram_username alongside stack in strategy field as JSON
     let strategyValue: string | null = null;
-    if (githubUsername || rawStack) {
+    if (githubUsername || telegramUsername || rawStack) {
       try {
         const strategyObj: Record<string, unknown> = {};
         if (rawStack) strategyObj.stack = rawStack;
         if (githubUsername) strategyObj.github_username = githubUsername;
+        if (telegramUsername) strategyObj.telegram_username = telegramUsername;
         strategyValue = JSON.stringify(strategyObj);
       } catch {
         strategyValue = rawStack;
@@ -104,6 +123,7 @@ export async function POST(req: NextRequest) {
     const missing: string[] = [];
     if (!walletAddr) missing.push("wallet_address");
     if (!githubUsername) missing.push("github_username");
+    if (!telegramUsername) missing.push("telegram_username");
 
     return created({
       agent: {
@@ -113,6 +133,7 @@ export async function POST(req: NextRequest) {
         api_key: apiKey,
         wallet_address: walletAddr || null,
         github_username: githubUsername || null,
+        telegram_username: telegramUsername || null,
       },
       important: "Save your API key! It will not be shown again.",
       prerequisites: missing.length > 0
@@ -140,6 +161,18 @@ export async function POST(req: NextRequest) {
                 "4. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
               ],
               security: "Your GITHUB_TOKEN stays on your machine. Never send it to any API. We only need your username.",
+            },
+          } : {}),
+          ...(missing.includes("telegram_username") ? {
+            telegram_setup: {
+              why: "Required to receive real-time team notifications (pushes, feedback, submissions). Your agent must be able to read messages from the BuildersClaw Telegram supergroup.",
+              how: [
+                "1. Join the BuildersClaw supergroup on Telegram (link provided by the platform or ask an admin)",
+                "2. Your bot/agent must be a member of the supergroup to receive team topic messages",
+                "3. Register your Telegram username: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}",
+                "4. Once registered and in the group, you'll get real-time push/feedback/submission notifications in your team's topic",
+              ],
+              important: "Without this, you CANNOT join hackathons. The platform verifies your membership in the supergroup before allowing you to participate.",
             },
           } : {}),
         }
@@ -204,7 +237,19 @@ export async function PATCH(req: NextRequest) {
 
     for (const [field, maxLen] of Object.entries(fieldLimits)) {
       if (body[field] !== undefined) {
-        updates[field] = sanitizeString(body[field], maxLen);
+        if (field === "wallet_address") {
+          // Special validation for wallet addresses
+          const rawAddr = sanitizeString(body[field], maxLen);
+          if (rawAddr) {
+            const valid = validateWalletAddress(rawAddr);
+            if (!valid) {
+              return error("Invalid wallet_address format. Must be a valid Ethereum address.", 400);
+            }
+            updates[field] = valid;
+          }
+        } else {
+          updates[field] = sanitizeString(body[field], maxLen);
+        }
       }
     }
 
@@ -217,18 +262,27 @@ export async function PATCH(req: NextRequest) {
     const mappedModel = sanitizeString(metadata.model, LIMITS.model);
     if (mappedModel !== null) updates.model = mappedModel;
 
-    const mappedWallet = sanitizeString(body.wallet, LIMITS.wallet_address);
-    if (mappedWallet !== null) updates.wallet_address = mappedWallet;
+    const rawMappedWallet = sanitizeString(body.wallet, LIMITS.wallet_address);
+    if (rawMappedWallet !== null) {
+      const validWallet = validateWalletAddress(rawMappedWallet);
+      if (!validWallet) {
+        return error("Invalid wallet_address format. Must be a valid Ethereum address.", 400);
+      }
+      updates.wallet_address = validWallet;
+    }
 
-    // Handle github_username — stored in strategy field as JSON
+    // Handle github_username + telegram_username — stored in strategy field as JSON
     const githubUsername = sanitizeString(body.github_username ?? body.github_handle, LIMITS.github_username);
-    if (githubUsername !== null || mappedStack !== null) {
+    const telegramUsername = sanitizeString(body.telegram_username, LIMITS.telegram_username)
+      ?.replace(/^@/, ""); // strip leading @
+    if (githubUsername !== null || telegramUsername !== null || mappedStack !== null) {
       // Parse existing strategy JSON
       let existing: Record<string, unknown> = {};
       if (agent.strategy) {
         try { existing = JSON.parse(agent.strategy); } catch { existing = { stack: agent.strategy }; }
       }
       if (githubUsername !== null) existing.github_username = githubUsername;
+      if (telegramUsername !== null) existing.telegram_username = telegramUsername;
       if (mappedStack !== null) existing.stack = mappedStack;
       updates.strategy = JSON.stringify(existing);
     } else if (mappedStack !== null) {

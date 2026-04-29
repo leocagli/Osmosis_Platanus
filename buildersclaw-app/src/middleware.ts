@@ -1,108 +1,256 @@
-import { NextResponse, type NextRequest } from "next/server";
+/**
+ * ═══════════════════════════════════════════════════════════════
+ * MIDDLEWARE — Security hardening for all API routes.
+ *
+ * Provides:
+ *   - Security headers (HSTS, CSP, X-Frame-Options, etc.)
+ *   - CORS control (only allowed origins)
+ *   - Request body size enforcement
+ *   - IP-based global rate limiting (edge-compatible)
+ *   - Bot/abuse detection via User-Agent
+ * ═══════════════════════════════════════════════════════════════
+ */
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { NextRequest, NextResponse } from "next/server";
+
+// ─── Configuration ───
+
+const ALLOWED_ORIGINS = [
+  "https://buildersclaw.vercel.app",
+  "https://www.buildersclaw.com",
+  process.env.NEXT_PUBLIC_APP_URL,
+].filter(Boolean) as string[];
+
+// In development, allow localhost
+if (process.env.NODE_ENV !== "production") {
+  ALLOWED_ORIGINS.push("http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000");
+}
+
+/** Max request body size: 1MB for most routes, 256KB for chat */
+const MAX_BODY_SIZE_BYTES = 1 * 1024 * 1024;
+const MAX_CHAT_BODY_SIZE = 256 * 1024;
 
 /**
- * Next.js middleware — runs on every API request.
- * 
- * Security layers:
- * 1. Blocks browser-originated POSTs (sec-fetch-mode: navigate)
- * 2. Requires auth on all writes (except register)
- * 3. Validates UUID path params to prevent injection
- * 4. Adds security headers
+ * Global rate limiter — edge-compatible (Map-based).
+ * NOTE: In Vercel Edge, this is per-isolate. For production, use Vercel KV or Upstash Redis.
+ * This still provides meaningful protection against single-origin bursts.
  */
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+const globalRateLimits = new Map<string, { count: number; windowStart: number }>();
+const GLOBAL_RATE_LIMIT = 300; // requests per window
+const GLOBAL_RATE_WINDOW_MS = 60_000; // 1 minute
 
-  // Only guard /api/v1
-  if (!pathname.startsWith("/api/v1")) return NextResponse.next();
+function checkGlobalRateLimit(ip: string): { allowed: boolean; remaining: number } {
+  const now = Date.now();
+  const entry = globalRateLimits.get(ip);
 
-  // ── Security headers on all API responses ──
-  const response = NextResponse.next();
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("Referrer-Policy", "no-referrer");
-
-  // ── Read requests: allow freely (except judge/submit which needs auth) ──
-  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
-    // Judge submit GET needs auth but we let it through — handler validates
-    return response;
+  if (!entry || now - entry.windowStart > GLOBAL_RATE_WINDOW_MS) {
+    globalRateLimits.set(ip, { count: 1, windowStart: now });
+    return { allowed: true, remaining: GLOBAL_RATE_LIMIT - 1 };
   }
 
-  // ── Block browser navigation POSTs ──
-  const secFetchMode = req.headers.get("sec-fetch-mode");
-  if (secFetchMode === "navigate") {
-    return NextResponse.json(
-      { success: false, error: { message: "This API is for AI agents only.", hint: "Read /skill.md for instructions." } },
-      { status: 403 }
+  if (entry.count >= GLOBAL_RATE_LIMIT) {
+    return { allowed: false, remaining: 0 };
+  }
+
+  entry.count++;
+  return { allowed: true, remaining: GLOBAL_RATE_LIMIT - entry.count };
+}
+
+// Cleanup stale entries periodically
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of globalRateLimits) {
+      if (now - entry.windowStart > GLOBAL_RATE_WINDOW_MS * 2) {
+        globalRateLimits.delete(key);
+      }
+    }
+  }, 60_000);
+}
+
+// ─── Security Headers ───
+
+function applySecurityHeaders(response: NextResponse, isApi: boolean): void {
+  // Prevent clickjacking
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+
+  // Prevent MIME sniffing
+  response.headers.set("X-Content-Type-Options", "nosniff");
+
+  // XSS Protection (legacy browsers)
+  response.headers.set("X-XSS-Protection", "1; mode=block");
+
+  // Referrer Policy
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  // HSTS (1 year, includeSubDomains)
+  if (process.env.NODE_ENV === "production") {
+    response.headers.set(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains; preload"
     );
   }
 
-  // ── Auth required on all writes except public endpoints ──
-  const isRegister = pathname.endsWith("/agents/register") && req.method === "POST";
-  const isJudge = pathname.endsWith("/judge") && req.method === "POST";
-  const isJudgeSubmit = pathname.endsWith("/judge/submit") && req.method === "POST";
-  const isProposal = pathname.endsWith("/proposals") && req.method === "POST";
-  const isCheckDeadline = pathname.endsWith("/check-deadline") && req.method === "POST";
-  const isSeedTest = pathname.endsWith("/seed-test") && req.method === "POST";
-  const isPublicWrite = isRegister || isJudge || isProposal || isCheckDeadline || isSeedTest;
+  // Permissions Policy — disable dangerous features
+  response.headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=()"
+  );
 
-  if (!isPublicWrite) {
-    const auth = req.headers.get("authorization");
-    const isAdminRoute = pathname.startsWith("/api/v1/admin/");
-    const isProposalAdmin = pathname.endsWith("/proposals") && (req.method === "PATCH" || req.method === "GET");
-    const needsAdminAuth = isAdminRoute || isProposalAdmin;
+  // API responses: never cache (sensitive data)
+  // Pages: let Next.js handle caching normally for performance
+  if (isApi) {
+    response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    response.headers.set("Pragma", "no-cache");
+  }
+}
 
-    const hasValidAgentPrefix = !!auth && (auth.startsWith("Bearer buildersclaw_") || auth.startsWith("Bearer hackaclaw_"));
-    const hasJudgePrefix = !!auth && auth.startsWith("Bearer judge_");
-    const hasBearerToken = !!auth && auth.startsWith("Bearer ");
+// ─── CORS ───
 
-    // Judge submit endpoint: allow judge_ prefix tokens
-    if (isJudgeSubmit && hasJudgePrefix) {
-      // Let through — route handler validates the key
-    } else if ((needsAdminAuth && !hasBearerToken) || (!needsAdminAuth && !hasValidAgentPrefix)) {
-      return NextResponse.json(
+function handleCors(request: NextRequest, response: NextResponse): NextResponse {
+  const origin = request.headers.get("origin");
+
+  // API routes need proper CORS
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    // For agent API calls (Bearer token auth), allow any origin
+    // because AI agents make requests from various servers
+    const hasAuth = request.headers.has("authorization");
+
+    if (hasAuth) {
+      // Authenticated API calls — allow from any origin (agents are server-side)
+      response.headers.set("Access-Control-Allow-Origin", origin || "*");
+    } else if (origin && ALLOWED_ORIGINS.includes(origin)) {
+      // Browser requests — only from allowed origins
+      response.headers.set("Access-Control-Allow-Origin", origin);
+    } else if (!origin) {
+      // No origin header (server-to-server, curl, etc.) — allow
+      response.headers.set("Access-Control-Allow-Origin", "*");
+    } else {
+      // Unknown browser origin — reject
+      return new NextResponse(JSON.stringify({ error: "CORS: Origin not allowed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Seed-Secret, X-Telegram-Bot-Api-Secret-Token");
+    response.headers.set("Access-Control-Max-Age", "86400");
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+  }
+
+  return response;
+}
+
+// ─── Main Middleware ───
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // ── Preflight (OPTIONS) — fast path ──
+  if (request.method === "OPTIONS") {
+    const response = new NextResponse(null, { status: 204 });
+    applySecurityHeaders(response, true);
+    return handleCors(request, response);
+  }
+
+  // ── Global rate limiting (API routes only) ──
+  if (pathname.startsWith("/api/")) {
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+
+    const rateCheck = checkGlobalRateLimit(clientIp);
+
+    if (!rateCheck.allowed) {
+      const response = NextResponse.json(
         {
           success: false,
           error: {
-            message: "Authentication required.",
-            hint: needsAdminAuth
-              ? "Add 'Authorization: Bearer <ADMIN_API_KEY>' header."
-              : isJudgeSubmit
-              ? "Add 'Authorization: Bearer <JUDGE_API_KEY>' header."
-              : "Register at POST /api/v1/agents/register to get your API key.",
+            message: "Too many requests. Please slow down.",
+            retry_after_seconds: 60,
           },
         },
-        { status: 401 }
+        { status: 429 }
       );
+      response.headers.set("Retry-After", "60");
+      applySecurityHeaders(response, true);
+      return response;
+    }
+
+    // ── Request body size check ──
+    const contentLength = request.headers.get("content-length");
+    if (contentLength) {
+      const size = parseInt(contentLength, 10);
+      const maxSize = pathname.includes("/chat") ? MAX_CHAT_BODY_SIZE : MAX_BODY_SIZE_BYTES;
+
+      if (!isNaN(size) && size > maxSize) {
+        const response = NextResponse.json(
+          {
+            success: false,
+            error: {
+              message: `Request body too large. Maximum: ${Math.round(maxSize / 1024)}KB`,
+            },
+          },
+          { status: 413 }
+        );
+        applySecurityHeaders(response, true);
+        return response;
+      }
+    }
+
+    // ── Content-Type validation for POST/PUT/PATCH ──
+    if (["POST", "PUT", "PATCH"].includes(request.method)) {
+      const contentType = request.headers.get("content-type");
+
+      // Telegram webhook sends application/json always
+      // Allow missing content-type for simple requests
+      if (contentType && !contentType.includes("application/json") && !contentType.includes("multipart/form-data")) {
+        const response = NextResponse.json(
+          {
+            success: false,
+            error: {
+              message: "Unsupported Content-Type. Use application/json.",
+            },
+          },
+          { status: 415 }
+        );
+        applySecurityHeaders(response, true);
+        return response;
+      }
+    }
+
+    // ── Block suspicious user-agents ──
+    const ua = request.headers.get("user-agent") || "";
+    const suspiciousPatterns = [
+      /sqlmap/i, /nikto/i, /nessus/i, /masscan/i,
+      /zgrab/i, /nuclei/i, /dirbuster/i, /gobuster/i,
+    ];
+
+    if (suspiciousPatterns.some((p) => p.test(ua))) {
+      return new NextResponse(null, { status: 403 });
     }
   }
 
-  // ── Validate UUID params in path ──
-  // Matches segments like /hackathons/UUID/teams/UUID/...
-  const segments = pathname.replace("/api/v1/", "").split("/");
-  for (const seg of segments) {
-    // If it looks like it should be a UUID (contains dashes, 36 chars) but isn't valid, reject
-    if (seg.length === 36 && seg.includes("-") && !UUID_RE.test(seg)) {
-      return NextResponse.json(
-        { success: false, error: { message: "Invalid ID format." } },
-        { status: 400 }
-      );
-    }
-  }
+  // ── Continue with response + headers ──
+  const isApiRoute = pathname.startsWith("/api/");
+  const response = NextResponse.next();
+  applySecurityHeaders(response, isApiRoute);
 
-  // ── Request body size limit (256KB) ──
-  const contentLength = req.headers.get("content-length");
-  if (contentLength && parseInt(contentLength) > 256 * 1024) {
-    return NextResponse.json(
-      { success: false, error: { message: "Request body too large. Max 256KB." } },
-      { status: 413 }
-    );
+  if (isApiRoute) {
+    return handleCors(request, response);
   }
 
   return response;
 }
 
 export const config = {
-  matcher: "/api/v1/:path*",
+  matcher: [
+    // API routes
+    "/api/:path*",
+    // Pages (for security headers)
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
 };
