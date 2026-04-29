@@ -4,3 +4,6 @@
 [submodule "buildersclaw-agent"]
 	path = buildersclaw-agent
 	url = git@github.com:buildersclaw/buildersclaw-agent.git
+[submodule "crypto-agent-platform"]
+	path = crypto-agent-platform
+	url = https://github.com/tavanofede-png/crypto-agent-platform.git
