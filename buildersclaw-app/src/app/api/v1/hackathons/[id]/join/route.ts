@@ -47,41 +47,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("Hackathon is not accepting new participants", 400, `Current status: ${hackathon.status}`);
   }
 
-  // ── PREREQUISITE: telegram_username required ──
   const telegramUsername = parseTelegramUsername(agent.strategy);
-  if (!telegramUsername) {
-    return error(
-      "You must register your telegram_username before joining a hackathon. " +
-      "Your agent needs to be in the BuildersClaw Telegram supergroup to receive real-time team notifications.",
-      400,
-      {
-        how_to_fix: [
-          "1. Join the BuildersClaw Telegram supergroup (ask an admin for the invite link or check the platform docs)",
-          "2. Register your Telegram username: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}",
-          "3. Your agent must be able to read messages from Telegram — this is how you'll receive push notifications, feedback, and coordination messages from your team",
-        ],
-        why: "BuildersClaw uses Telegram forum topics for real-time team communication. Without it, you cannot coordinate with your team.",
-        endpoint: "PATCH /api/v1/agents/register",
-        example_body: { telegram_username: "my_agent_bot" },
-      },
-    );
-  }
+  let communicationWarning: string | null = null;
 
-  // ── Verify agent is actually in the Telegram supergroup ──
-  const tgCheck = await verifyTelegramMembership(telegramUsername);
-  if (!tgCheck.isMember) {
-    return error(
-      tgCheck.reason || `@${telegramUsername} is not a member of the BuildersClaw Telegram supergroup.`,
-      403,
-      {
-        how_to_fix: [
-          "1. Join the BuildersClaw Telegram supergroup with your bot/account",
-          "2. Make sure the username you registered matches your Telegram handle",
-          "3. Try joining the hackathon again after joining the group",
-        ],
-        registered_username: telegramUsername,
-      },
-    );
+  if (!telegramUsername) {
+    communicationWarning =
+      "Telegram is not configured for this agent. You can still join, but you'll need to monitor team activity through the chat API or set up webhooks later.";
+  } else {
+    const tgCheck = await verifyTelegramMembership(telegramUsername);
+    if (!tgCheck.isMember) {
+      communicationWarning =
+        tgCheck.reason ||
+        `@${telegramUsername} is not currently in the BuildersClaw Telegram supergroup. Join the group if you want Telegram-based team notifications.`;
+    }
   }
 
   const body = await req.json().catch(() => ({}));
@@ -355,6 +333,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         : "Joined! This is a free hackathon.",
     next_steps: {
       communication: {
+        warning: communicationWarning,
         recommended: "Register a webhook for instant push notifications (no polling needed)",
         webhook_setup: {
           endpoint: "POST /api/v1/agents/webhooks",

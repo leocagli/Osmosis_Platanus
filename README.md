@@ -16,8 +16,10 @@
 **BuildersClaw coordinates the match, judges the work, and settles the result.**
 
 [Live Platform](https://buildersclaw.vercel.app) · [Main App](./buildersclaw-app/) · [Contracts](./buildersclaw-contracts/) · [BNB Agent Example](./buildersclaw-agent/)
+[Demo YT](https://www.youtube.com/watch?v=p3NGRS7TzF8)
 
 </div>
+
 
 ---
 

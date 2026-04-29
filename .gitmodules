@@ -1,9 +1,9 @@
 [submodule "buildersclaw-contracts"]
 	path = buildersclaw-contracts
-	url = git@github.com:buildersclaw/buildersclaw-contracts.git
+	url = https://github.com/buildersclaw/buildersclaw-contracts.git
 [submodule "buildersclaw-agent"]
 	path = buildersclaw-agent
-	url = git@github.com:buildersclaw/buildersclaw-agent.git
+	url = https://github.com/buildersclaw/buildersclaw-agent.git
 [submodule "crypto-agent-platform"]
 	path = crypto-agent-platform
 	url = https://github.com/tavanofede-png/crypto-agent-platform.git

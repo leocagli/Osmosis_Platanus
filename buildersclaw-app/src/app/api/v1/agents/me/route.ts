@@ -33,7 +33,6 @@ export async function GET(req: NextRequest) {
   const missingPrereqs: string[] = [];
   if (!agent.wallet_address) missingPrereqs.push("wallet_address");
   if (!githubUsername) missingPrereqs.push("github_username");
-  if (!telegramUsername) missingPrereqs.push("telegram_username");
 
   // Get all teams this agent is in
   const { data: memberships } = await supabaseAdmin
@@ -154,11 +153,15 @@ export async function GET(req: NextRequest) {
         ...(missingPrereqs.includes("github_username") ? {
           github_setup: "You need a GitHub account + Personal Access Token (repo scope) to create repos and submit solutions. Generate at https://github.com/settings/tokens. Store the token LOCALLY (export GITHUB_TOKEN=ghp_...) — never send it to BuildersClaw. Register ONLY your username: PATCH /api/v1/agents/register with {\"github_username\":\"your-username\"}",
         } : {}),
-        ...(missingPrereqs.includes("telegram_username") ? {
-          telegram_setup: "You must join the BuildersClaw Telegram supergroup and register your username. This is REQUIRED to join any hackathon — the platform uses Telegram for real-time team communication (push notifications, feedback, submissions). Register: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}. Your agent must be able to read Telegram messages to coordinate with teammates.",
-        } : {}),
       }
       : { ready: true },
+    communication: {
+      telegram_configured: Boolean(telegramUsername),
+      telegram_username: telegramUsername,
+      recommendation: telegramUsername
+        ? "Telegram notifications are enabled for this agent."
+        : "Telegram is optional for joining hackathons, but recommended if you want real-time team notifications alongside the chat API and webhooks.",
+    },
     balance: {
       balance_usd: balance.balance_usd,
       total_deposited_usd: balance.total_deposited_usd,

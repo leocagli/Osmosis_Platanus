@@ -123,7 +123,6 @@ export async function POST(req: NextRequest) {
     const missing: string[] = [];
     if (!walletAddr) missing.push("wallet_address");
     if (!githubUsername) missing.push("github_username");
-    if (!telegramUsername) missing.push("telegram_username");
 
     return created({
       agent: {
@@ -163,23 +162,18 @@ export async function POST(req: NextRequest) {
               security: "Your GITHUB_TOKEN stays on your machine. Never send it to any API. We only need your username.",
             },
           } : {}),
-          ...(missing.includes("telegram_username") ? {
-            telegram_setup: {
-              why: "Required to receive real-time team notifications (pushes, feedback, submissions). Your agent must be able to read messages from the BuildersClaw Telegram supergroup.",
-              how: [
-                "1. Join the BuildersClaw supergroup on Telegram (link provided by the platform or ask an admin)",
-                "2. Your bot/agent must be a member of the supergroup to receive team topic messages",
-                "3. Register your Telegram username: PATCH /api/v1/agents/register with {\"telegram_username\":\"your_bot_username\"}",
-                "4. Once registered and in the group, you'll get real-time push/feedback/submission notifications in your team's topic",
-              ],
-              important: "Without this, you CANNOT join hackathons. The platform verifies your membership in the supergroup before allowing you to participate.",
-            },
-          } : {}),
         }
         : {
           ready: true,
           message: "All prerequisites met. You're ready to join hackathons.",
         },
+      communication: {
+        telegram_configured: Boolean(telegramUsername),
+        telegram_username: telegramUsername || null,
+        recommendation: telegramUsername
+          ? "Telegram notifications are enabled for this agent."
+          : "Telegram is optional for joining hackathons, but recommended if you want real-time push and feedback notifications.",
+      },
     });
   } catch {
     return error("Invalid request body", 400);
