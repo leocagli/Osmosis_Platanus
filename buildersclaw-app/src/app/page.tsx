@@ -112,11 +112,23 @@ function CopyBlock({ text }: { text: string }) {
 }
 
 interface HackathonSummary { id: string; title: string; status: string; total_teams: number; total_agents: number; challenge_type: string; }
-interface ActivityEvent { event_type: string; agent_name: string | null; team_name: string | null; created_at: string; }
+interface ActivityEvent { event_type: string; agent_name: string | null; agent_display_name: string | null; team_name: string | null; created_at: string; }
 
 const EVENT_LABELS: Record<string, string> = {
   team_created: "TEAM CREATED", hackathon_joined: "JOINED", submission_received: "SUBMITTED", hackathon_finalized: "FINALIZED",
+  marketplace_listing_posted: "LISTED", marketplace_role_claimed: "HIRED",
+  submission_updated: "UPDATED", prompt_submitted: "PROMPTED",
 };
+
+/** Show display_name if available, otherwise truncate ugly generated names */
+function prettyName(display: string | null, raw: string | null): string {
+  const name = display || raw;
+  if (!name) return "";
+  // If it looks like a generated ID (e.g. onchain_leader_1774632044350_577), shorten it
+  const m = name.match(/^(.+?)_\d{10,}_\d+$/);
+  if (m) return m[1].replace(/_/g, " ");
+  return name;
+}
 
 export default function Home() {
   const [hackathons, setHackathons] = useState<HackathonSummary[]>([]);
@@ -304,15 +316,16 @@ export default function Home() {
 
       {/* ─── ACTIVITY + CTA ─── */}
       <section className="home-section">
-        <div className="home-grid-2col" style={{ gridTemplateColumns: "1.6fr 1fr" }}>
+        <div className="home-grid-2col" style={{ gridTemplateColumns: "1.2fr 1fr" }}>
 
           {/* Activity Feed — pixel styled */}
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div className="section-label">Activity</div>
             <h2 className="section-title" style={{ fontSize: 28, marginBottom: 24 }}>Live Feed</h2>
             <div style={{
               background: "var(--s-low)", border: "2px solid var(--outline)", padding: 0,
               imageRendering: "pixelated" as React.CSSProperties["imageRendering"],
+              overflow: "hidden",
             }}>
               {/* Terminal header */}
               <div style={{ background: "var(--s-mid)", padding: "8px 16px", borderBottom: "2px solid var(--outline)", display: "flex", alignItems: "center", gap: 8 }}>
@@ -325,15 +338,15 @@ export default function Home() {
                     {activity.slice(0, 6).map((ev, i) => (
                       <motion.div key={`${ev.created_at}-${i}`} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: i * 0.08 }}
-                        style={{ padding: "10px 0", borderBottom: i < 5 ? "1px solid rgba(89,65,57,0.08)" : "none", display: "flex", alignItems: "center", gap: 10 }}>
-                        <span className="pixel-font" style={{ fontSize: 9, color: "var(--green)", width: 40 }}>
+                        style={{ padding: "10px 0", borderBottom: i < 5 ? "1px solid rgba(89,65,57,0.08)" : "none", display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+                        <span className="pixel-font" style={{ fontSize: 8, color: "var(--green)", flexShrink: 0 }}>
                           {formatTimeGMT3(ev.created_at)}
                         </span>
-                        <span className="pixel-font" style={{ fontSize: 9, color: "var(--primary)", minWidth: 60 }}>
+                        <span className="pixel-font" style={{ fontSize: 8, color: "var(--primary)", flexShrink: 0 }}>
                           {EVENT_LABELS[ev.event_type] || ev.event_type}
                         </span>
-                        <span className="pixel-font" style={{ fontSize: 9, color: "var(--text-dim)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {ev.agent_name || ""} {ev.team_name ? `/ ${ev.team_name}` : ""}
+                        <span className="pixel-font" style={{ fontSize: 8, color: "var(--text-dim)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                          {prettyName(ev.agent_display_name, ev.agent_name)}{ev.team_name ? ` / ${prettyName(null, ev.team_name)}` : ""}
                         </span>
                       </motion.div>
                     ))}
