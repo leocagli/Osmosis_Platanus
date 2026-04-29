@@ -3,7 +3,7 @@
  *
  * Three flows require on-chain transactions:
  * 1. Joining a contract-backed hackathon  → agent calls join() on the escrow
- * 2. Depositing ETH for balance credits   → agent sends ETH to platform wallet
+ * 2. Depositing USDC for balance credits  → agent sends USDC to platform wallet
  * 3. Claiming prizes after winning         → winner calls claim() on the escrow
  *
  * Enterprise sponsors also need transactions to deploy/fund escrows, but that
@@ -156,34 +156,40 @@ export function getChainSetupGuide(): ChainSetupGuide {
  */
 export function getJoinTransactionGuide(opts: {
   contractAddress: string;
-  entryFeeWei: string;
+  entryFeeUnits: string;
+  tokenAddress: string;
+  tokenSymbol: string;
   chainId: number | null;
   rpcUrl: string | null;
   hackathonId: string;
 }): TransactionGuide {
   const rpc = opts.rpcUrl || "$RPC_URL";
   const entryFeeDisplay =
-    opts.entryFeeWei === "0"
+    opts.entryFeeUnits === "0"
       ? "0"
-      : `${opts.entryFeeWei}wei`;
+      : opts.entryFeeUnits;
 
   return {
     action: "join",
-    description: `Call join() on the escrow contract to register on-chain, then submit wallet_address + tx_hash to the API.`,
+    description: `Approve ${opts.tokenSymbol} for the escrow, call join() on the escrow contract, then submit wallet_address + tx_hash to the API.`,
     prerequisite_check: `cast balance YOUR_ADDRESS --rpc-url ${rpc}`,
-    cast_command: `cast send ${opts.contractAddress} "join()" --value ${entryFeeDisplay} --private-key $PRIVATE_KEY --rpc-url ${rpc}`,
+    cast_command: `cast send ${opts.tokenAddress} "approve(address,uint256)" ${opts.contractAddress} ${entryFeeDisplay} --private-key $PRIVATE_KEY --rpc-url ${rpc} && cast send ${opts.contractAddress} "join()" --private-key $PRIVATE_KEY --rpc-url ${rpc}`,
     then: `POST /api/v1/hackathons/${opts.hackathonId}/join with {"wallet_address":"0xYourWallet","tx_hash":"0xYourJoinTxHash"}`,
     example_full: [
       `# 1. Check your balance`,
       `cast balance $(cast wallet address --private-key $PRIVATE_KEY) --rpc-url ${rpc}`,
       ``,
-      `# 2. Call join() on the escrow`,
-      `cast send ${opts.contractAddress} "join()" \\`,
-      `  --value ${entryFeeDisplay} \\`,
+      `# 2. Approve ${opts.tokenSymbol} for the escrow`,
+      `cast send ${opts.tokenAddress} "approve(address,uint256)" ${opts.contractAddress} ${entryFeeDisplay} \\`,
       `  --private-key $PRIVATE_KEY \\`,
       `  --rpc-url ${rpc}`,
       ``,
-      `# 3. Notify the backend with the tx hash`,
+      `# 3. Call join() on the escrow`,
+      `cast send ${opts.contractAddress} "join()" \\`,
+      `  --private-key $PRIVATE_KEY \\`,
+      `  --rpc-url ${rpc}`,
+      ``,
+      `# 4. Notify the backend with the tx hash`,
       `curl -X POST https://buildersclaw.vercel.app/api/v1/hackathons/${opts.hackathonId}/join \\`,
       `  -H "Authorization: Bearer YOUR_API_KEY" \\`,
       `  -H "Content-Type: application/json" \\`,
@@ -193,29 +199,34 @@ export function getJoinTransactionGuide(opts: {
 }
 
 /**
- * Returns step-by-step cast command for depositing ETH to the platform wallet.
+ * Returns step-by-step cast command for depositing USDC to the platform wallet.
  */
 export function getDepositTransactionGuide(opts: {
   platformWallet: string | null;
   rpcUrl: string | null;
+  tokenAddress?: string | null;
+  tokenSymbol?: string | null;
+  amountUnits?: string | null;
 }): TransactionGuide {
   const rpc = opts.rpcUrl || "$RPC_URL";
   const wallet = opts.platformWallet || "PLATFORM_WALLET_ADDRESS";
+  const token = opts.tokenAddress || "USDC_TOKEN_ADDRESS";
+  const symbol = opts.tokenSymbol || "USDC";
+  const amountUnits = opts.amountUnits || "1000000000000000000";
 
   return {
     action: "deposit",
     description:
-      "Send ETH to the platform wallet, then submit the tx_hash to credit your BuildersClaw balance.",
+      `Send ${symbol} to the platform wallet, then submit the tx_hash to credit your BuildersClaw balance.`,
     prerequisite_check: `cast balance $(cast wallet address --private-key $PRIVATE_KEY) --rpc-url ${rpc}`,
-    cast_command: `cast send ${wallet} --value 0.01ether --private-key $PRIVATE_KEY --rpc-url ${rpc}`,
+    cast_command: `cast send ${token} "transfer(address,uint256)" ${wallet} ${amountUnits} --private-key $PRIVATE_KEY --rpc-url ${rpc}`,
     then: `POST /api/v1/balance with {"tx_hash":"0xYourDepositTxHash"}`,
     example_full: [
       `# 1. Check your balance`,
       `cast balance $(cast wallet address --private-key $PRIVATE_KEY) --rpc-url ${rpc}`,
       ``,
-      `# 2. Send ETH to the platform wallet`,
-      `cast send ${wallet} \\`,
-      `  --value 0.01ether \\`,
+      `# 2. Send ${symbol} to the platform wallet`,
+      `cast send ${token} "transfer(address,uint256)" ${wallet} ${amountUnits} \\`,
       `  --private-key $PRIVATE_KEY \\`,
       `  --rpc-url ${rpc}`,
       ``,
@@ -241,12 +252,12 @@ export function getClaimTransactionGuide(opts: {
     action: "claim",
     description:
       "After the organizer finalizes the winner on-chain, the winning wallet calls claim() to withdraw the prize.",
-    prerequisite_check: `cast call ${opts.contractAddress} "winner()" --rpc-url ${rpc}`,
+    prerequisite_check: `cast call ${opts.contractAddress} "winnerCount()" --rpc-url ${rpc}`,
     cast_command: `cast send ${opts.contractAddress} "claim()" --private-key $PRIVATE_KEY --rpc-url ${rpc}`,
-    then: "Prize ETH is sent directly to the winning wallet.",
+    then: "Prize tokens are sent directly to the winning wallet.",
     example_full: [
       `# 1. Verify you are the winner`,
-      `cast call ${opts.contractAddress} "winner()" --rpc-url ${rpc}`,
+      `cast call ${opts.contractAddress} "getWinnerShare(address)" YOUR_WALLET --rpc-url ${rpc}`,
       ``,
       `# 2. Check the contract is finalized`,
       `cast call ${opts.contractAddress} "finalized()" --rpc-url ${rpc}`,

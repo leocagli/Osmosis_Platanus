@@ -1,17 +1,17 @@
 import { NextRequest } from "next/server";
+import { formatUnits } from "viem";
 import { authenticateRequest } from "@/lib/auth";
 import { creditBalance, getBalance, DuplicateDepositError } from "@/lib/balance";
-import { weiToUsd, getEthPriceUsd } from "@/lib/eth-price";
-import { verifyDepositTransaction } from "@/lib/chain";
+import { getUsdcAddress, getUsdcDecimals, getUsdcSymbol, verifyDepositTransaction } from "@/lib/chain";
 import { success, error, unauthorized, created } from "@/lib/responses";
 import { getOrganizerWalletClient } from "@/lib/chain";
-import { getDepositTransactionGuide, getChainSetupGuide } from "@/lib/chain-prerequisites";
+import { getDepositTransactionGuide } from "@/lib/chain-prerequisites";
 
 /**
- * POST /api/v1/balance — Deposit ETH to fund prompt credits.
+ * POST /api/v1/balance — Deposit USDC to fund prompt credits.
  *
- * Agent sends ETH to the platform wallet, then submits the tx_hash here.
- * We verify the on-chain transaction and credit their balance in USD.
+ * Agent sends USDC to the platform wallet, then submits the tx_hash here.
+ * We verify the ERC-20 transfer on-chain and credit their balance 1:1 in USD.
  *
  * Body: { tx_hash: string }
  */
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     });
 
     return error(
-      "tx_hash is required. Send ETH to the platform wallet first, then submit the transaction hash here.",
+        `tx_hash is required. Send ${getUsdcSymbol()} to the platform wallet first, then submit the transaction hash here.`,
       400,
       {
         how_to_deposit: depositGuide,
@@ -58,18 +58,19 @@ export async function POST(req: NextRequest) {
   // Verify the deposit on-chain
   let deposit;
   try {
-    deposit = await verifyDepositTransaction({ txHash });
+    if (!agent.wallet_address) {
+      return error("Register your wallet_address before depositing USDC.", 400);
+    }
+    deposit = await verifyDepositTransaction({ txHash, expectedFrom: agent.wallet_address });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to verify deposit";
     return error(msg, 400, {
-      help: "Ensure the transaction was sent to the correct platform wallet, was confirmed on-chain, and had a non-zero ETH value.",
+      help: `Ensure the transaction transferred ${getUsdcSymbol()} from your registered wallet to the correct platform wallet and was confirmed on-chain.`,
       setup_guide: "GET /api/v1/chain/setup",
     });
   }
 
-  // Convert ETH amount to USD
-  const usdAmount = await weiToUsd(deposit.value);
-  const ethPrice = await getEthPriceUsd();
+  const usdAmount = Number(formatUnits(deposit.value, deposit.decimals));
 
   if (usdAmount < 0.001) {
     return error("Deposit too small. Minimum ~$0.001 USD.", 400);
@@ -80,15 +81,17 @@ export async function POST(req: NextRequest) {
   try {
     balance = await creditBalance({
       agentId: agent.id,
-      amountUsd: usdAmount,
-      referenceId: txHash,
-      metadata: {
-        tx_hash: txHash,
-        eth_amount: deposit.ethAmount,
-        eth_price_usd: ethPrice,
-        from_address: deposit.from,
-        block_number: deposit.blockNumber,
-      },
+        amountUsd: usdAmount,
+        referenceId: txHash,
+        metadata: {
+          tx_hash: txHash,
+          token_symbol: deposit.symbol,
+          token_address: deposit.tokenAddress,
+          token_amount_units: deposit.value.toString(),
+          token_amount_display: formatUnits(deposit.value, deposit.decimals),
+          from_address: deposit.from,
+          block_number: deposit.blockNumber,
+        },
     });
   } catch (err) {
     if (err instanceof DuplicateDepositError) {
@@ -99,25 +102,23 @@ export async function POST(req: NextRequest) {
 
   return created({
     deposited_usd: usdAmount,
-    eth_amount: deposit.ethAmount,
-    eth_price_usd: ethPrice,
+    token_symbol: deposit.symbol,
+    token_amount: formatUnits(deposit.value, deposit.decimals),
     balance_usd: balance.balance_usd,
     tx_hash: txHash,
-    message: `Deposited $${usdAmount.toFixed(4)} USD (${deposit.ethAmount} ETH @ $${ethPrice.toFixed(2)}/ETH)`,
+    message: `Deposited $${usdAmount.toFixed(4)} USD via ${formatUnits(deposit.value, deposit.decimals)} ${deposit.symbol}`,
   });
 }
 
 /**
- * GET /api/v1/balance — Get current balance, platform wallet address, and fee info.
+ * GET /api/v1/balance — Get current balance, platform wallet address, and deposit info.
  */
 export async function GET(req: NextRequest) {
   const agent = await authenticateRequest(req);
   if (!agent) return unauthorized();
 
   const balance = await getBalance(agent.id);
-  const ethPrice = await getEthPriceUsd();
-
-  // Get platform wallet address so agents know where to send ETH
+  // Get platform wallet address so agents know where to send USDC
   let platformWallet: string | null = null;
   try {
     const walletClient = getOrganizerWalletClient();
@@ -132,11 +133,13 @@ export async function GET(req: NextRequest) {
     total_deposited_usd: balance.total_deposited_usd,
     total_spent_usd: balance.total_spent_usd,
     total_fees_usd: balance.total_fees_usd,
-    eth_price_usd: ethPrice,
+    token_symbol: getUsdcSymbol(),
+    token_address: getUsdcAddress(),
+    token_decimals: getUsdcDecimals(),
     platform_fee_pct: 0.05,
     platform_wallet: platformWallet,
     deposit_instructions: platformWallet
-      ? `Send ETH to ${platformWallet}, then POST /api/v1/balance with the tx_hash.`
+      ? `Send ${getUsdcSymbol()} to ${platformWallet}, then POST /api/v1/balance with the tx_hash.`
       : "Platform wallet not configured. Contact admin.",
   });
 }

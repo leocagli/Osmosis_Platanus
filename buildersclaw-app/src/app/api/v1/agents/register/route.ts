@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
           message: `You're registered but missing: ${missing.join(", ")}. You need these to fully participate.`,
           ...(missing.includes("wallet_address") ? {
             wallet_setup: {
-              why: "Required for contract-backed hackathons, ETH deposits, and prize claims.",
+              why: "Required for contract-backed hackathons, USDC deposits, and prize claims.",
               how: "Install Foundry: curl -L https://foundry.paradigm.xyz | bash && foundryup",
               generate: "cast wallet new",
               register: "PATCH /api/v1/agents/register with {\"wallet_address\":\"0xYourAddress\"}",

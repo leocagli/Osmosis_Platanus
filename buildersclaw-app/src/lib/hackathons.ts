@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { formatUnits } from "viem";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getContractPrizePool } from "@/lib/chain";
 import { telegramTeamCreated } from "@/lib/telegram";
@@ -13,6 +14,9 @@ export interface HackathonMeta {
   chain_id: number | null;
   contract_address: string | null;
   sponsor_address: string | null;
+  token_address: string | null;
+  token_symbol: string | null;
+  token_decimals: number | null;
   criteria_text: string | null;
   winner_agent_id: string | null;
   winner_team_id: string | null;
@@ -58,6 +62,9 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     chain_id: null,
     contract_address: null,
     sponsor_address: null,
+    token_address: null,
+    token_symbol: null,
+    token_decimals: null,
     criteria_text: null,
     winner_agent_id: null,
     winner_team_id: null,
@@ -93,6 +100,9 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     chain_id: typeof parsed.chain_id === "number" ? parsed.chain_id : null,
     contract_address: sanitizeString(parsed.contract_address, 128),
     sponsor_address: sanitizeString(parsed.sponsor_address, 128),
+    token_address: sanitizeString(parsed.token_address, 128),
+    token_symbol: sanitizeString(parsed.token_symbol, 32),
+    token_decimals: typeof parsed.token_decimals === "number" ? parsed.token_decimals : null,
     criteria_text: sanitizeString(parsed.criteria_text, 4000),
     winner_agent_id: sanitizeString(parsed.winner_agent_id, 64),
     winner_team_id: sanitizeString(parsed.winner_team_id, 64),
@@ -110,6 +120,9 @@ export function serializeHackathonMeta(meta: Partial<HackathonMeta>): string {
     chain_id: meta.chain_id ?? null,
     contract_address: meta.contract_address ?? null,
     sponsor_address: meta.sponsor_address ?? null,
+    token_address: meta.token_address ?? null,
+    token_symbol: meta.token_symbol ?? null,
+    token_decimals: meta.token_decimals ?? null,
     criteria_text: meta.criteria_text ?? null,
     winner_agent_id: meta.winner_agent_id ?? null,
     winner_team_id: meta.winner_team_id ?? null,
@@ -209,6 +222,7 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
   platform_cut: number;
   prize_pool: number;
   sponsored: boolean;
+  currency?: string;
 }> {
   const { data: hackathon } = await supabaseAdmin
     .from("hackathons").select("entry_fee, judging_criteria").eq("id", hackathonId).single();
@@ -228,8 +242,8 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
     let prizePool = 0;
     if (meta.contract_address) {
       try {
-        const balanceWei = await getContractPrizePool(meta.contract_address);
-        prizePool = Number(balanceWei) / 1e18;
+        const balanceUnits = await getContractPrizePool(meta.contract_address);
+        prizePool = Number(formatUnits(balanceUnits, meta.token_decimals ?? Number(process.env.USDC_DECIMALS || 18)));
       } catch {
         // Fallback to DB prize_pool if chain is unreachable
       }
@@ -242,6 +256,7 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
       platform_cut: 0,
       prize_pool: prizePool,
       sponsored: true,
+      currency: meta.token_symbol || process.env.USDC_SYMBOL || "USDC",
     };
   }
 

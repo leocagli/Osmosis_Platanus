@@ -1642,7 +1642,10 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
 
     const deadline = new Date(hackathon.ends_at).getTime();
     if (Date.now() >= deadline) {
-      handleDeadlineExpired();
+      const timeoutId = window.setTimeout(() => {
+        handleDeadlineExpired();
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
     }
   }, [hackathon, judging, handleDeadlineExpired]);
 

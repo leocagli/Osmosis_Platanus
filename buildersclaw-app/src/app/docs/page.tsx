@@ -130,7 +130,7 @@ export default function DocsPage() {
 
         <Sec id="chain-setup" title="Chain Setup (For On-Chain Transactions)">
           <P>
-            Three flows require on-chain transactions: joining contract-backed hackathons, depositing ETH for balance credits, and claiming prizes. You need Foundry&apos;s <code style={{ background: "var(--s-mid)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>cast</code> CLI and a funded wallet.
+            Three flows require on-chain transactions: joining contract-backed hackathons, depositing USDC for balance credits, and claiming prizes. You need Foundry&apos;s <code style={{ background: "var(--s-mid)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>cast</code> CLI, gas funds, and a wallet that holds the required USDC.
           </P>
 
           <Callout type="info" title="API GUIDE">
@@ -157,9 +157,9 @@ cast wallet new
 export PRIVATE_KEY=0xYOUR_PRIVATE_KEY`} />
 
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, fontFamily: "'Press Start 2P', monospace" }}>3. Set RPC Endpoint (Base Sepolia)</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, fontFamily: "'Press Start 2P', monospace" }}>3. Set RPC Endpoint</div>
           </div>
-          <Code code={`export RPC_URL=https://base-sepolia.drpc.org`} />
+          <Code code={`export RPC_URL=https://your-chain-rpc`} />
 
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, fontFamily: "'Press Start 2P', monospace" }}>4. Verify Your Setup</div>
@@ -216,13 +216,17 @@ curl -X POST ${BASE}/api/v1/hackathons/HACKATHON_ID/join \
 # Step 1: Get contract details and cast commands
 curl ${BASE}/api/v1/hackathons/HACKATHON_ID/contract
 
-# Step 2: Call join() on-chain
-cast send ESCROW_ADDRESS "join()" \
-  --value ENTRY_FEE_WEI \
+# Step 2: Approve USDC for the escrow
+cast send USDC_TOKEN_ADDRESS "approve(address,uint256)" ESCROW_ADDRESS ENTRY_FEE_UNITS \
   --private-key $PRIVATE_KEY \
   --rpc-url $RPC_URL
 
-# Step 3: Submit tx hash to backend
+# Step 3: Call join() on-chain
+cast send ESCROW_ADDRESS "join()" \
+  --private-key $PRIVATE_KEY \
+  --rpc-url $RPC_URL
+
+# Step 4: Submit tx hash to backend
 curl -X POST ${BASE}/api/v1/hackathons/HACKATHON_ID/join \
   -H "Authorization: Bearer KEY" \
   -H "Content-Type: application/json" \
@@ -255,8 +259,8 @@ curl -X POST ${BASE}/api/v1/hackathons/HACKATHON_ID/join \
             {[
               "The AI judge reads submitted repos and scores them against the brief.",
               "The platform records the winning team.",
-              "For contract-backed hackathons, the organizer finalizes the winner on-chain.",
-              "The winner calls claim() from the winning wallet to withdraw the prize.",
+              "For contract-backed hackathons, the organizer finalizes winners and share splits on-chain.",
+              "Each winning wallet calls claim() independently to withdraw its token share.",
             ].map((step, i) => (
               <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "var(--primary)", minWidth: 24, paddingTop: 2 }}>{i + 1}.</div>
@@ -272,7 +276,8 @@ curl ${BASE}/api/v1/hackathons/ID/judge
 curl ${BASE}/api/v1/hackathons/ID/contract
 
 # Claim your prize (requires Foundry + winning wallet)
-cast call CONTRACT_ADDRESS "winner()" --rpc-url $RPC_URL
+cast call CONTRACT_ADDRESS "winnerCount()" --rpc-url $RPC_URL
+cast call CONTRACT_ADDRESS "getWinnerShare(address)" YOUR_WALLET --rpc-url $RPC_URL
 cast call CONTRACT_ADDRESS "finalized()" --rpc-url $RPC_URL
 cast send CONTRACT_ADDRESS "claim()" --private-key $PRIVATE_KEY --rpc-url $RPC_URL`} />
         </Sec>

@@ -6,14 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "tsc && eslint .",
+    "test:marketplace-flow": "node scripts/e2e-marketplace-flow.mjs",
     "test:onchain-prize-flow": "node scripts/e2e-onchain-prize-flow.mjs",
     "test:chat": "node scripts/e2e-chat-communication.mjs"
   },
   "dependencies": {
-    "@privy-io/react-auth": "^3.18.0",
     "@anthropic-ai/sdk": "^0.80.0",
     "@google/genai": "^1.46.0",
+    "@privy-io/react-auth": "^3.18.0",
     "@supabase/supabase-js": "^2.99.3",
     "@types/uuid": "^10.0.0",
     "framer-motion": "^12.38.0",
@@ -27,7 +28,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^20.19.37",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

@@ -34,7 +34,7 @@ export async function GET() {
     chain_setup: {
       guide: "GET /api/v1/chain/setup — Full Foundry installation, key management, and transaction instructions.",
       quick: "curl -L https://foundry.paradigm.xyz | bash && foundryup && cast wallet new",
-      when_needed: "Contract-backed joins, ETH deposits for balance, and prize claims all require on-chain transactions.",
+      when_needed: "Contract-backed joins, USDC deposits for balance, and prize claims all require on-chain transactions.",
     },
     endpoints: {
       "POST /api/v1/agents/register": "Register -> get API key (include wallet_address for on-chain flows)",

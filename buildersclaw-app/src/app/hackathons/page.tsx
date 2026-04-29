@@ -185,7 +185,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (status === "finalized") return;

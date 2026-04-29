@@ -6,13 +6,17 @@ import {
   createWalletClient,
   custom,
   http,
-  parseEther,
+  parseAbi,
+  parseUnits,
   type Hash,
 } from "viem";
 import { ESCROW_ABI, ESCROW_BYTECODE } from "@/lib/escrow-bytecode";
 import { publicChain, publicChainId, publicChainName, publicChainRpcUrl } from "@/lib/public-chain";
 
 const platformWallet = process.env.NEXT_PUBLIC_PLATFORM_WALLET;
+const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS;
+const usdcDecimals = Number(process.env.NEXT_PUBLIC_USDC_DECIMALS || "18");
+const erc20Abi = parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]);
 
 type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -48,13 +52,13 @@ export function useDeployEscrow() {
   const [error, setError] = useState<string | null>(null);
 
   const deploy = useCallback(
-    async (options: {
-      provider: unknown; // EIP-1193 provider from Privy wallet
-      sponsorAddress: string;
-      prizeAmountEth: string;
-      deadlineUnix: number;
-      entryFeeWei?: bigint;
-    }) => {
+      async (options: {
+        provider: unknown; // EIP-1193 provider from Privy wallet
+        sponsorAddress: string;
+        prizeAmountUsdc: string;
+        deadlineUnix: number;
+        entryFeeUnits?: bigint;
+      }) => {
       setIsDeploying(true);
       setError(null);
       setResult(null);
@@ -62,6 +66,9 @@ export function useDeployEscrow() {
       try {
         if (!platformWallet) {
           throw new Error("Platform wallet not configured (NEXT_PUBLIC_PLATFORM_WALLET)");
+        }
+        if (!usdcAddress) {
+          throw new Error("USDC token not configured (NEXT_PUBLIC_USDC_ADDRESS)");
         }
 
         const provider = options.provider as Eip1193Provider;
@@ -78,20 +85,20 @@ export function useDeployEscrow() {
           transport: http(publicChainRpcUrl),
         });
 
-        const prizeWei = parseEther(options.prizeAmountEth);
-        const entryFee = options.entryFeeWei ?? BigInt(0);
+        const prizeUnits = parseUnits(options.prizeAmountUsdc, usdcDecimals);
+        const entryFee = options.entryFeeUnits ?? BigInt(0);
 
         // Deploy HackathonEscrow with platform as owner, sponsor as sponsor
         const txHash = await walletClient.deployContract({
           abi: ESCROW_ABI,
           bytecode: ESCROW_BYTECODE,
           args: [
+            usdcAddress as `0x${string}`,
             entryFee,
             BigInt(options.deadlineUnix),
             platformWallet as `0x${string}`,
             options.sponsorAddress as `0x${string}`,
           ],
-          value: prizeWei,
         });
 
         // Wait for deployment receipt
@@ -105,6 +112,36 @@ export function useDeployEscrow() {
 
         if (!receipt.contractAddress) {
           throw new Error("No contract address in deploy receipt");
+        }
+
+        if (prizeUnits > BigInt(0)) {
+          const approveHash = await walletClient.writeContract({
+            address: usdcAddress as `0x${string}`,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [receipt.contractAddress, prizeUnits],
+            account: options.sponsorAddress as `0x${string}`,
+            chain: publicChain,
+          });
+
+          const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash as Hash });
+          if (approveReceipt.status !== "success") {
+            throw new Error("USDC approve transaction failed on-chain");
+          }
+
+          const fundHash = await walletClient.writeContract({
+            address: receipt.contractAddress,
+            abi: ESCROW_ABI,
+            functionName: "fund",
+            args: [prizeUnits],
+            account: options.sponsorAddress as `0x${string}`,
+            chain: publicChain,
+          });
+
+          const fundReceipt = await publicClient.waitForTransactionReceipt({ hash: fundHash as Hash });
+          if (fundReceipt.status !== "success") {
+            throw new Error("Escrow funding transaction failed on-chain");
+          }
         }
 
         const deployResult: DeployResult = {

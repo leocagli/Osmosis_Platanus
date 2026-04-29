@@ -2,6 +2,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import {
   createPublicClient,
   createWalletClient,
+  decodeEventLog,
   decodeFunctionData,
   getAddress,
   http,
@@ -14,13 +15,14 @@ import {
 import { resolveChain } from "@/lib/chain-config";
 
 const factoryAbi = parseAbi([
-  "function createHackathon(uint256 _entryFee, uint256 _deadline) payable returns (address)",
+  "function createHackathon(address _token, uint256 _entryFee, uint256 _deadline) returns (address)",
   "function hackathons(uint256) view returns (address)",
   "function hackathonCount() view returns (uint256)",
-  "event HackathonCreated(address indexed escrow, uint256 entryFee, uint256 deadline)",
+  "event HackathonCreated(address indexed escrow, address indexed token, uint256 entryFee, uint256 deadline)",
 ]);
 
 const escrowAbi = parseAbi([
+  "function token() view returns (address)",
   "function entryFee() view returns (uint256)",
   "function hasJoined(address) view returns (bool)",
   "function finalized() view returns (bool)",
@@ -33,9 +35,19 @@ const escrowAbi = parseAbi([
   "function winnerCount() view returns (uint256)",
   "function hasClaimed(address) view returns (bool)",
   "function totalPrizeAtFinalize() view returns (uint256)",
-  "function join() payable",
+  "function join()",
+  "function fund(uint256 amount)",
   "function finalize(address[] _winners, uint256[] _sharesBps)",
   "function abort()",
+  "event Joined(address indexed participant)",
+  "event Funded(address indexed sponsor, uint256 amount)",
+]);
+
+const erc20Abi = parseAbi([
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
 ]);
 
 let cachedChain: Chain | null = null;
@@ -56,6 +68,22 @@ export function getConfiguredChainId(): number {
   return parsed;
 }
 
+export function getUsdcAddress(): Address {
+  return normalizeAddress(requireEnv("USDC_ADDRESS"));
+}
+
+export function getUsdcDecimals(): number {
+  const parsed = Number.parseInt(process.env.USDC_DECIMALS || "18", 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error("USDC_DECIMALS must be a non-negative integer");
+  }
+  return parsed;
+}
+
+export function getUsdcSymbol(): string {
+  return process.env.USDC_SYMBOL || "USDC";
+}
+
 function getChain() {
   if (cachedChain) return cachedChain;
 
@@ -64,8 +92,8 @@ function getChain() {
     chainId: getConfiguredChainId(),
     rpcUrl,
     fallbackName: process.env.CHAIN_NAME || "buildersclaw",
-    fallbackCurrencyName: process.env.CHAIN_CURRENCY_NAME || "Ether",
-    fallbackCurrencySymbol: process.env.CHAIN_CURRENCY_SYMBOL || "ETH",
+    fallbackCurrencyName: process.env.CHAIN_CURRENCY_NAME || "BNB",
+    fallbackCurrencySymbol: process.env.CHAIN_CURRENCY_SYMBOL || "BNB",
   });
   return cachedChain;
 }
@@ -103,6 +131,53 @@ export function sameAddress(left: string, right: string) {
   return getAddress(left) === getAddress(right);
 }
 
+function getTransferValueFromReceipt(opts: {
+  receipt: { logs: Array<{ address?: string | null; data: `0x${string}`; topics: readonly `0x${string}`[] }> };
+  tokenAddress: Address;
+  from: Address;
+  to: Address;
+}): bigint {
+  let total = BigInt(0);
+
+  for (const log of opts.receipt.logs) {
+    if (!log.address || !sameAddress(log.address, opts.tokenAddress)) continue;
+    if (log.topics.length === 0) continue;
+    try {
+      const decoded = decodeEventLog({
+        abi: erc20Abi,
+        data: log.data,
+        topics: [...log.topics] as [`0x${string}`, ...`0x${string}`[]],
+      });
+      if (decoded.eventName !== "Transfer") continue;
+      const args = decoded.args as { from: Address; to: Address; value: bigint };
+      if (sameAddress(args.from, opts.from) && sameAddress(args.to, opts.to)) {
+        total += args.value;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return total;
+}
+
+export async function getEscrowTokenConfig(contractAddress: string) {
+  const publicClient = getPublicChainClient();
+  const address = normalizeAddress(contractAddress);
+  const tokenAddress = await publicClient.readContract({
+    address,
+    abi: escrowAbi,
+    functionName: "token",
+  }) as Address;
+
+  const [symbol, decimals] = await Promise.all([
+    publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: "symbol" }).catch(() => getUsdcSymbol()),
+    publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: "decimals" }).catch(() => getUsdcDecimals()),
+  ]);
+
+  return { tokenAddress, symbol: symbol as string, decimals: Number(decimals) };
+}
+
 export async function verifyJoinTransaction(options: {
   contractAddress: string;
   walletAddress: string;
@@ -132,37 +207,39 @@ export async function verifyJoinTransaction(options: {
     throw new Error("Transaction is not a HackathonEscrow join() call");
   }
 
-  const entryFee = await publicClient.readContract({
-    address: contractAddress,
-    abi: escrowAbi,
-    functionName: "entryFee",
+  const [entryFee, tokenAddress, hasJoined] = await Promise.all([
+    publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "entryFee" }),
+    publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "token" }),
+    publicClient.readContract({
+      address: contractAddress,
+      abi: escrowAbi,
+      functionName: "hasJoined",
+      args: [walletAddress],
+    }),
+  ]);
+
+  const transferred = getTransferValueFromReceipt({
+    receipt,
+    tokenAddress: tokenAddress as Address,
+    from: walletAddress,
+    to: contractAddress,
   });
 
-  if (transaction.value !== entryFee) {
-    throw new Error("Join transaction value does not match the contract entry fee");
+  if (transferred !== (entryFee as bigint)) {
+    throw new Error("Join transaction token transfer does not match the contract entry fee");
   }
-
-  const hasJoined = await publicClient.readContract({
-    address: contractAddress,
-    abi: escrowAbi,
-    functionName: "hasJoined",
-    args: [walletAddress],
-  });
-
   if (!hasJoined) throw new Error("Wallet is not marked as joined on-chain");
 
-  return { transaction, receipt, entryFee };
+  return { transaction, receipt, entryFee, tokenAddress };
 }
 
-/**
- * Verify an ETH deposit transaction to the platform wallet.
- * Used when agents deposit funds for prompt credits.
- */
 export async function verifyDepositTransaction(options: {
   txHash: string;
+  expectedFrom: string;
 }) {
   const publicClient = getPublicChainClient();
   const txHash = options.txHash as Hash;
+  const expectedFrom = normalizeAddress(options.expectedFrom);
 
   const transaction = await publicClient.getTransaction({ hash: txHash }).catch(() => null);
   if (!transaction) throw new Error("Deposit transaction not found");
@@ -171,37 +248,45 @@ export async function verifyDepositTransaction(options: {
   if (!receipt) throw new Error("Deposit transaction receipt not found");
   if (receipt.status !== "success") throw new Error("Deposit transaction failed on-chain");
 
-  // Verify it was sent to our platform wallet
   const organizerWallet = getOrganizerWalletClient();
-  const platformAddress = normalizeAddress(organizerWallet.account!.address);
+  const treasuryAddress = normalizeAddress(organizerWallet.account!.address);
+  const tokenAddress = getUsdcAddress();
 
-  if (!transaction.to || !sameAddress(transaction.to, platformAddress)) {
-    throw new Error(
-      `Deposit must be sent to the platform wallet: ${platformAddress}. ` +
-      `This transaction was sent to: ${transaction.to || "null"}`
-    );
+  if (!sameAddress(transaction.from, expectedFrom)) {
+    throw new Error("Deposit transaction sender does not match your registered wallet_address");
   }
 
-  if (transaction.value <= BigInt(0)) {
-    throw new Error("Transaction has no ETH value");
-  }
+  const transferred = getTransferValueFromReceipt({
+    receipt,
+    tokenAddress,
+    from: expectedFrom,
+    to: treasuryAddress,
+  });
 
-  const ethAmount = Number(transaction.value) / 1e18;
+  if (transferred <= BigInt(0)) {
+    throw new Error(`Transaction has no ${getUsdcSymbol()} transfer to the platform treasury`);
+  }
 
   return {
     from: transaction.from,
-    to: transaction.to,
-    value: transaction.value,
-    ethAmount: ethAmount.toFixed(8),
+    to: treasuryAddress,
+    value: transferred,
     blockNumber: Number(receipt.blockNumber),
     txHash: options.txHash,
+    tokenAddress,
+    decimals: getUsdcDecimals(),
+    symbol: getUsdcSymbol(),
   };
 }
 
 export async function getContractPrizePool(contractAddress: string): Promise<bigint> {
   const publicClient = getPublicChainClient();
   const addr = normalizeAddress(contractAddress);
-  return await publicClient.getBalance({ address: addr });
+  return await publicClient.readContract({
+    address: addr,
+    abi: escrowAbi,
+    functionName: "prizePool",
+  }) as bigint;
 }
 
 export async function finalizeHackathonOnChain(options: {
@@ -242,28 +327,25 @@ export async function finalizeHackathonOnChain(options: {
   return { txHash, receipt };
 }
 
-/**
- * Deploy a new HackathonEscrow via the on-chain HackathonFactory.
- * Requires FACTORY_ADDRESS env var to be set.
- */
 export async function deployHackathonEscrow(options: {
-  entryFeeWei: bigint;
+  entryFeeUnits: bigint;
   deadlineUnix: bigint;
-  fundingWei?: bigint;
-}): Promise<{ escrowAddress: string; txHash: string }> {
+  fundingUnits?: bigint;
+  tokenAddress?: string;
+}): Promise<{ escrowAddress: string; txHash: string; fundingTxHash?: string }> {
   const factoryAddress = process.env.FACTORY_ADDRESS;
   if (!factoryAddress) throw new Error("FACTORY_ADDRESS not configured");
 
   const publicClient = getPublicChainClient();
   const walletClient = getOrganizerWalletClient();
   const factory = normalizeAddress(factoryAddress);
+  const token = options.tokenAddress ? normalizeAddress(options.tokenAddress) : getUsdcAddress();
 
   const txHash = await walletClient.writeContract({
     address: factory,
     abi: factoryAbi,
     functionName: "createHackathon",
-    args: [options.entryFeeWei, options.deadlineUnix],
-    value: options.fundingWei ?? BigInt(0),
+    args: [token, options.entryFeeUnits, options.deadlineUnix],
     account: walletClient.account!,
     chain: walletClient.chain,
   });
@@ -271,32 +353,50 @@ export async function deployHackathonEscrow(options: {
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
   if (receipt.status !== "success") throw new Error("Factory createHackathon transaction failed");
 
-  // Extract escrow address from HackathonCreated event log
-  // The escrow address is the first indexed param (topics[1]), zero-padded to 32 bytes
   let escrowAddress: string | null = null;
   for (const log of receipt.logs) {
     if (log.address && sameAddress(log.address, factory) && log.topics.length >= 2 && log.topics[1]) {
-      // topics[1] is the indexed escrow address, padded to 32 bytes
-      escrowAddress = getAddress("0x" + log.topics[1].slice(26));
+      escrowAddress = getAddress(`0x${log.topics[1].slice(26)}`);
       break;
     }
   }
 
   if (!escrowAddress) throw new Error("Could not find escrow address in transaction logs");
 
-  return { escrowAddress, txHash };
+  let fundingTxHash: string | undefined;
+  if ((options.fundingUnits ?? BigInt(0)) > BigInt(0)) {
+    fundingTxHash = await walletClient.writeContract({
+      address: token,
+      abi: parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]),
+      functionName: "approve",
+      args: [normalizeAddress(escrowAddress), options.fundingUnits!],
+      account: walletClient.account!,
+      chain: walletClient.chain,
+    });
+
+    await publicClient.waitForTransactionReceipt({ hash: fundingTxHash as Hash });
+
+    const fundCallHash = await walletClient.writeContract({
+      address: normalizeAddress(escrowAddress),
+      abi: escrowAbi,
+      functionName: "fund",
+      args: [options.fundingUnits!],
+      account: walletClient.account!,
+      chain: walletClient.chain,
+    });
+
+    await publicClient.waitForTransactionReceipt({ hash: fundCallHash });
+    fundingTxHash = fundCallHash;
+  }
+
+  return { escrowAddress, txHash, fundingTxHash };
 }
 
-/**
- * Verify that a sponsor has funded a HackathonEscrow contract.
- * Checks: tx succeeded, sent to contract, from sponsor wallet, value > 0,
- * contract sponsor() matches, and platform organizer is contract owner().
- */
 export async function verifySponsorFunding(options: {
   contractAddress: string;
   sponsorWallet: string;
   txHash: string;
-}): Promise<{ prizePoolWei: bigint; blockNumber: number }> {
+}): Promise<{ prizePoolUnits: bigint; blockNumber: number; tokenAddress: Address }> {
   const publicClient = getPublicChainClient();
   const contractAddr = normalizeAddress(options.contractAddress);
   const sponsorAddr = normalizeAddress(options.sponsorWallet);
@@ -309,53 +409,50 @@ export async function verifySponsorFunding(options: {
   if (!receipt) throw new Error("Funding transaction receipt not found");
   if (receipt.status !== "success") throw new Error("Funding transaction failed on-chain");
 
-  const fundedViaDeploy = !transaction.to && !!receipt.contractAddress && sameAddress(receipt.contractAddress, contractAddr);
-  const fundedViaTransfer = !!transaction.to && sameAddress(transaction.to, contractAddr);
-
-  if (!fundedViaDeploy && !fundedViaTransfer) {
+  if (!transaction.to || !sameAddress(transaction.to, contractAddr)) {
     throw new Error("Funding transaction was not sent to the escrow contract");
   }
   if (!sameAddress(transaction.from, sponsorAddr)) {
     throw new Error("Funding transaction sender does not match sponsor wallet");
   }
-  if (transaction.value <= BigInt(0)) {
-    throw new Error("Funding transaction has no ETH value");
+
+  const decoded = decodeFunctionData({ abi: escrowAbi, data: transaction.input });
+  if (decoded.functionName !== "fund") {
+    throw new Error("Funding transaction is not a HackathonEscrow fund(amount) call");
   }
 
-  // Verify contract's sponsor() matches the provided wallet
-  const onChainSponsor = await publicClient.readContract({
-    address: contractAddr,
-    abi: escrowAbi,
-    functionName: "sponsor",
-  }) as string;
-  if (!sameAddress(onChainSponsor, sponsorAddr)) {
+  const [tokenAddress, onChainSponsor, onChainOwner, prizePoolUnits] = await Promise.all([
+    publicClient.readContract({ address: contractAddr, abi: escrowAbi, functionName: "token" }),
+    publicClient.readContract({ address: contractAddr, abi: escrowAbi, functionName: "sponsor" }),
+    publicClient.readContract({ address: contractAddr, abi: escrowAbi, functionName: "owner" }),
+    publicClient.readContract({ address: contractAddr, abi: escrowAbi, functionName: "prizePool" }),
+  ]);
+
+  if (!sameAddress(onChainSponsor as string, sponsorAddr)) {
     throw new Error("Contract sponsor does not match provided wallet");
   }
 
-  // Verify platform organizer is set as contract owner
   const organizerWallet = getOrganizerWalletClient();
   const platformAddress = normalizeAddress(organizerWallet.account!.address);
-  const onChainOwner = await publicClient.readContract({
-    address: contractAddr,
-    abi: escrowAbi,
-    functionName: "owner",
-  }) as string;
-  if (!sameAddress(onChainOwner, platformAddress)) {
-    throw new Error(
-      `Contract owner must be the platform organizer (${platformAddress}). ` +
-      `Found: ${onChainOwner}. Deploy the escrow with _owner set to the platform wallet.`
-    );
+  if (!sameAddress(onChainOwner as string, platformAddress)) {
+    throw new Error("Contract owner does not match platform organizer wallet");
   }
 
-  // Read current prize pool
-  const prizePoolWei = await publicClient.readContract({
-    address: contractAddr,
-    abi: escrowAbi,
-    functionName: "prizePool",
-  }) as bigint;
+  const transferred = getTransferValueFromReceipt({
+    receipt,
+    tokenAddress: tokenAddress as Address,
+    from: sponsorAddr,
+    to: contractAddr,
+  });
+
+  const requestedAmount = (decoded.args?.[0] ?? BigInt(0)) as bigint;
+  if (transferred !== requestedAmount || transferred <= BigInt(0)) {
+    throw new Error("Funding transaction token transfer does not match the requested fund amount");
+  }
 
   return {
-    prizePoolWei,
+    prizePoolUnits: prizePoolUnits as bigint,
     blockNumber: Number(receipt.blockNumber),
+    tokenAddress: tokenAddress as Address,
   };
 }

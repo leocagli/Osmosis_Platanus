@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getPublicChainClient, getConfiguredChainId, normalizeAddress } from "@/lib/chain";
+import { getEscrowTokenConfig, getPublicChainClient, getConfiguredChainId, normalizeAddress } from "@/lib/chain";
 import { parseHackathonMeta } from "@/lib/hackathons";
 import { error, notFound, success } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   const publicClient = getPublicChainClient();
   let status;
   try {
-    const [finalized, winnersArr, winnerCountVal, sponsorAddr, prizePoolWei, entryFeeWei, totalPrizeWei] = await Promise.all([
+    const [finalized, winnersArr, winnerCountVal, sponsorAddr, prizePoolUnits, entryFeeUnits, totalPrizeUnits] = await Promise.all([
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "finalized" }),
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "getWinners" }),
       publicClient.readContract({ address: contractAddress, abi: escrowAbi, functionName: "winnerCount" }),
@@ -68,15 +68,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
       (w) => w !== "0x0000000000000000000000000000000000000000",
     );
     const sponsorAddress = sponsorAddr as string;
+    const token = await getEscrowTokenConfig(contractAddress);
 
     status = {
       finalized: finalized as boolean,
       winners,
       winner_count: Number(winnerCountVal),
       sponsor: sponsorAddress === "0x0000000000000000000000000000000000000000" ? null : sponsorAddress,
-      prize_pool_wei: (prizePoolWei as bigint).toString(),
-      total_prize_at_finalize_wei: (totalPrizeWei as bigint).toString(),
-      entry_fee_wei: (entryFeeWei as bigint).toString(),
+      prize_pool_units: (prizePoolUnits as bigint).toString(),
+      total_prize_at_finalize_units: (totalPrizeUnits as bigint).toString(),
+      entry_fee_units: (entryFeeUnits as bigint).toString(),
+      token_address: token.tokenAddress,
+      token_symbol: token.symbol,
+      token_decimals: token.decimals,
     };
   } catch {
     status = null;
@@ -88,9 +92,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     chain_id: chainId,
     rpc_url: rpcUrl,
     abi: {
-      join: "function join() payable",
+      join: "function join()",
+      fund: "function fund(uint256 amount)",
       claim: "function claim()",
       finalize: "function finalize(address[] _winners, uint256[] _sharesBps)",
+      token: "function token() view returns (address)",
       hasJoined: "function hasJoined(address) view returns (bool)",
       finalized: "function finalized() view returns (bool)",
       getWinners: "function getWinners() view returns (address[])",
@@ -106,7 +112,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     transaction_guides: {
       join: getJoinTransactionGuide({
         contractAddress,
-        entryFeeWei: status?.entry_fee_wei ?? "0",
+        entryFeeUnits: status?.entry_fee_units ?? "0",
+        tokenAddress: status?.token_address ?? (process.env.USDC_ADDRESS || "USDC_TOKEN_ADDRESS"),
+        tokenSymbol: status?.token_symbol ?? (process.env.USDC_SYMBOL || "USDC"),
         chainId,
         rpcUrl,
         hackathonId,

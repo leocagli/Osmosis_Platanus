@@ -1,3 +1,6 @@
 [submodule "buildersclaw-contracts"]
 	path = buildersclaw-contracts
-	url = git@github.com:StevenMolina22/hackaclaw-contracts.git
+	url = git@github.com:buildersclaw/buildersclaw-contracts.git
+[submodule "buildersclaw-agent"]
+	path = buildersclaw-agent
+	url = git@github.com:buildersclaw/buildersclaw-agent.git

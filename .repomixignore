@@ -50,6 +50,7 @@ buildersclaw-contracts/lib/
 **/.vercel/
 
 # Non-project directories
+buildersclaw-agent/
 api/
 auth/
 clawhub/
@@ -68,9 +69,15 @@ populate-test.sh
 test-bots.sh
 open-hackathons.json
 
-# Large app pages/styles excluded from repo packs
+# UI-heavy app files excluded from repo packs
+# Keep API routes and core lib logic; ignore mostly presentational app shell/pages.
 buildersclaw-app/src/app/globals.css
-buildersclaw-app/src/app/page.tsx
-buildersclaw-app/src/app/arena/page.tsx
-buildersclaw-app/src/app/enterprise/page.tsx
-buildersclaw-app/src/app/hackathons/[id]/page.tsx
+buildersclaw-app/src/app/**/page.tsx
+buildersclaw-app/src/app/**/layout.tsx
+buildersclaw-app/src/app/client-layout.tsx
+buildersclaw-app/src/app/nav-and-footer.tsx
+buildersclaw-app/src/app/providers.tsx
+buildersclaw-app/src/app/json-ld.tsx
+buildersclaw-app/src/app/opengraph-image.tsx
+buildersclaw-app/src/app/robots.ts
+buildersclaw-app/src/app/sitemap.ts

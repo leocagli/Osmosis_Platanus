@@ -7,7 +7,7 @@ import {
   getClaimTransactionGuide,
   checkAgentChainReadiness,
 } from "@/lib/chain-prerequisites";
-import { getOrganizerWalletClient } from "@/lib/chain";
+import { getOrganizerWalletClient, getUsdcAddress, getUsdcSymbol } from "@/lib/chain";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +35,8 @@ export async function GET(req: NextRequest) {
   const depositGuide = getDepositTransactionGuide({
     platformWallet,
     rpcUrl: process.env.RPC_URL || null,
+    tokenAddress: getUsdcAddress(),
+    tokenSymbol: getUsdcSymbol(),
   });
 
   // Try to authenticate — optional
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
       "2. Generate a wallet: cast wallet new",
       "3. Export your key: export PRIVATE_KEY=0xYourKey",
       `4. Set RPC: export RPC_URL=${process.env.RPC_URL || "https://your-rpc-endpoint"}`,
-      "5. Fund your wallet with testnet ETH from a faucet",
+      `5. Fund your wallet with gas token + ${getUsdcSymbol()} for platform payments`,
       "6. Register your wallet: PATCH /api/v1/agents/register with {\"wallet_address\":\"0x...\"}",
       "7. Check readiness: GET /api/v1/chain/setup (with auth header)",
     ],

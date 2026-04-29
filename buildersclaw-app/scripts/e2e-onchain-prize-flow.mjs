@@ -1,10 +1,41 @@
 #!/usr/bin/env node
 
+/**
+ * E2E Test — BNB Sepolia USDC contract-backed marketplace flow
+ *
+ * Flow:
+ *  1. Register leader + hired member with wallet/github/telegram prereqs
+ *  2. Deploy a fresh escrow via the factory on-chain
+ *  3. Fund the escrow with sponsor USDC
+ *  4. Submit + approve an enterprise proposal using the funded escrow
+ *  5. Leader receives gas + USDC, joins on-chain, then notifies backend
+ *  6. Leader posts a marketplace listing and hired member claims it
+ *  7. Team submits a repo
+ *  8. Admin finalizes the hackathon on-chain
+ *  9. Leader and hired member claim their USDC prizes independently
+ * 10. Prize pool reaches zero
+ *
+ * Optional ERC-8004 validation:
+ *   Set TEST_ERC8004_AGENT_ID + TEST_ERC8004_OWNER_PRIVATE_KEY to link the
+ *   leader identity before posting the marketplace listing and assert that the
+ *   marketplace API surfaces the linked identity.
+ */
+
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
+import {
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  formatUnits,
+  getAddress,
+  http,
+  parseAbi,
+  parseUnits,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,14 +49,70 @@ loadEnvFile(path.join(appRoot, ".env"), { override: true });
 
 const BASE_URL = normalizeBaseUrl(process.env.BASE_URL || "http://localhost:3000");
 const RPC_URL = requiredEnv("RPC_URL");
-requiredEnv("CHAIN_ID");
-const ORGANIZER_PRIVATE_KEY = normalizePrivateKey(requiredEnv("ORGANIZER_PRIVATE_KEY"));
+const CHAIN_ID = Number.parseInt(requiredEnv("CHAIN_ID"), 10);
+const FACTORY_ADDRESS = getAddress(requiredEnv("FACTORY_ADDRESS"));
+const USDC_ADDRESS = getAddress(requiredEnv("USDC_ADDRESS"));
+const USDC_SYMBOL = process.env.USDC_SYMBOL || "USDC";
+const USDC_DECIMALS = Number.parseInt(process.env.USDC_DECIMALS || "18", 10);
 const ADMIN_API_KEY = requiredEnv("ADMIN_API_KEY");
-const ENTRY_FEE_WEI = toBigInt(process.env.ENTRY_FEE_WEI || "0", "ENTRY_FEE_WEI");
-const BOUNTY_WEI = toBigInt(process.env.BOUNTY_WEI || "100000000000000", "BOUNTY_WEI");
-const PARTICIPANT_FUNDING_WEI = toBigInt(process.env.PARTICIPANT_FUNDING_WEI || "50000000000000", "PARTICIPANT_FUNDING_WEI");
-const GAS_PRICE_WEI = toBigInt(process.env.TEST_GAS_PRICE_WEI || "50000000", "TEST_GAS_PRICE_WEI");
+const ORGANIZER_PRIVATE_KEY = normalizePrivateKey(requiredEnv("ORGANIZER_PRIVATE_KEY"));
+const ENTRY_FEE_UNITS = parseUnits(process.env.TEST_ENTRY_FEE_USDC || "5", USDC_DECIMALS);
+const SPONSOR_FUNDING_UNITS = parseUnits(process.env.TEST_SPONSOR_FUNDING_USDC || "50", USDC_DECIMALS);
+const GAS_FUND_BNB = process.env.TEST_PARTICIPANT_GAS_BNB || "0.01";
 const DURATION_HOURS = Number.parseInt(process.env.TEST_DURATION_HOURS || "24", 10);
+const REPO_URL = process.env.TEST_REPO_URL || "https://github.com/buildersclaw/onchain-marketplace-e2e";
+const OPTIONAL_ERC8004_AGENT_ID = process.env.TEST_ERC8004_AGENT_ID || "";
+const OPTIONAL_ERC8004_OWNER_PRIVATE_KEY = process.env.TEST_ERC8004_OWNER_PRIVATE_KEY || "";
+const OPTIONAL_ERC8004_SOURCE = process.env.TEST_ERC8004_SOURCE || "external";
+
+const chain = defineChain({
+  id: CHAIN_ID,
+  name: process.env.CHAIN_NAME || "buildersclaw-testnet",
+  nativeCurrency: {
+    name: process.env.CHAIN_CURRENCY_NAME || "BNB",
+    symbol: process.env.CHAIN_CURRENCY_SYMBOL || "BNB",
+    decimals: 18,
+  },
+  rpcUrls: {
+    default: { http: [RPC_URL] },
+    public: { http: [RPC_URL] },
+  },
+});
+
+const publicClient = createPublicClient({ chain, transport: http(RPC_URL) });
+const organizerAccount = privateKeyToAccount(ORGANIZER_PRIVATE_KEY);
+const organizerWalletClient = createWalletClient({ account: organizerAccount, chain, transport: http(RPC_URL) });
+const organizerAddress = organizerAccount.address;
+
+const factoryAbi = parseAbi([
+  "function createHackathon(address _token, uint256 _entryFee, uint256 _deadline) returns (address)",
+  "function hackathonCount() view returns (uint256)",
+  "function hackathons(uint256) view returns (address)",
+  "event HackathonCreated(address indexed escrow, address indexed token, uint256 entryFee, uint256 deadline)",
+]);
+
+const escrowAbi = parseAbi([
+  "function join()",
+  "function fund(uint256 amount)",
+  "function claim()",
+  "function prizePool() view returns (uint256)",
+  "function entryFee() view returns (uint256)",
+  "function hasJoined(address) view returns (bool)",
+  "function getWinnerShare(address) view returns (uint256)",
+  "function winnerCount() view returns (uint256)",
+  "function totalPrizeAtFinalize() view returns (uint256)",
+  "function token() view returns (address)",
+]);
+
+const erc20Abi = parseAbi([
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address to, uint256 amount) returns (bool)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+]);
+
+let passed = 0;
+let failed = 0;
+const failures = [];
 
 function loadEnvFile(filePath, options = {}) {
   if (!fs.existsSync(filePath)) return;
@@ -47,487 +134,487 @@ function requiredEnv(name) {
   return value;
 }
 
-function normalizePrivateKey(value) {
-  return value.startsWith("0x") ? value : `0x${value}`;
-}
-
 function normalizeBaseUrl(value) {
   return value.replace("://localhost:", "://127.0.0.1:");
 }
 
-function toBigInt(value, label) {
-  try {
-    return BigInt(value);
-  } catch {
-    throw new Error(`${label} must be a valid integer string`);
-  }
+function normalizePrivateKey(value) {
+  return value.startsWith("0x") ? value : `0x${value}`;
 }
 
-function run(command, args, options = {}) {
-  return execFileSync(command, args, {
-    cwd: options.cwd || appRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...(options.env || {}) },
-  }).trim();
-}
-
-function formatExecError(command, args, error) {
-  const stdout = error.stdout ? error.stdout.toString() : "";
-  const stderr = error.stderr ? error.stderr.toString() : "";
-  return [`Command failed: ${command} ${args.join(" ")}`, stdout, stderr].filter(Boolean).join("\n");
-}
-
-function parseJsonOutput(command, args, options = {}) {
-  const output = run(command, args, options);
-  try {
-    return JSON.parse(output);
-  } catch {
-    throw new Error(`Failed to parse JSON output from ${command}: ${output}`);
-  }
-}
-
-async function api(method, apiPath, body, apiKey) {
-  const headers = { "Content-Type": "application/json" };
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-
-  let lastError;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const response = await fetch(`${BASE_URL}/api/v1${apiPath}`, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-
-      const text = await response.text();
-      let json;
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { success: false, raw: text };
-      }
-
-      if (!response.ok || json.success === false) {
-        throw new Error(`${method} ${apiPath} failed (${response.status}): ${JSON.stringify(json)}`);
-      }
-
-      return json;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
-    }
-  }
-
-  throw new Error(lastError instanceof Error ? lastError.message : String(lastError));
-}
-
-async function waitForPrizePoolZero(hackathonId, attempts = 8, delayMs = 2000) {
-  let lastValue = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const state = await api("GET", `/hackathons/${hackathonId}/contract`);
-    lastValue = state.data.status?.prize_pool_wei ?? null;
-    if (lastValue === "0") return state;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-
-  throw new Error(`prize_pool_wei after claim mismatch: expected 0, got ${lastValue}`);
-}
-
-function assertEqual(actual, expected, label) {
-  if (actual !== expected) {
-    throw new Error(`${label} mismatch: expected ${expected}, got ${actual}`);
-  }
-}
-
-function logStep(step, message) {
-  console.log(`\n${step} ${message}`);
-}
-
-function makeAgentName(prefix) {
+function uid(prefix) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 }
 
-function generateParticipantWallet() {
+function fakeTelegram(label) {
+  return `${label}_${Date.now().toString().slice(-6)}`.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
+}
+
+function newWallet(label) {
   let privateKey;
   do {
     privateKey = `0x${crypto.randomBytes(32).toString("hex")}`;
   } while (/^0x0+$/.test(privateKey));
-
   const account = privateKeyToAccount(privateKey);
-  return { privateKey, address: account.address };
+  return {
+    label,
+    privateKey,
+    account,
+    walletClient: createWalletClient({ account, chain, transport: http(RPC_URL) }),
+  };
 }
 
-function getAddressFromPrivateKey(privateKey) {
-  return run("cast", ["wallet", "address", "--private-key", privateKey], { cwd: contractsRoot });
+function step(label, message) {
+  console.log(`\n${label} ${message}`);
 }
 
-function getBalance(address) {
-  return BigInt(run("cast", ["balance", address, "--rpc-url", RPC_URL], { cwd: contractsRoot }));
+function assert(condition, label, detail) {
+  if (condition) {
+    passed += 1;
+    console.log(`  OK  ${label}`);
+    return;
+  }
+  failed += 1;
+  const line = `  FAIL ${label}${detail ? ` — ${detail}` : ""}`;
+  console.log(line);
+  failures.push(line);
 }
 
-function getPendingNonce(address) {
-  return run("cast", ["nonce", address, "--rpc-url", RPC_URL, "--block", "pending"], { cwd: contractsRoot });
+function assertEqual(actual, expected, label) {
+  assert(actual === expected, label, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 
-function sendTx(fromPrivateKey, to, valueWei, dataArgs = [], confirmations = 1) {
-  const args = [
-    "send",
-    to,
-    ...dataArgs,
-    "--confirmations",
-    String(confirmations),
-    "--value",
-    valueWei.toString(),
-    "--gas-price",
-    GAS_PRICE_WEI.toString(),
-    "--rpc-url",
-    RPC_URL,
-    "--private-key",
-    fromPrivateKey,
-    "--json",
-  ];
-  return parseJsonOutput("cast", args, { cwd: contractsRoot });
+function assertBigInt(actual, expected, label) {
+  assert(actual === expected, label, `expected ${expected.toString()}, got ${actual.toString()}`);
 }
 
-function callContract(address, signature, extraArgs = []) {
-  return run("cast", ["call", address, signature, ...extraArgs, "--rpc-url", RPC_URL], { cwd: contractsRoot });
+async function api(method, apiPath, body, apiKey, extraHeaders = {}) {
+  const headers = { "Content-Type": "application/json", ...extraHeaders };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const response = await fetch(`${BASE_URL}/api/v1${apiPath}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { success: false, raw: text };
+  }
+  return { ok: response.ok, status: response.status, json };
 }
 
-function deployEscrow(deadlineUnix, organizerAddress) {
-  let nonce = getPendingNonce(organizerAddress);
+async function registerAgent(prefix, walletAddress, githubUsername, telegramUsername) {
+  const payload = {
+    name: uid(prefix),
+    model: "gpt-4o",
+    description: `${prefix} on-chain marketplace e2e agent`,
+    stack: "node.js",
+    wallet_address: walletAddress,
+    github_username: githubUsername,
+    telegram_username: telegramUsername,
+  };
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const args = [
-      "create",
-      "src/HackathonEscrow.sol:HackathonEscrow",
-      "--broadcast",
-      "--rpc-url",
-      RPC_URL,
-      "--private-key",
-      ORGANIZER_PRIVATE_KEY,
-      "--value",
-      BOUNTY_WEI.toString(),
-      "--gas-price",
-      GAS_PRICE_WEI.toString(),
-      "--nonce",
-      nonce,
-      "--constructor-args",
-      ENTRY_FEE_WEI.toString(),
-      deadlineUnix.toString(),
-      organizerAddress,
-      organizerAddress,
-    ];
-
-    try {
-      const output = run("forge", args, { cwd: contractsRoot });
-      const match = output.match(/Deployed to:\s*(0x[a-fA-F0-9]{40})/);
-      if (!match) throw new Error(`Could not parse escrow address from forge output:\n${output}`);
-      return { escrowAddress: match[1], output };
-    } catch (error) {
-      const message = formatExecError("forge", args, error);
-      const nextNonceMatch = message.match(/next nonce (\d+)/i);
-      if (!nextNonceMatch) throw new Error(message);
-      nonce = nextNonceMatch[1];
+  const reg = await api("POST", "/agents/register", payload);
+  if (!reg.ok) {
+    if (reg.status !== 429) {
+      throw new Error(`Register ${prefix} failed: ${JSON.stringify(reg.json)}`);
     }
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error(`Register ${prefix} hit rate limit and no Supabase fallback is configured`);
+    }
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const id = crypto.randomUUID();
+    const apiKey = `buildersclaw_${crypto.randomBytes(32).toString("hex")}`;
+    const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+    const strategy = JSON.stringify({
+      stack: payload.stack,
+      github_username: githubUsername,
+      telegram_username: telegramUsername,
+    });
+    const insert = await supabaseAdmin.from("agents").insert({
+      id,
+      name: payload.name,
+      display_name: payload.name,
+      description: payload.description,
+      wallet_address: walletAddress,
+      api_key_hash: apiKeyHash,
+      model: payload.model,
+      personality: null,
+      strategy,
+    });
+    if (insert.error) throw new Error(`Register ${prefix} fallback insert failed: ${JSON.stringify(insert.error)}`);
+    return { id, name: payload.name, key: apiKey };
   }
 
-  throw new Error("Failed to deploy escrow after nonce retries");
+  return {
+    id: reg.json.data.agent.id,
+    name: reg.json.data.agent.name,
+    key: reg.json.data.agent.api_key,
+  };
+}
+
+async function maybeLinkErc8004(agentKey) {
+  if (!OPTIONAL_ERC8004_AGENT_ID || !OPTIONAL_ERC8004_OWNER_PRIVATE_KEY) {
+    return { attempted: false };
+  }
+
+  const issuedAt = new Date().toISOString();
+  const identityInfo = await api(
+    "GET",
+    `/agents/identity?identity_agent_id=${encodeURIComponent(OPTIONAL_ERC8004_AGENT_ID)}&issued_at=${encodeURIComponent(issuedAt)}`,
+    null,
+    agentKey,
+  );
+  if (!identityInfo.ok || !identityInfo.json?.data?.link_message) {
+    return { attempted: true, linked: false, reason: `identity GET failed: ${JSON.stringify(identityInfo.json)}` };
+  }
+
+  const owner = privateKeyToAccount(normalizePrivateKey(OPTIONAL_ERC8004_OWNER_PRIVATE_KEY));
+  const signature = await owner.signMessage({ message: identityInfo.json.data.link_message });
+  const link = await api("POST", "/agents/identity", {
+    action: "link",
+    identity_agent_id: OPTIONAL_ERC8004_AGENT_ID,
+    issued_at: issuedAt,
+    signature,
+    identity_source: OPTIONAL_ERC8004_SOURCE,
+  }, agentKey);
+  if (!link.ok) {
+    return { attempted: true, linked: false, reason: `identity link failed: ${JSON.stringify(link.json)}` };
+  }
+  const sync = await api("POST", "/agents/identity", { action: "sync" }, agentKey);
+  return {
+    attempted: true,
+    linked: sync.ok,
+    reason: sync.ok ? null : `identity sync failed: ${JSON.stringify(sync.json)}`,
+  };
+}
+
+async function sendNative(fromClient, to, amountWei) {
+  const txHash = await fromClient.sendTransaction({ account: fromClient.account, to, value: amountWei, chain });
+  return publicClient.waitForTransactionReceipt({ hash: txHash });
+}
+
+async function writeContractAndWait(client, request) {
+  const txHash = await client.writeContract({ ...request, account: client.account, chain });
+  return publicClient.waitForTransactionReceipt({ hash: txHash });
+}
+
+async function transferUsdc(to, amount) {
+  return writeContractAndWait(organizerWalletClient, {
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: "transfer",
+    args: [to, amount],
+  });
+}
+
+async function getUsdcBalance(address) {
+  return publicClient.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName: "balanceOf", args: [address] });
+}
+
+async function deployEscrow(deadlineUnix) {
+  const hackathonCountBefore = await publicClient.readContract({
+    address: FACTORY_ADDRESS,
+    abi: factoryAbi,
+    functionName: "hackathonCount",
+  });
+
+  const receipt = await writeContractAndWait(organizerWalletClient, {
+    address: FACTORY_ADDRESS,
+    abi: factoryAbi,
+    functionName: "createHackathon",
+    args: [USDC_ADDRESS, ENTRY_FEE_UNITS, BigInt(deadlineUnix)],
+  });
+
+  let escrowAddress = null;
+  const createdLog = receipt.logs.find((log) => log.address && getAddress(log.address) === FACTORY_ADDRESS && log.topics?.[1]);
+  if (createdLog?.topics?.[1]) {
+    escrowAddress = getAddress(`0x${createdLog.topics[1].slice(26)}`);
+  } else {
+    const hackathonCountAfter = await publicClient.readContract({
+      address: FACTORY_ADDRESS,
+      abi: factoryAbi,
+      functionName: "hackathonCount",
+    });
+    if (hackathonCountAfter <= hackathonCountBefore) {
+      throw new Error("Factory transaction succeeded but hackathon count did not increase");
+    }
+    escrowAddress = await publicClient.readContract({
+      address: FACTORY_ADDRESS,
+      abi: factoryAbi,
+      functionName: "hackathons",
+      args: [hackathonCountAfter - 1n],
+    });
+  }
+
+  if (!escrowAddress) throw new Error("Could not resolve escrow address after factory deployment");
+  return { escrowAddress, txHash: receipt.transactionHash };
+}
+
+async function fundEscrow(escrowAddress, amount) {
+  await writeContractAndWait(organizerWalletClient, {
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [escrowAddress, amount],
+  });
+
+  return writeContractAndWait(organizerWalletClient, {
+    address: escrowAddress,
+    abi: escrowAbi,
+    functionName: "fund",
+    args: [amount],
+  });
+}
+
+async function submitProposal({ escrowAddress, fundingTxHash, endsAt }) {
+  const proposal = await api("POST", "/proposals", {
+    company: `On-chain E2E Co ${Date.now()}`,
+    email: `onchain-e2e-${Date.now()}@example.com`,
+    track: "api",
+    problem: "Verify BNB Sepolia USDC contract-backed marketplace flow.",
+    judge_agent: "platform",
+    prize_amount: formatUnits(SPONSOR_FUNDING_UNITS, USDC_DECIMALS),
+    judging_priorities: "On-chain verification, finalization reliability, marketplace collaboration.",
+    tech_requirements: "USDC-backed contract flow on BNB Sepolia with marketplace hiring.",
+    hackathon_title: `BNB Sepolia Onchain Flow ${Date.now()}`,
+    hackathon_brief: "Leader joins on-chain, hires via marketplace, then winners claim split USDC prizes.",
+    hackathon_rules: "Leader must join on-chain with USDC approval and tx proof before backend registration.",
+    hackathon_deadline: endsAt,
+    hackathon_min_participants: 2,
+    hackathon_team_size_max: 4,
+    challenge_type: "api",
+    contract_address: escrowAddress,
+    chain_id: CHAIN_ID,
+    funding_tx_hash: fundingTxHash,
+    sponsor_wallet: organizerAddress,
+  });
+  if (!proposal.ok) throw new Error(`Proposal submission failed: ${JSON.stringify(proposal.json)}`);
+
+  const approval = await api("PATCH", "/proposals", {
+    id: proposal.json.data.id,
+    status: "approved",
+    notes: "Automated BNB Sepolia USDC E2E approval.",
+  }, ADMIN_API_KEY);
+  if (!approval.ok) throw new Error(`Proposal approval failed: ${JSON.stringify(approval.json)}`);
+
+  return {
+    proposalId: proposal.json.data.id,
+    hackathonId: approval.json.data.hackathon_id,
+  };
+}
+
+async function approveAndJoinEscrow(participant, escrowAddress) {
+  await writeContractAndWait(participant.walletClient, {
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [escrowAddress, ENTRY_FEE_UNITS],
+  });
+
+  return writeContractAndWait(participant.walletClient, {
+    address: escrowAddress,
+    abi: escrowAbi,
+    functionName: "join",
+    args: [],
+  });
+}
+
+async function claimPrize(participant, escrowAddress) {
+  return writeContractAndWait(participant.walletClient, {
+    address: escrowAddress,
+    abi: escrowAbi,
+    functionName: "claim",
+    args: [],
+  });
 }
 
 async function main() {
-  const organizerAddress = getAddressFromPrivateKey(ORGANIZER_PRIVATE_KEY);
-  const organizerBalance = getBalance(organizerAddress);
-  // Need funds for 2 escrow deploys (2x bounty) + 3 wallet fundings (leader, hired, single-winner participant)
-  const minimumRequired = BOUNTY_WEI * 2n + PARTICIPANT_FUNDING_WEI * 3n;
-  if (organizerBalance <= minimumRequired) {
-    throw new Error(
-      `Organizer wallet ${organizerAddress} is underfunded. Need more than ${minimumRequired} wei, have ${organizerBalance} wei.`
-    );
-  }
+  console.log("============================================================");
+  console.log(" BuildersClaw BNB Sepolia USDC On-chain E2E");
+  console.log("============================================================");
+  console.log(` Base URL:        ${BASE_URL}`);
+  console.log(` Chain ID:        ${CHAIN_ID}`);
+  console.log(` Factory:         ${FACTORY_ADDRESS}`);
+  console.log(` Token:           ${USDC_ADDRESS} (${USDC_SYMBOL})`);
+  console.log(` Organizer:       ${organizerAddress}`);
+  console.log(` Time:            ${new Date().toISOString()}`);
 
-  const participantWallet = generateParticipantWallet();
+  step("1.", "Verify organizer has enough gas and USDC");
+  const [organizerGas, organizerUsdc] = await Promise.all([
+    publicClient.getBalance({ address: organizerAddress }),
+    getUsdcBalance(organizerAddress),
+  ]);
+  const minimumUsdc = SPONSOR_FUNDING_UNITS + ENTRY_FEE_UNITS;
+  assert(organizerGas > parseUnits(GAS_FUND_BNB, 18) * 3n, "Organizer has enough BNB for gas", organizerGas.toString());
+  assert(organizerUsdc >= minimumUsdc, `Organizer has at least ${formatUnits(minimumUsdc, USDC_DECIMALS)} ${USDC_SYMBOL}`, formatUnits(organizerUsdc, USDC_DECIMALS));
+  if (failed > 0) throw new Error("Organizer funding precheck failed");
+
+  step("2.", "Create fresh leader and hired wallets + register agents");
+  const leaderWallet = newWallet("leader");
+  const hiredWallet = newWallet("hired");
+  const leaderTelegram = fakeTelegram("leader");
+  const hiredTelegram = fakeTelegram("hired");
+  const leader = await registerAgent("onchain_leader", leaderWallet.account.address, uid("ghleader"), leaderTelegram);
+  const hired = await registerAgent("onchain_hired", hiredWallet.account.address, uid("ghhired"), hiredTelegram);
+  assert(!!leader.key && !!hired.key, "Leader and hired agents registered");
+
+  step("3.", "Fund leader/hired with BNB gas and leader with USDC entry fee");
+  await sendNative(organizerWalletClient, leaderWallet.account.address, parseUnits(GAS_FUND_BNB, 18));
+  await sendNative(organizerWalletClient, hiredWallet.account.address, parseUnits(GAS_FUND_BNB, 18));
+  await transferUsdc(leaderWallet.account.address, ENTRY_FEE_UNITS);
+  const leaderUsdc = await getUsdcBalance(leaderWallet.account.address);
+  assertBigInt(leaderUsdc, ENTRY_FEE_UNITS, "Leader received exact USDC entry fee");
+
+  step("4.", "Deploy fresh escrow via factory and fund it with sponsor USDC");
   const deadlineUnix = Math.floor(Date.now() / 1000) + DURATION_HOURS * 60 * 60;
   const endsAt = new Date(deadlineUnix * 1000).toISOString();
-
-  logStep("1.", "Registering fresh participant agent with a fresh wallet");
-  const participant = await api("POST", "/agents/register", {
-    name: makeAgentName("onchain_participant"),
-    display_name: "On-Chain Participant",
-    model: "openai",
-    wallet_address: participantWallet.address,
+  const deploy = await deployEscrow(deadlineUnix);
+  const fundReceipt = await fundEscrow(deploy.escrowAddress, SPONSOR_FUNDING_UNITS);
+  const fundedPrizePool = await publicClient.readContract({
+    address: deploy.escrowAddress,
+    abi: escrowAbi,
+    functionName: "prizePool",
   });
-  const participantKey = participant.data.agent.api_key;
-  const participantAgentId = participant.data.agent.id;
-  console.log(`Participant agent: ${participantAgentId}`);
-  console.log(`Participant wallet: ${participantWallet.address}`);
+  assertBigInt(fundedPrizePool, SPONSOR_FUNDING_UNITS, "Escrow prize pool equals sponsor funding before joins");
 
-  logStep("2.", "Funding the fresh participant wallet for gas");
-  const fundingTx = sendTx(ORGANIZER_PRIVATE_KEY, participantWallet.address, PARTICIPANT_FUNDING_WEI);
-  console.log(`Funding tx: ${fundingTx.transactionHash}`);
-
-  logStep("3.", "Deploying funded escrow contract");
-  const { escrowAddress } = deployEscrow(deadlineUnix, organizerAddress);
-  console.log(`Escrow: ${escrowAddress}`);
-
-  logStep("4.", "Submitting enterprise proposal with the deployed escrow");
-  const proposal = await api("POST", "/proposals", {
-    company: `On-Chain Test Co ${Date.now()}`,
-    email: `onchain-test-${Date.now()}@example.com`,
-    track: "api",
-    problem: "Verify the full on-chain join, finalize, and claim flow against a funded escrow.",
-    judge_agent: "platform",
-    prize_amount: "0",
-    judging_priorities: "End-to-end integration reliability.",
-    tech_requirements: "Contract-backed hackathon with repo submission.",
-    hackathon_title: `On-Chain Prize Flow ${Date.now()}`,
-    hackathon_brief: "End-to-end test for on-chain join, backend verification, finalization, and claim.",
-    hackathon_rules: "Fresh participant wallet must join on-chain before backend registration.",
-    hackathon_deadline: endsAt,
-    hackathon_min_participants: 2,
-    challenge_type: "api",
-    contract_address: escrowAddress,
-    chain_id: Number(process.env.CHAIN_ID),
+  step("5.", "Create hackathon from funded proposal and verify backend contract state");
+  const proposal = await submitProposal({
+    escrowAddress: deploy.escrowAddress,
+    fundingTxHash: fundReceipt.transactionHash,
+    endsAt,
   });
-  const proposalId = proposal.data.id;
-  console.log(`Proposal: ${proposalId}`);
+  assert(typeof proposal.hackathonId === "string", "Proposal approval created a hackathon");
+  const contractStateBeforeJoin = await api("GET", `/hackathons/${proposal.hackathonId}/contract`);
+  assert(contractStateBeforeJoin.ok, "Contract endpoint loads before join", JSON.stringify(contractStateBeforeJoin.json));
+  assertEqual(contractStateBeforeJoin.json.data.contract_address, deploy.escrowAddress, "Contract endpoint uses deployed escrow");
+  assertEqual(contractStateBeforeJoin.json.data.status.entry_fee_units, ENTRY_FEE_UNITS.toString(), "Contract endpoint entry fee matches env");
+  assertEqual(contractStateBeforeJoin.json.data.status.prize_pool_units, SPONSOR_FUNDING_UNITS.toString(), "Contract endpoint prize pool matches sponsor funding");
 
-  logStep("5.", "Approving proposal to auto-create the hackathon");
-  const approval = await api("PATCH", "/proposals", {
-    id: proposalId,
-    status: "approved",
-    notes: "Automated contract-backed E2E approval.",
-  }, ADMIN_API_KEY);
-  const hackathonId = approval.data.hackathon_id;
-  assertEqual(approval.data.contract_address, escrowAddress, "approved contract_address");
-  console.log(`Hackathon: ${hackathonId}`);
+  step("6.", "Optional ERC-8004 link/sync for leader before marketplace listing");
+  const identity = await maybeLinkErc8004(leader.key);
+  if (!identity.attempted) {
+    console.log("  SKIP ERC-8004 optional test (set TEST_ERC8004_AGENT_ID + TEST_ERC8004_OWNER_PRIVATE_KEY to enable)");
+  } else {
+    assert(identity.linked, "Leader ERC-8004 link/sync succeeds", identity.reason || undefined);
+  }
 
-  logStep("6.", "Submitting on-chain join transaction from the fresh participant wallet");
-  const joinTx = sendTx(participantWallet.privateKey, escrowAddress, ENTRY_FEE_WEI, ["join()"]) ;
-  console.log(`Join tx: ${joinTx.transactionHash}`);
-
-  logStep("7.", "Notifying backend with tx proof");
-  const joinResponse = await api("POST", `/hackathons/${hackathonId}/join`, {
-    tx_hash: joinTx.transactionHash,
-    wallet_address: participantWallet.address,
-  }, participantKey);
-  console.log(`Team: ${joinResponse.data.team.id}`);
-
-  logStep("8.", "Validating live contract state through the backend");
-  const contractState = await api("GET", `/hackathons/${hackathonId}/contract`);
-  const expectedPrizePoolBeforeFinalize = (BOUNTY_WEI + ENTRY_FEE_WEI).toString();
-  assertEqual(contractState.data.contract_address, escrowAddress, "contract endpoint address");
-  assertEqual(contractState.data.status.entry_fee_wei, ENTRY_FEE_WEI.toString(), "entry_fee_wei");
-  assertEqual(contractState.data.status.prize_pool_wei, expectedPrizePoolBeforeFinalize, "prize_pool_wei before finalize");
-  assertEqual(contractState.data.status.winner_count, 0, "winner_count before finalize");
-  assertEqual(callContract(escrowAddress, "hasJoined(address)(bool)", [participantWallet.address]), "true", "on-chain joined flag");
-  console.log(`Prize pool before finalize: ${contractState.data.status.prize_pool_wei} wei`);
-
-  logStep("9.", "Finalizing hackathon through the backend admin endpoint");
-  const finalizeResponse = await api(
-    "POST",
-    `/admin/hackathons/${hackathonId}/finalize`,
-    { winner_team_id: joinResponse.data.team.id, notes: "Automated on-chain prize flow test winner." },
-    ADMIN_API_KEY
-  );
-  console.log(`Finalize winner team: ${finalizeResponse.data.winner_team_id}`);
-
-  logStep("10.", "Claiming the funded prize from the fresh participant wallet");
-  const claimTx = sendTx(participantWallet.privateKey, escrowAddress, 0n, ["claim()"], 3);
-  console.log(`Claim tx: ${claimTx.transactionHash}`);
-
-  logStep("11.", "Verifying the prize pool was emptied after claim");
-  await waitForPrizePoolZero(hackathonId);
-  console.log("Prize pool after claim: 0 wei");
-
-  console.log("\n--- Single-winner scenario complete ---");
-  console.log(`- Hackathon: ${hackathonId}`);
-  console.log(`- Escrow: ${escrowAddress}`);
-  console.log(`- Participant wallet: ${participantWallet.address}`);
-  console.log(`- Funding tx: ${fundingTx.transactionHash}`);
-  console.log(`- Join tx: ${joinTx.transactionHash}`);
-  console.log(`- Claim tx: ${claimTx.transactionHash}`);
-
-  // =========================================================================
-  // Multi-winner marketplace scenario
-  // =========================================================================
-  console.log("\n========== MULTI-WINNER MARKETPLACE SCENARIO ==========");
-
-  const mwDeadlineUnix = Math.floor(Date.now() / 1000) + DURATION_HOURS * 60 * 60;
-  const mwEndsAt = new Date(mwDeadlineUnix * 1000).toISOString();
-
-  logStep("12.", "Deploying a fresh escrow for multi-winner scenario");
-  const { escrowAddress: mwEscrow } = deployEscrow(mwDeadlineUnix, organizerAddress);
-  console.log(`Multi-winner escrow: ${mwEscrow}`);
-
-  logStep("13.", "Creating hackathon via proposal + approval");
-  const mwProposal = await api("POST", "/proposals", {
-    company: `Multi-Winner Test Co ${Date.now()}`,
-    email: `mw-test-${Date.now()}@example.com`,
-    track: "api",
-    problem: "Verify multi-winner marketplace hire, finalize, and split claim flow.",
-    judge_agent: "platform",
-    prize_amount: "0",
-    judging_priorities: "Multi-winner integration reliability.",
-    tech_requirements: "Contract-backed hackathon with marketplace hiring.",
-    hackathon_title: `Multi-Winner Flow ${Date.now()}`,
-    hackathon_brief: "E2E test: leader joins on-chain, hires teammate via marketplace, both claim split prizes.",
-    hackathon_rules: "Leader must join on-chain. Hired member joins via marketplace only.",
-    hackathon_deadline: mwEndsAt,
-    hackathon_min_participants: 2,
-    hackathon_team_size_max: 5,
-    challenge_type: "api",
-    contract_address: mwEscrow,
-    chain_id: Number(process.env.CHAIN_ID),
+  step("7.", "Leader approves USDC, joins on-chain, and notifies backend");
+  const joinReceipt = await approveAndJoinEscrow(leaderWallet, deploy.escrowAddress);
+  const joinBackend = await api("POST", `/hackathons/${proposal.hackathonId}/join`, {
+    tx_hash: joinReceipt.transactionHash,
+    wallet_address: leaderWallet.account.address,
+  }, leader.key);
+  assert(joinBackend.ok, "Leader backend join succeeds", JSON.stringify(joinBackend.json));
+  const teamId = joinBackend.json.data.team.id;
+  const joinedFlag = await publicClient.readContract({
+    address: deploy.escrowAddress,
+    abi: escrowAbi,
+    functionName: "hasJoined",
+    args: [leaderWallet.account.address],
   });
-  const mwProposalId = mwProposal.data.id;
-
-  const mwApproval = await api("PATCH", "/proposals", {
-    id: mwProposalId,
-    status: "approved",
-    notes: "Automated multi-winner E2E approval.",
-  }, ADMIN_API_KEY);
-  const mwHackathonId = mwApproval.data.hackathon_id;
-  assertEqual(mwApproval.data.contract_address, mwEscrow, "mw approved contract_address");
-  console.log(`Hackathon: ${mwHackathonId}`);
-
-  logStep("14.", "Registering leader agent with fresh wallet");
-  const leaderWallet = generateParticipantWallet();
-  const leaderFundTx = sendTx(ORGANIZER_PRIVATE_KEY, leaderWallet.address, PARTICIPANT_FUNDING_WEI);
-  console.log(`Leader wallet: ${leaderWallet.address}`);
-  console.log(`Leader funding tx: ${leaderFundTx.transactionHash}`);
-
-  const leaderReg = await api("POST", "/agents/register", {
-    name: makeAgentName("mw_leader"),
-    display_name: "Multi-Winner Leader",
-    model: "openai",
-    wallet_address: leaderWallet.address,
+  assert(joinedFlag === true, "Escrow marks leader as joined on-chain");
+  const prizeAfterJoin = await publicClient.readContract({
+    address: deploy.escrowAddress,
+    abi: escrowAbi,
+    functionName: "prizePool",
   });
-  const leaderKey = leaderReg.data.agent.api_key;
-  const leaderAgentId = leaderReg.data.agent.id;
-  console.log(`Leader agent: ${leaderAgentId}`);
+  assertBigInt(prizeAfterJoin, SPONSOR_FUNDING_UNITS + ENTRY_FEE_UNITS, "Escrow prize pool includes sponsor funding + leader entry fee");
 
-  logStep("15.", "Leader joins on-chain + backend");
-  const leaderJoinTx = sendTx(leaderWallet.privateKey, mwEscrow, ENTRY_FEE_WEI, ["join()"]);
-  console.log(`Leader join tx: ${leaderJoinTx.transactionHash}`);
-
-  const leaderJoinResp = await api("POST", `/hackathons/${mwHackathonId}/join`, {
-    tx_hash: leaderJoinTx.transactionHash,
-    wallet_address: leaderWallet.address,
-  }, leaderKey);
-  const mwTeamId = leaderJoinResp.data.team.id;
-  console.log(`Team: ${mwTeamId}`);
-
-  logStep("16.", "Registering hired agent with fresh wallet");
-  const hiredWallet = generateParticipantWallet();
-  console.log(`Hired wallet: ${hiredWallet.address}`);
-
-  const hiredReg = await api("POST", "/agents/register", {
-    name: makeAgentName("mw_hired"),
-    display_name: "Multi-Winner Hired Member",
-    model: "openai",
-    wallet_address: hiredWallet.address,
-  });
-  const hiredKey = hiredReg.data.agent.api_key;
-  const hiredAgentId = hiredReg.data.agent.id;
-  console.log(`Hired agent: ${hiredAgentId}`);
-
-  logStep("17.", "Leader posts marketplace role listing (40% share)");
-  const listing = await api("POST", "/marketplace", {
-    hackathon_id: mwHackathonId,
-    team_id: mwTeamId,
+  step("8.", "Leader posts marketplace listing and hired member claims it");
+  const listingCreate = await api("POST", "/marketplace", {
+    hackathon_id: proposal.hackathonId,
+    team_id: teamId,
     role_title: "Backend Dev",
-    role_description: "E2E test hired member role",
+    role_type: "builder",
+    role_description: "Build the API and review final submission.",
+    repo_url: REPO_URL,
     share_pct: 40,
-  }, leaderKey);
-  const listingId = listing.data.id;
-  assertEqual(listing.data.share_pct, 40, "listing share_pct");
-  assertEqual(listing.data.leader_keeps, 60, "leader_keeps");
-  console.log(`Listing: ${listingId}, leader keeps ${listing.data.leader_keeps}%`);
+  }, leader.key);
+  assertEqual(listingCreate.status, 201, "Marketplace listing created");
+  const listingId = listingCreate.json.data.id;
+  const browseListing = await api("GET", `/marketplace?hackathon_id=${proposal.hackathonId}&status=open`);
+  const openListing = Array.isArray(browseListing.json?.data)
+    ? browseListing.json.data.find((listing) => listing.id === listingId)
+    : null;
+  assert(!!openListing, "Listing appears in open marketplace feed");
+  if (identity.attempted && identity.linked) {
+    assertEqual(openListing?.poster_identity?.linked, true, "Marketplace listing surfaces linked ERC-8004 identity");
+  }
+  const take = await api("POST", `/marketplace/${listingId}/take`, {}, hired.key);
+  assert(take.ok, "Hired member claims marketplace listing", JSON.stringify(take.json));
 
-  logStep("18.", "Hired agent claims the role");
-  const takeResp = await api("POST", `/marketplace/${listingId}/take`, {}, hiredKey);
-  assertEqual(takeResp.data.share_pct, 40, "hired share_pct");
-  console.log(`Claimed: hired gets ${takeResp.data.share_pct}%, role: ${takeResp.data.role}`);
-
-  logStep("19.", "Submitting repo from the team");
-  await api("POST", `/hackathons/${mwHackathonId}/teams/${mwTeamId}/submit`, {
-    repo_url: "https://github.com/buildersclaw/multi-winner-e2e-test",
-    notes: "Automated multi-winner E2E test submission.",
-  }, leaderKey);
-  console.log("Submission recorded");
-
-  logStep("20.", "Finalizing with winner_team_id (multi-winner split)");
-  const mwFinalizeResp = await api(
-    "POST",
-    `/admin/hackathons/${mwHackathonId}/finalize`,
-    { winner_team_id: mwTeamId, notes: "Automated multi-winner prize flow test." },
-    ADMIN_API_KEY
+  step("9.", "Team submits repo and admin finalizes split winners on-chain");
+  const submit = await api("POST", `/hackathons/${proposal.hackathonId}/teams/${teamId}/submit`, {
+    repo_url: REPO_URL,
+    notes: "Automated BNB Sepolia on-chain marketplace e2e submission.",
+  }, leader.key);
+  assert(submit.ok, "Team submission succeeds", JSON.stringify(submit.json));
+  const finalize = await api("POST", `/admin/hackathons/${proposal.hackathonId}/finalize`, {
+    winner_team_id: teamId,
+    notes: "Automated BNB Sepolia USDC finalization test.",
+  }, ADMIN_API_KEY);
+  assert(finalize.ok, "Admin finalize succeeds", JSON.stringify(finalize.json));
+  assertEqual(finalize.json.data.winners.length, 2, "Finalize returns two winner entries");
+  const winnersByWallet = new Map(
+    finalize.json.data.winners.map((winner) => [winner.wallet.toLowerCase(), winner]),
   );
-  assertEqual(mwFinalizeResp.data.winners.length, 2, "winners count");
-  console.log(`Finalize tx: ${mwFinalizeResp.data.hackathon?.finalize_tx_hash || "in metadata"}`);
-  console.log("Winners:");
-  for (const w of mwFinalizeResp.data.winners) {
-    console.log(`  ${w.wallet}: ${w.share_bps} bps`);
+  const leaderWinner = winnersByWallet.get(leaderWallet.account.address.toLowerCase());
+  const hiredWinner = winnersByWallet.get(hiredWallet.account.address.toLowerCase());
+  assertEqual(leaderWinner?.share_bps, 6000, "Leader keeps 60% after 40% marketplace listing");
+  assertEqual(hiredWinner?.share_bps, 4000, "Hired member receives 40%");
+
+  step("10.", "Both members claim USDC prizes and escrow reaches zero");
+  const totalPrizeAtFinalize = await publicClient.readContract({
+    address: deploy.escrowAddress,
+    abi: escrowAbi,
+    functionName: "totalPrizeAtFinalize",
+  });
+  const leaderExpected = (totalPrizeAtFinalize * 6000n) / 10000n;
+  const hiredExpected = (totalPrizeAtFinalize * 4000n) / 10000n;
+  const [leaderBefore, hiredBefore] = await Promise.all([
+    getUsdcBalance(leaderWallet.account.address),
+    getUsdcBalance(hiredWallet.account.address),
+  ]);
+  await claimPrize(leaderWallet, deploy.escrowAddress);
+  await claimPrize(hiredWallet, deploy.escrowAddress);
+  const [leaderAfter, hiredAfter, finalPrizePool] = await Promise.all([
+    getUsdcBalance(leaderWallet.account.address),
+    getUsdcBalance(hiredWallet.account.address),
+    publicClient.readContract({ address: deploy.escrowAddress, abi: escrowAbi, functionName: "prizePool" }),
+  ]);
+  assertBigInt(leaderAfter - leaderBefore, leaderExpected, "Leader receives exact USDC winner share");
+  assertBigInt(hiredAfter - hiredBefore, hiredExpected, "Hired member receives exact USDC winner share");
+  assertBigInt(finalPrizePool, 0n, "Escrow prize pool reaches zero after all claims");
+
+  console.log("\n------------------------------------------------------------");
+  console.log(` Hackathon ID:     ${proposal.hackathonId}`);
+  console.log(` Proposal ID:      ${proposal.proposalId}`);
+  console.log(` Escrow:           ${deploy.escrowAddress}`);
+  console.log(` Team ID:          ${teamId}`);
+  console.log(` Total prize:      ${formatUnits(totalPrizeAtFinalize, USDC_DECIMALS)} ${USDC_SYMBOL}`);
+  console.log(` Leader wallet:    ${leaderWallet.account.address}`);
+  console.log(` Hired wallet:     ${hiredWallet.account.address}`);
+  console.log("------------------------------------------------------------");
+  console.log(` Passed: ${passed}`);
+  console.log(` Failed: ${failed}`);
+  if (failures.length > 0) {
+    console.log(" Failures:");
+    for (const failure of failures) console.log(failure);
   }
+  console.log("============================================================");
 
-  // Verify on-chain state
-  const mwContractState = await api("GET", `/hackathons/${mwHackathonId}/contract`);
-  assertEqual(mwContractState.data.status.winner_count, 2, "on-chain winner_count");
-  console.log(`On-chain prize pool at finalize: ${mwContractState.data.status.total_prize_at_finalize_wei} wei`);
-
-  logStep("21.", "Both members claim their prizes independently");
-  // Fund hired wallet for gas (they never called join, so they have no funds)
-  const hiredGasTx = sendTx(ORGANIZER_PRIVATE_KEY, hiredWallet.address, PARTICIPANT_FUNDING_WEI);
-  console.log(`Hired gas funding tx: ${hiredGasTx.transactionHash}`);
-
-  const leaderBalBefore = getBalance(leaderWallet.address);
-  const hiredBalBefore = getBalance(hiredWallet.address);
-
-  // Leader claims
-  const leaderClaimTx = sendTx(leaderWallet.privateKey, mwEscrow, 0n, ["claim()"], 3);
-  console.log(`Leader claim tx: ${leaderClaimTx.transactionHash}`);
-
-  // Hired member claims — this proves non-joined addresses can claim after finalize
-  const hiredClaimTx = sendTx(hiredWallet.privateKey, mwEscrow, 0n, ["claim()"], 3);
-  console.log(`Hired claim tx: ${hiredClaimTx.transactionHash}`);
-
-  const leaderBalAfter = getBalance(leaderWallet.address);
-  const hiredBalAfter = getBalance(hiredWallet.address);
-
-  // Calculate expected prizes from the bounty
-  const totalPrize = BOUNTY_WEI + ENTRY_FEE_WEI;
-  const expectedLeaderPrize = (totalPrize * 6000n) / 10000n;
-  const expectedHiredPrize = (totalPrize * 4000n) / 10000n;
-
-  // Balance increase = prize - gas cost, so just verify balance went up by at least 90% of expected
-  const leaderGain = leaderBalAfter - leaderBalBefore;
-  const hiredGain = hiredBalAfter - hiredBalBefore;
-  if (leaderGain < (expectedLeaderPrize * 90n) / 100n) {
-    throw new Error(`Leader prize too low: gained ${leaderGain} wei, expected ~${expectedLeaderPrize} wei`);
-  }
-  if (hiredGain < (expectedHiredPrize * 90n) / 100n) {
-    throw new Error(`Hired prize too low: gained ${hiredGain} wei, expected ~${expectedHiredPrize} wei`);
-  }
-  console.log(`Leader gained: ${leaderGain} wei (expected ~${expectedLeaderPrize})`);
-  console.log(`Hired gained: ${hiredGain} wei (expected ~${expectedHiredPrize})`);
-
-  logStep("22.", "Verifying prize pool emptied after both claims");
-  await waitForPrizePoolZero(mwHackathonId);
-  console.log("Prize pool after both claims: 0 wei");
-
-  console.log("\n--- Multi-winner marketplace scenario complete ---");
-  console.log(`- Hackathon: ${mwHackathonId}`);
-  console.log(`- Escrow: ${mwEscrow}`);
-  console.log(`- Leader wallet: ${leaderWallet.address}`);
-  console.log(`- Hired wallet: ${hiredWallet.address} (never called join())`);
-  console.log(`- Leader claim tx: ${leaderClaimTx.transactionHash}`);
-  console.log(`- Hired claim tx: ${hiredClaimTx.transactionHash}`);
-
-  console.log("\n========== ALL SCENARIOS PASSED ==========");
+  if (failed > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {
-  console.error(`\nFAIL: ${error.message}`);
+  console.error(`\nFAIL: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

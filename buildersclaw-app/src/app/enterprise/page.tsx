@@ -85,7 +85,7 @@ export default function EnterprisePage() {
 
   // Sponsor funding state
   const [sponsorFunded, setSponsorFunded] = useState(false);
-  const [prizeAmountEth, setPrizeAmountEth] = useState("");
+  const [prizeAmountUsdc, setPrizeAmountUsdc] = useState("");
   const [deployedContract, setDeployedContract] = useState<{ contractAddress: string; txHash: string } | null>(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [openWalletModalAfterConnect, setOpenWalletModalAfterConnect] = useState(false);
@@ -156,7 +156,7 @@ export default function EnterprisePage() {
         });
         setSponsorFunded(false);
         setDeployedContract(null);
-        setPrizeAmountEth("");
+        setPrizeAmountUsdc("");
       } else {
         setErrorMsg(data.error?.message || "Submission failed. Try again.");
       }
@@ -584,12 +584,12 @@ export default function EnterprisePage() {
                     {/* Step 2: Prize Amount */}
                     {authenticated && connectedWallet && (
                       <div>
-                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6 }}>STEP 2 — PRIZE AMOUNT (ETH)</div>
+                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6 }}>STEP 2 — PRIZE AMOUNT (USDC)</div>
                         <input
                           type="number" step="0.001" min="0.001"
-                          value={prizeAmountEth}
-                          onChange={(e) => setPrizeAmountEth(e.target.value)}
-                          placeholder="e.g. 0.5"
+                          value={prizeAmountUsdc}
+                          onChange={(e) => setPrizeAmountUsdc(e.target.value)}
+                          placeholder="e.g. 500"
                           disabled={!!deployedContract}
                           style={{ ...inp, maxWidth: 200 }}
                         />
@@ -597,7 +597,7 @@ export default function EnterprisePage() {
                     )}
 
                     {/* Step 3: Deploy */}
-                    {authenticated && connectedWallet && prizeAmountEth && !deployedContract && (
+                    {authenticated && connectedWallet && prizeAmountUsdc && !deployedContract && (
                       <div>
                         <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8 }}>STEP 3 — DEPLOY & FUND ESCROW</div>
                         <button
@@ -623,7 +623,7 @@ export default function EnterprisePage() {
                             const deployResult = await deploy({
                               provider,
                               sponsorAddress: connectedWallet.address,
-                              prizeAmountEth,
+                              prizeAmountUsdc,
                               deadlineUnix: Math.floor(deadlineDate.getTime() / 1000),
                             });
 
@@ -632,7 +632,7 @@ export default function EnterprisePage() {
                             }
                           }}
                         >
-                          {isDeploying ? "Deploying..." : `Deploy & Fund ${prizeAmountEth} ETH`}
+                          {isDeploying ? "Deploying..." : `Deploy & Fund ${prizeAmountUsdc} USDC`}
                         </button>
                         {!form.hackathon_deadline && (
                           <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginTop: 6 }}>
@@ -669,7 +669,7 @@ export default function EnterprisePage() {
                           <code style={{ color: "var(--text-dim)", wordBreak: "break-all" }}>{deployedContract.txHash}</code>
                         </div>
                         <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--gold)", marginTop: 10 }}>
-                          {prizeAmountEth} ETH LOCKED. SUBMIT THE FORM TO COMPLETE.
+                          {prizeAmountUsdc} USDC LOCKED. SUBMIT THE FORM TO COMPLETE.
                         </div>
                       </div>
                     )}

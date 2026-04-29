@@ -16,7 +16,7 @@ type RouteParams = { params: Promise<{ id: string }> };
  * POST /api/v1/hackathons/:id/join — Join a hackathon.
  *
  * For on-chain hackathons (contract_address set): requires { wallet, tx_hash } — agent must
- * call join() on the contract first, then submit the tx_hash here for verification.
+ * approve the escrow to spend USDC, call join() on the contract, then submit the tx_hash here.
  *
  * For off-chain hackathons: entry_fee > 0 is deducted from USD balance.
  *
@@ -179,25 +179,34 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   if (meta.contract_address) {
-    // ── On-chain hackathon: verify join() transaction ──
-    if (!wallet || !txHash) {
+      // ── On-chain hackathon: verify join() transaction ──
+      if (!wallet || !txHash) {
       // Read contract state for the guide
-      let entryFeeWei = "0";
+      let entryFeeUnits = "0";
+      let tokenAddress = process.env.USDC_ADDRESS || "USDC_TOKEN_ADDRESS";
+      let tokenSymbol = process.env.USDC_SYMBOL || "USDC";
       try {
-        const { getPublicChainClient, normalizeAddress } = await import("@/lib/chain");
+        const { getPublicChainClient, normalizeAddress, getEscrowTokenConfig } = await import("@/lib/chain");
         const { parseAbi } = await import("viem");
         const pc = getPublicChainClient();
-        const fee = await pc.readContract({
+        const [fee, tokenConfig] = await Promise.all([
+          pc.readContract({
           address: normalizeAddress(meta.contract_address) as `0x${string}`,
           abi: parseAbi(["function entryFee() view returns (uint256)"]),
           functionName: "entryFee",
-        });
-        entryFeeWei = (fee as bigint).toString();
+          }),
+          getEscrowTokenConfig(meta.contract_address),
+        ]);
+        entryFeeUnits = (fee as bigint).toString();
+        tokenAddress = tokenConfig.tokenAddress;
+        tokenSymbol = tokenConfig.symbol;
       } catch { /* best-effort */ }
 
       const txGuide = getJoinTransactionGuide({
         contractAddress: meta.contract_address,
-        entryFeeWei,
+        entryFeeUnits,
+        tokenAddress,
+        tokenSymbol,
         chainId: meta.chain_id,
         rpcUrl: process.env.RPC_URL || null,
         hackathonId,
@@ -209,14 +218,16 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         "This is a contract-backed hackathon. You must call join() on-chain first, then submit wallet_address + tx_hash here.",
         400,
         {
-          what_you_need: "Foundry's `cast` CLI and a funded wallet on the correct chain.",
+          what_you_need: `Foundry's \`cast\` CLI, a funded wallet, and enough ${tokenSymbol} approved for the escrow on the correct chain.`,
           setup_guide: "GET /api/v1/chain/setup for full Foundry installation + key management instructions.",
           transaction: txGuide,
           agent_wallet_status: agentReadiness,
           chain: {
             chain_id: meta.chain_id ?? (process.env.CHAIN_ID ? Number(process.env.CHAIN_ID) : null),
             rpc_url: process.env.RPC_URL || null,
-            entry_fee_wei: entryFeeWei,
+            entry_fee_units: entryFeeUnits,
+            token_address: tokenAddress,
+            token_symbol: tokenSymbol,
           },
           contract_details: `GET /api/v1/hackathons/${hackathonId}/contract`,
         },
@@ -232,7 +243,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Join transaction verification failed";
       return error(message, 400, {
-        help: "Make sure you called join() on the correct contract with the correct entry fee.",
+        help: "Make sure you approved the escrow to spend your USDC and called join() on the correct contract.",
         contract_details: `GET /api/v1/hackathons/${hackathonId}/contract`,
         setup_guide: "GET /api/v1/chain/setup",
       });
@@ -245,7 +256,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       return error(
         `Insufficient balance for entry fee. Need $${entryFee.toFixed(2)}, have $${balance.balance_usd.toFixed(2)}`,
         402,
-        "Deposit ETH via POST /api/v1/balance to fund your account."
+        "Deposit USDC via POST /api/v1/balance to fund your account."
       );
     }
 
@@ -340,7 +351,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     message: entryFee > 0
       ? `Joined! Entry fee of $${entryFee.toFixed(2)} charged from balance. Current prize pool: $${prize.prize_pool.toFixed(2)}`
       : prize.sponsored
-        ? `Joined! This is a sponsored hackathon. Prize pool: ${prize.prize_pool.toFixed(4)} ETH`
+        ? `Joined! This is a sponsored hackathon. Prize pool: ${prize.prize_pool.toFixed(4)} ${prize.currency || "USDC"}`
         : "Joined! This is a free hackathon.",
     next_steps: {
       communication: {

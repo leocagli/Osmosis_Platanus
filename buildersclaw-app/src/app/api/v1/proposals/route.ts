@@ -1,9 +1,10 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { formatUnits } from "viem";
 import { supabaseAdmin } from "@/lib/supabase";
 import { authenticateAdminRequest, hashToken } from "@/lib/auth";
 import { serializeHackathonMeta } from "@/lib/hackathons";
-import { verifySponsorFunding, getContractPrizePool } from "@/lib/chain";
+import { getContractPrizePool, getUsdcDecimals, getUsdcSymbol, verifySponsorFunding } from "@/lib/chain";
 import { telegramHackathonCreated } from "@/lib/telegram";
 import { v4 as uuid } from "uuid";
 import { checkRateLimit } from "@/lib/validation";
@@ -84,7 +85,10 @@ export async function POST(req: NextRequest) {
         hackathonConfig.funding_tx_hash = fundingTxHash;
         hackathonConfig.sponsor_wallet = sponsorWallet;
         hackathonConfig.funding_verified = true;
-        hackathonConfig.funding_amount_wei = funding.prizePoolWei.toString();
+        hackathonConfig.funding_amount_units = funding.prizePoolUnits.toString();
+        hackathonConfig.token_address = funding.tokenAddress;
+        hackathonConfig.token_symbol = getUsdcSymbol();
+        hackathonConfig.token_decimals = getUsdcDecimals();
       } catch (verifyErr) {
         return NextResponse.json(
           { success: false, error: { message: `Funding verification failed: ${verifyErr instanceof Error ? verifyErr.message : "unknown error"}` } },
@@ -165,7 +169,7 @@ export async function POST(req: NextRequest) {
 
     if (hackathonConfig.funding_verified) {
       responseData.funding_verified = true;
-      responseData.funding_amount_wei = hackathonConfig.funding_amount_wei;
+      responseData.funding_amount_units = hackathonConfig.funding_amount_units;
     }
 
     // If custom judge, return the key — this is the ONLY time it's shown
@@ -255,7 +259,10 @@ export async function PATCH(req: NextRequest) {
         chain_id?: number | null;
         funding_verified?: boolean;
         sponsor_wallet?: string;
-        funding_amount_wei?: string;
+        funding_amount_units?: string;
+        token_address?: string;
+        token_symbol?: string;
+        token_decimals?: number;
       };
 
       if (cfg.title && cfg.brief && cfg.deadline) {
@@ -281,14 +288,14 @@ export async function PATCH(req: NextRequest) {
 
         if (cfg.funding_verified && cfg.contract_address) {
           try {
-            const balanceWei = await getContractPrizePool(cfg.contract_address);
-            if (balanceWei <= BigInt(0)) {
+            const balanceUnits = await getContractPrizePool(cfg.contract_address);
+            if (balanceUnits <= BigInt(0)) {
               return NextResponse.json(
                 { success: false, error: { message: "Escrow contract has no funds. Sponsor may have called abort()." } },
                 { status: 400 },
               );
             }
-            prizePool = Number(balanceWei) / 1e18;
+            prizePool = Number(formatUnits(balanceUnits, cfg.token_decimals || getUsdcDecimals()));
             sponsorAddress = cfg.sponsor_wallet || null;
           } catch (chainErr) {
             return NextResponse.json(
@@ -302,6 +309,9 @@ export async function PATCH(req: NextRequest) {
           chain_id: typeof cfg.chain_id === "number" ? cfg.chain_id : null,
           contract_address: cfg.contract_address || null,
           sponsor_address: sponsorAddress,
+          token_address: cfg.token_address || process.env.USDC_ADDRESS || null,
+          token_symbol: cfg.token_symbol || process.env.USDC_SYMBOL || "USDC",
+          token_decimals: typeof cfg.token_decimals === "number" ? cfg.token_decimals : getUsdcDecimals(),
           criteria_text: cfg.rules || null,
         });
 
@@ -339,7 +349,7 @@ export async function PATCH(req: NextRequest) {
 
             // Notify Telegram community (fire-and-forget)
             telegramHackathonCreated({
-              id: hackathonId,
+              id: hackathonId!,
               title: cfg.title,
               prize_pool: Number(proposal.prize_amount) || 0,
               challenge_type: cfg.challenge_type || "other",

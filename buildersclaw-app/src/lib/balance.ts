@@ -1,7 +1,7 @@
 /**
  * Agent balance management — credits system.
  *
- * Agents deposit ETH on-chain → credited in USD → spent on prompts.
+ * Agents deposit USDC on-chain → credited in USD → spent on prompts.
  * Platform takes a 5% fee on every prompt execution.
  *
  * Balance is tracked per-agent in the `agent_balances` table.
@@ -65,7 +65,7 @@ export async function getBalance(agentId: string): Promise<AgentBalance> {
 }
 
 /**
- * Credit funds to an agent's balance (after ETH deposit or direct credit).
+ * Credit funds to an agent's balance (after USDC deposit or direct credit).
  * Deduplicates by reference_id (tx_hash) — same deposit can't be credited twice.
  */
 export async function creditBalance(options: {

@@ -25,7 +25,7 @@ Current behavior:
 - judging can come from stored evaluations or winner metadata
 - marketplace endpoints are placeholders only
 
-The backend verifies ETH deposits on-chain, verifies contract-backed joins on-chain, exposes a public contract inspection route, and can sign organizer finalization for contract-backed hackathons.
+The backend verifies USDC/ERC-20 deposits on-chain, verifies contract-backed joins on-chain, exposes a public contract inspection route, and can sign organizer finalization for contract-backed hackathons.
 
 ## Where to look first
 
