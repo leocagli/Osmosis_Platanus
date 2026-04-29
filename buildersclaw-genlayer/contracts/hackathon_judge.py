@@ -3,7 +3,6 @@
 import json
 from dataclasses import dataclass
 from genlayer import *
-from genlayer.gl.vm import UserError
 
 
 @allow_storage
@@ -29,6 +28,20 @@ class JudgeResult:
 
 
 class HackathonJudge(gl.Contract):
+    """
+    On-chain impartial hackathon judging via GenLayer's Optimistic Democracy.
+
+    Flow:
+    1. Owner deploys contract with hackathon metadata
+    2. Owner submits top contenders (pre-filtered by off-chain scoring)
+    3. Owner calls finalize() → 5 validators independently pick a winner
+    4. Consensus via Equivalence Principle: winner_team_id must match
+    5. Result is verifiable on-chain by anyone
+
+    This replaces single-LLM judging with decentralized multi-validator
+    consensus — eliminating bias from any single AI model.
+    """
+
     owner: Address
     hackathon_id: str
     title: str
@@ -54,19 +67,22 @@ class HackathonJudge(gl.Contract):
 
     def _only_owner(self):
         if gl.message.sender_address != self.owner:
-            raise UserError("Only the contract owner can perform this action")
+            raise gl.vm.UserError("Only the contract owner can perform this action")
 
     @gl.public.write
     def submit_contenders(self, contenders_json: str) -> None:
         """
         Receive top contenders as a JSON string.
-        Called after Gemini pre-scoring filters down to the top 3.
+        Called after off-chain pre-scoring filters down to top N.
         """
         self._only_owner()
         if self.result.finalized:
-            raise UserError("Judging already finalized")
+            raise gl.vm.UserError("Judging already finalized")
 
         parsed = json.loads(contenders_json)
+        if len(parsed) < 2:
+            raise gl.vm.UserError("Need at least 2 contenders for fair judging")
+
         for c in parsed:
             self.contenders[c["team_id"]] = Contender(
                 team_id=c["team_id"],
@@ -82,14 +98,20 @@ class HackathonJudge(gl.Contract):
     def finalize(self) -> None:
         """
         Trigger LLM consensus among validators to pick the winner.
-        Each validator independently evaluates all contenders and votes.
-        The result is agreed upon via comparative equivalence principle.
+
+        Uses run_nondet_unsafe with a custom validator function:
+        - Leader picks a winner via LLM analysis
+        - Each validator independently picks their own winner
+        - Consensus is reached if winner_team_id matches (Partial Field Matching)
+
+        This is the recommended Equivalence Principle pattern for subjective
+        decisions where the reasoning text will differ but the decision must agree.
         """
         self._only_owner()
         if self.result.finalized:
-            raise UserError("Already finalized")
+            raise gl.vm.UserError("Already finalized")
         if not self.contenders_submitted:
-            raise UserError("No contenders submitted yet")
+            raise gl.vm.UserError("No contenders submitted yet")
 
         # Build contender summaries for the prompt
         contender_list = []
@@ -103,7 +125,61 @@ class HackathonJudge(gl.Contract):
                 "repo_summary": c.repo_summary[:8000],
             })
 
-        verdict = self._judge_contenders(contender_list)
+        contenders_text = json.dumps(contender_list, indent=2)
+
+        # Extract valid team IDs for validation
+        valid_team_ids = [c["team_id"] for c in contender_list]
+
+        def leader_fn() -> dict:
+            """Leader validator evaluates all contenders and picks a winner."""
+            task = f"""You are an impartial judge for the hackathon "{self.title}".
+
+CHALLENGE BRIEF:
+{self.brief}
+
+CONTENDERS (pre-scored by another AI, you must form your OWN independent opinion):
+{contenders_text}
+
+INSTRUCTIONS:
+- Read each contender's repo summary and feedback carefully.
+- Evaluate which submission BEST solves the challenge brief.
+- Pre-scores are advisory only — you may disagree.
+- Focus on: brief compliance, code quality, completeness, innovation.
+- You MUST pick exactly one winner from the contenders above.
+
+Return a JSON object with exactly these fields:
+{{
+    "winner_team_id": "<team_id of the winner>",
+    "winner_team_name": "<team_name of the winner>",
+    "final_score": <0-100 your overall score for the winner>,
+    "reasoning": "<2-3 sentences explaining why this team won>"
+}}"""
+            result = gl.nondet.exec_prompt(task, response_format="json")
+            return result
+
+        def validator_fn(leader_result) -> bool:
+            """
+            Validator independently picks a winner and compares.
+            Only the winner_team_id must match — reasoning will differ.
+            This is Partial Field Matching (Pattern 1 from GenLayer docs).
+            """
+            if not isinstance(leader_result, gl.vm.Return):
+                return False
+
+            leader_data = leader_result.calldata
+
+            # Validate leader picked a real contender
+            if leader_data.get("winner_team_id") not in valid_team_ids:
+                return False
+
+            # Validator independently evaluates
+            validator_data = leader_fn()
+
+            # Consensus: same winner_team_id is enough
+            # Reasoning and exact scores will naturally differ between LLMs
+            return leader_data["winner_team_id"] == validator_data["winner_team_id"]
+
+        verdict = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
         self.result = JudgeResult(
             finalized=True,
@@ -114,53 +190,9 @@ class HackathonJudge(gl.Contract):
             reasoning=verdict.get("reasoning", ""),
         )
 
-    def _judge_contenders(self, contender_list: list) -> dict:
-        """
-        Each validator runs this independently, then consensus is reached
-        via comparative equivalence on the winner_team_id.
-        """
-        contenders_text = json.dumps(contender_list, indent=2)
-
-        def pick_winner() -> str:
-            task = f"""You are an impartial judge for the hackathon "{self.title}".
-
-CHALLENGE BRIEF:
-{self.brief}
-
-CONTENDERS (pre-scored by Gemini, you must form your OWN opinion):
-{contenders_text}
-
-INSTRUCTIONS:
-- Read each contender's repo summary and Gemini feedback carefully.
-- Evaluate which submission BEST solves the challenge brief.
-- Gemini scores are advisory only — you may disagree.
-- Focus on: brief compliance, code quality, completeness, innovation.
-- You MUST pick exactly one winner.
-
-Respond in JSON only:
-{{
-    "winner_team_id": "<team_id of the winner>",
-    "winner_team_name": "<team_name of the winner>",
-    "final_score": <0-100 your score for the winner>,
-    "reasoning": "<2-3 sentences explaining why this team won>"
-}}
-
-Respond ONLY with valid JSON. No markdown, no extra text."""
-
-            result = gl.nondet.exec_prompt(task, response_format="json")
-            return json.dumps(result, sort_keys=True)
-
-        result_json = json.loads(
-            gl.eq_principle.prompt_comparative(
-                pick_winner,
-                "The results are equivalent if they select the same winner_team_id",
-            )
-        )
-        return result_json
-
     @gl.public.view
     def get_result(self) -> dict:
-        """Return the current judging result."""
+        """Return the current judging result. Callable by anyone."""
         return {
             "finalized": self.result.finalized,
             "hackathon_id": self.result.hackathon_id,
@@ -172,7 +204,7 @@ Respond ONLY with valid JSON. No markdown, no extra text."""
 
     @gl.public.view
     def get_contenders(self) -> list:
-        """Return all submitted contenders."""
+        """Return all submitted contenders. Callable by anyone."""
         out = []
         for team_id, c in self.contenders.items():
             out.append({
@@ -180,6 +212,7 @@ Respond ONLY with valid JSON. No markdown, no extra text."""
                 "team_name": c.team_name,
                 "repo_url": c.repo_url,
                 "gemini_score": int(c.gemini_score),
+                "gemini_feedback": c.gemini_feedback,
             })
         return out
 

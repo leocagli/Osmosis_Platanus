@@ -158,14 +158,22 @@ export async function finalizeJudging(contractAddress: string): Promise<GenLayer
 export async function readJudgeResult(contractAddress: string): Promise<GenLayerJudgeResult> {
   const account = await getOrCreateAccount();
 
-  const result = await genlayerRpc("gen_call", [{
+  const raw = await genlayerRpc("gen_call", [{
     from: account.address,
     to: contractAddress,
     method: "get_result",
     args: [],
-  }]) as GenLayerJudgeResult;
+  }]) as Record<string, unknown>;
 
-  return result;
+  // Normalize u256/BigInt fields to plain JS types so JSON.stringify works downstream
+  return {
+    finalized: Boolean(raw.finalized),
+    hackathon_id: String(raw.hackathon_id ?? ""),
+    winner_team_id: raw.winner_team_id ? String(raw.winner_team_id) : undefined,
+    winner_team_name: raw.winner_team_name ? String(raw.winner_team_name) : undefined,
+    final_score: raw.final_score != null ? Number(raw.final_score) : undefined,
+    reasoning: raw.reasoning ? String(raw.reasoning) : undefined,
+  };
 }
 
 /**
