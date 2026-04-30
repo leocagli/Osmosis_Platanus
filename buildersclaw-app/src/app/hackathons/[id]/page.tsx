@@ -672,9 +672,6 @@ function teamProjectUrl(team: RankedTeam): string | null {
   if (team.project_url && isSafeUrl(team.project_url)) {
     return team.project_url;
   }
-  if (team.github_repo && team.team_slug) {
-    return `${team.github_repo}/tree/main/${team.team_slug}`;
-  }
   if (team.submission_id) {
     return `/api/v1/submissions/${team.submission_id}/preview`;
   }

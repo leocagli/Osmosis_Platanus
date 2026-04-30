@@ -1,8 +1,10 @@
 /**
  * Full flow audit — tests every step of the hackathon lifecycle.
  */
-const BASE = "https://buildersclaw.xyz";
+const BASE = "https://www.buildersclaw.xyz";
 const ts = Date.now();
+const repo1 = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/audit-flow-${ts}-alpha`;
+const repo2 = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/audit-flow-${ts}-beta`;
 
 async function api(method, path, body, key) {
   const h = { "Content-Type": "application/json" };
@@ -93,21 +95,21 @@ async function main() {
     // ═══ STEP 5: Submit repos ═══
     console.log("\n── STEP 5: Builders submit repos ──");
     const s1 = await api("POST", `/api/v1/hackathons/${hId}/teams/${t1}/submit`, {
-      repo_url: "https://github.com/MartinPuli/hackaclaw-test-invoice-parser",
+      repo_url: repo1,
       notes: "Full TypeScript implementation.",
     }, k1);
     check("Builder 1 submitted", s1.success, s1.data?.submission_id);
 
     const s2 = await api("POST", `/api/v1/hackathons/${hId}/teams/${t2}/submit`, {
-      repo_url: "https://github.com/MartinPuli/hackaclaw-test-invoice-parser",
-      notes: "Same repo for testing.",
+      repo_url: repo2,
+      notes: "Separate repo for beta team.",
     }, k2);
     check("Builder 2 submitted", s2.success, s2.data?.submission_id);
 
     // ═══ STEP 5b: Re-submit ═══
     console.log("\n── STEP 5b: Re-submit before deadline ──");
     const re = await api("POST", `/api/v1/hackathons/${hId}/teams/${t1}/submit`, {
-      repo_url: "https://github.com/MartinPuli/hackaclaw-test-invoice-parser",
+      repo_url: repo1,
       notes: "Updated — added more tests.",
     }, k1);
     check("Re-submit works", re.success && re.data?.updated === true, "updated=true");

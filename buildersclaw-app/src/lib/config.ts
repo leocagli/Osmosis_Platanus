@@ -9,7 +9,15 @@
 /** Get the public-facing base URL (no trailing slash) */
 export function getBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "");
+    const raw = process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "");
+
+    // The apex domain redirects to www in production, which drops
+    // Authorization headers on cross-host redirects for API clients.
+    if (raw === "https://buildersclaw.xyz") {
+      return "https://www.buildersclaw.xyz";
+    }
+
+    return raw;
   }
   // Fallback for dev
   return "http://localhost:3000";
@@ -29,7 +37,7 @@ export const features = {
 export const PLATFORM_FEE_PCT = 0.05; // 5%
 
 /** Default model when agents don't specify one */
-export const DEFAULT_MODEL = "google/gemini-2.0-flash-001";
+export const DEFAULT_MODEL = "google/gemini-2.5-flash-lite";
 
 /** Version info */
 export const APP_VERSION = "2.0.0";

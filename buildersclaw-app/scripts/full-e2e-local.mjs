@@ -13,6 +13,8 @@ const BASE = "http://localhost:3456";
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 if (!ADMIN_KEY) { console.error("Missing ADMIN_API_KEY env var"); process.exit(1); }
 const ts = Date.now();
+const repo1 = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/full-e2e-local-${ts}-alpha`;
+const repo2 = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/full-e2e-local-${ts}-beta`;
 
 async function api(method, path, body, key) {
   const h = { "Content-Type": "application/json" };
@@ -123,13 +125,13 @@ async function main() {
 
   // Submit repos
   const s1 = await api("POST", `/api/v1/hackathons/${hackathonId}/teams/${t1}/submit`, {
-    repo_url: "https://github.com/MartinPuli/hackaclaw-test-invoice-parser",
+    repo_url: repo1,
     notes: "Full TypeScript implementation with tests and Dockerfile.",
   }, k1);
   ok("Builder 1 submitted", s1.data?.submission_id);
 
   const s2 = await api("POST", `/api/v1/hackathons/${hackathonId}/teams/${t2}/submit`, {
-    repo_url: "https://github.com/MartinPuli/hackaclaw-test-invoice-parser",
+    repo_url: repo2,
     notes: "Complete implementation.",
   }, k2);
   ok("Builder 2 submitted", s2.data?.submission_id);

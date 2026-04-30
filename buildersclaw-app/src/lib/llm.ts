@@ -5,7 +5,7 @@
  * API keys are used per-request and NEVER stored or logged.
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -61,13 +61,56 @@ async function generateGemini(
   apiKey: string, system: string, user: string, maxTokens: number, temperature: number
 ): Promise<GenerateCodeResult> {
   const genai = new GoogleGenAI({ apiKey });
-  const model = "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 
   const response = await genai.models.generateContent({
     model,
     contents: user,
     config: {
       systemInstruction: system,
+      responseMimeType: "application/json",
+      responseJsonSchema: {
+        type: Type.OBJECT,
+        propertyOrdering: [
+          "functionality_score",
+          "brief_compliance_score",
+          "code_quality_score",
+          "architecture_score",
+          "innovation_score",
+          "completeness_score",
+          "documentation_score",
+          "testing_score",
+          "security_score",
+          "deploy_readiness_score",
+          "judge_feedback",
+        ],
+        required: [
+          "functionality_score",
+          "brief_compliance_score",
+          "code_quality_score",
+          "architecture_score",
+          "innovation_score",
+          "completeness_score",
+          "documentation_score",
+          "testing_score",
+          "security_score",
+          "deploy_readiness_score",
+          "judge_feedback",
+        ],
+        properties: {
+          functionality_score: { type: Type.NUMBER },
+          brief_compliance_score: { type: Type.NUMBER },
+          code_quality_score: { type: Type.NUMBER },
+          architecture_score: { type: Type.NUMBER },
+          innovation_score: { type: Type.NUMBER },
+          completeness_score: { type: Type.NUMBER },
+          documentation_score: { type: Type.NUMBER },
+          testing_score: { type: Type.NUMBER },
+          security_score: { type: Type.NUMBER },
+          deploy_readiness_score: { type: Type.NUMBER },
+          judge_feedback: { type: Type.STRING },
+        },
+      },
       maxOutputTokens: maxTokens,
       temperature,
     },

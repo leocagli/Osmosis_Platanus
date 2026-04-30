@@ -5,7 +5,7 @@ import { success, error, unauthorized, notFound } from "@/lib/responses";
 import { v4 as uuid } from "uuid";
 import { chatCompletion, estimateCost, type ChatMessage } from "@/lib/openrouter";
 import { canAfford, chargeForPrompt, InsufficientBalanceError, PLATFORM_FEE_PCT } from "@/lib/balance";
-import { commitRound, createHackathonRepo, slugify, type GitHubOptions } from "@/lib/github";
+import { slugify } from "@/lib/github";
 import { sanitizePrompt, sanitizeGeneratedOutput } from "@/lib/prompt-security";
 import { parseHackathonMeta } from "@/lib/hackathons";
 
@@ -19,11 +19,15 @@ type RouteParams = { params: Promise<{ id: string; teamId: string }> };
  *
  * Body: {
  *   prompt: string,          — what to build/improve
- *   model?: string,          — OpenRouter model ID (default: google/gemini-2.0-flash-001)
+ *   model?: string,          — OpenRouter model ID (default: google/gemini-2.5-flash-lite)
  *   max_tokens?: number,     — max output tokens (default: 4096)
  *   temperature?: number,    — creativity 0-2 (default: 0.7)
  *   system_prompt?: string,  — optional custom system prompt override
- * }
+  * }
+ *
+ * Prompt generation is intentionally decoupled from final submission.
+ * Agents must push the generated files to their own GitHub repo and then call
+ * POST /submit with that repo URL.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const agent = await authenticateRequest(req);
@@ -37,7 +41,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     model?: string;
     max_tokens?: number;
     temperature?: number;
-    github_token?: string;
   };
   try {
     body = await req.json();
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("Invalid request body", 400);
   }
 
-  const modelId = body.model?.trim() || "google/gemini-2.0-flash-001";
+  const modelId = body.model?.trim() || "google/gemini-2.5-flash-lite";
   const maxTokens = Math.min(Math.max(1, body.max_tokens || 4096), 32000);
   const temperature = Math.min(Math.max(0, body.temperature ?? 0.7), 2);
 
@@ -165,7 +168,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       rules: hackathon.rules || null,
       judging_criteria: hackathonMeta.criteria_text,
       ends_at: hackathon.ends_at || null,
-      github_repo: hackathon.github_repo || null,
+      github_repo: null,
       team_slug: slugify(team.name),
     },
     agent.personality || "",
@@ -261,49 +264,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     content: sanitizeGeneratedOutput(f.content),
   }));
 
-  // Commit to GitHub (best-effort)
-  let commitUrl = "";
-  let folderUrl = "";
-  let agentRepoUrl = "";
-  const teamSlug = slugify(team.name);
-  const ghToken = (typeof body.github_token === "string" && body.github_token) ? body.github_token.trim().slice(0, 256) : undefined;
-
-  if (ghToken) {
-    // Agent provided their own token → create/use their own public repo
-    try {
-      const hackSlug = slugify(hackathon.title);
-      const ghOpts: GitHubOptions = { token: ghToken };
-      const { repoUrl, repoFullName } = await createHackathonRepo(
-        hackSlug, hackathon.brief || hackathon.title, hackathon.title, ghOpts,
-      );
-      agentRepoUrl = repoUrl;
-
-      // Commit files to root (no team subfolder — it's their own repo)
-      const commitResult = await commitRound(
-        repoFullName, ".", roundNumber, files,
-        `🤖 Round ${roundNumber}`, ghOpts,
-      );
-      commitUrl = commitResult.commitUrl;
-      folderUrl = commitResult.folderUrl;
-    } catch (err) {
-      console.error("Agent GitHub commit failed:", err);
-    }
-  } else if (hackathon.github_repo) {
-    // No agent token → fall back to shared hackathon repo (platform token)
-    try {
-      const repoFullName = hackathon.github_repo.replace("https://github.com/", "");
-      const commitResult = await commitRound(
-        repoFullName, teamSlug, roundNumber, files,
-        `🤖 ${agent.name} — Round ${roundNumber}`,
-      );
-      commitUrl = commitResult.commitUrl;
-      folderUrl = commitResult.folderUrl;
-      agentRepoUrl = hackathon.github_repo;
-    } catch (err) {
-      console.error("GitHub commit failed:", err);
-    }
-  }
-
   // Store round in DB
   await supabaseAdmin.from("prompt_rounds").insert({
     id: roundId,
@@ -315,59 +275,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     llm_provider: "openrouter",
     llm_model: result.model,
     files,
-    commit_sha: commitUrl ? commitUrl.split("/").pop() : null,
+    commit_sha: null,
     cost_usd: result.cost_usd,
     fee_usd: charge.fee,
     input_tokens: result.input_tokens,
     output_tokens: result.output_tokens,
     created_at: new Date().toISOString(),
   });
-
-  // Upsert into submissions (for judge + leaderboard compatibility)
-  const htmlFile = files.find(f => f.path === "demo.html") || files.find(f => f.path === "index.html" || f.path.endsWith(".html"));
-
-  const { data: existingSub } = await supabaseAdmin
-    .from("submissions")
-    .select("id")
-    .eq("team_id", teamId)
-    .eq("hackathon_id", hackathonId)
-    .single();
-
-  const buildLog = JSON.stringify({
-    round: roundNumber,
-    agent: agent.name,
-    model: result.model,
-    ...(agentRepoUrl ? { repo_url: agentRepoUrl } : {}),
-  });
-
-  if (existingSub) {
-    await supabaseAdmin.from("submissions").update({
-      html_content: htmlFile?.content || null,
-      preview_url: agentRepoUrl || null,
-      files,
-      file_count: files.length,
-      languages: [...new Set(files.map(f => detectLanguage(f.path)))],
-      build_log: buildLog,
-      status: "completed",
-      completed_at: new Date().toISOString(),
-    }).eq("id", existingSub.id);
-  } else {
-    await supabaseAdmin.from("submissions").insert({
-      id: uuid(),
-      team_id: teamId,
-      hackathon_id: hackathonId,
-      html_content: htmlFile?.content || null,
-      preview_url: agentRepoUrl || null,
-      files,
-      file_count: files.length,
-      languages: [...new Set(files.map(f => detectLanguage(f.path)))],
-      project_type: hackathon.challenge_type || "landing_page",
-      build_log: buildLog,
-      status: "completed",
-      started_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-    });
-  }
 
   await supabaseAdmin.from("teams").update({ status: "building" }).eq("id", teamId);
 
@@ -393,14 +307,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     },
   });
 
-  const repoDisplay = agentRepoUrl || hackathon.github_repo || null;
-  const teamSlugForUrl = slugify(team.name);
-  const expectedFolder = agentRepoUrl
-    ? `${agentRepoUrl}/tree/main/round-${roundNumber}`
-    : hackathon.github_repo
-      ? `${hackathon.github_repo}/tree/main/${teamSlugForUrl}/round-${roundNumber}`
-      : null;
-
   return success({
     round: roundNumber,
     model: result.model,
@@ -415,16 +321,16 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     },
     files: files.map(f => ({ path: f.path, size: f.content.length })),
     file_contents: files.map(f => ({ path: f.path, content: f.content })),
-    github: {
-      repo: repoDisplay,
-      folder: folderUrl || expectedFolder,
-      commit: commitUrl || null,
-      clone_cmd: repoDisplay ? `git clone ${repoDisplay}` : null,
-    },
+    github: null,
     duration_ms: result.duration_ms,
     hint: roundNumber === 1
-      ? `Round 1 complete. Review your code at: ${folderUrl || expectedFolder || "GitHub"}. Send another prompt to iterate.`
-      : `Round ${roundNumber} complete. Your code: ${folderUrl || expectedFolder || "GitHub"}. Keep refining or trigger judging.`,
+      ? "Round 1 complete. Push these files to your own GitHub repo, then submit that repo URL when you are ready."
+      : `Round ${roundNumber} complete. Push the updated files to your own GitHub repo, then resubmit when ready.`,
+    next_steps: [
+      "Create or update your own public GitHub repository locally.",
+      "Commit and push these generated files to that repository.",
+      `Call POST /api/v1/hackathons/${hackathonId}/teams/${teamId}/submit with {\"repo_url\":\"https://github.com/owner/repo\"}.`,
+    ],
   });
 }
 
@@ -471,7 +377,7 @@ One file MUST be named "demo.html" — a self-contained HTML file showcasing the
     hackathon.rules ? `\nRULES:\n${hackathon.rules}` : "",
     hackathon.judging_criteria ? `\nJUDGING CRITERIA:\n${hackathon.judging_criteria}` : "",
     hackathon.ends_at ? `\nDEADLINE: ${hackathon.ends_at}` : "",
-    hackathon.github_repo && hackathon.team_slug ? `\nGITHUB REPOSITORY:\nRepo Link: ${hackathon.github_repo}\nYour Team Folder: ${hackathon.github_repo}/tree/main/${hackathon.team_slug}\nAll generated code is committed to your team folder automatically.` : "",
+    "\nREPOSITORY RULE: You are generating files only. The agent must create and manage its own GitHub repository outside this prompt flow.",
   ].filter(Boolean).join("\n");
 
   return `You are building a project for team "${teamName}" in a hackathon competition.

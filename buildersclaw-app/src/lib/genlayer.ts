@@ -20,6 +20,7 @@ import { TransactionStatus } from "genlayer-js/types";
 
 const GENLAYER_RPC = process.env.GENLAYER_RPC_URL || "https://rpc-bradbury.genlayer.com";
 const GENLAYER_PK  = process.env.GENLAYER_PRIVATE_KEY || "";
+const GENLAYER_CHAIN = (process.env.GENLAYER_CHAIN || "bradbury").trim().toLowerCase();
 
 // ─── Types ───
 
@@ -40,30 +41,130 @@ export interface GenLayerJudgeResult {
   final_score?:      number;
   reasoning?:        string;
   contractAddress:   string;
+  deploy_tx_hash?:   string;
+  submit_tx_hash?:   string;
+  finalize_tx_hash?: string;
 }
 
 // ─── Client factory ───
 
-function makeClient() {
+function getChain() {
+  switch (GENLAYER_CHAIN) {
+    case "localnet":
+    case "local":
+      return chains.localnet;
+    case "studionet":
+    case "studio":
+      return chains.studionet;
+    case "asimov":
+    case "testnet_asimov":
+    case "testnet-asimov":
+      return chains.testnetAsimov;
+    case "bradbury":
+    case "testnet_bradbury":
+    case "testnet-bradbury":
+      return chains.testnetBradbury;
+    default:
+      throw new Error(`Unsupported GENLAYER_CHAIN \"${GENLAYER_CHAIN}\"`);
+  }
+}
+
+async function makeClient() {
   if (!GENLAYER_PK) throw new Error("GENLAYER_PRIVATE_KEY not configured");
 
   const account = createAccount(GENLAYER_PK as `0x${string}`);
   const client = createClient({
-    chain: chains.testnetBradbury as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    chain: getChain() as typeof chains.testnetBradbury,
     account,
     endpoint: GENLAYER_RPC,
   });
+
+  // The SDK docs require consensus initialization before contract interactions.
+  await client.initializeConsensusSmartContract();
+
   return { client, account };
 }
 
 // ─── Contract interaction helpers ───
 
-async function waitForReceipt(client: ReturnType<typeof createClient>, txHash: string, retries = 200) {
-  return client.waitForTransactionReceipt({
-    hash:    txHash as TransactionHash,
-    status:  TransactionStatus.ACCEPTED,
-    retries,
-  });
+type GenLayerReceipt = Record<string, unknown>;
+const STATUS_RANK: Record<string, number> = {
+  PENDING: 0,
+  PROPOSING: 1,
+  COMMITTING: 2,
+  REVEALING: 3,
+  ACCEPTED: 4,
+  FINALIZED: 5,
+  UNDETERMINED: 6,
+  CANCELED: 7,
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function statusNameOf(receipt: GenLayerReceipt): string | undefined {
+  const raw =
+    (receipt.status_name as string | undefined)
+    ?? (receipt.statusName as string | undefined)
+    ?? (typeof receipt.status === "string" ? receipt.status : undefined);
+
+  return raw?.toUpperCase();
+}
+
+function isAcceptedReceipt(receipt: GenLayerReceipt): boolean {
+  const statusRaw = receipt.status;
+  const statusNum = statusRaw !== undefined ? Number(statusRaw) : undefined;
+  const statusName = statusNameOf(receipt);
+
+  return statusNum === 5 || statusNum === 7
+    || statusName === "ACCEPTED"
+    || statusName === "FINALIZED";
+}
+
+function assertAcceptedReceipt(action: string, receipt: GenLayerReceipt) {
+  if (!isAcceptedReceipt(receipt)) {
+    throw new Error(
+      `[GenLayer] ${action} failed. Receipt: ${JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`
+    );
+  }
+}
+
+async function waitForReceipt(
+  client: Awaited<ReturnType<typeof makeClient>>["client"],
+  txHash: string,
+  status: TransactionStatus = TransactionStatus.FINALIZED,
+  retries = 240,
+  intervalMs = 5000,
+) {
+  const targetStatus = String(status).toUpperCase();
+  const targetRank = STATUS_RANK[targetStatus];
+
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      const tx = await client.getTransaction({ hash: txHash as TransactionHash }) as GenLayerReceipt;
+      const currentStatus = statusNameOf(tx);
+
+      if (currentStatus === "CANCELED" || currentStatus === "UNDETERMINED") {
+        throw new Error(`[GenLayer] Transaction ${txHash} entered terminal status ${currentStatus}`);
+      }
+
+      if (currentStatus) {
+        const currentRank = STATUS_RANK[currentStatus];
+        if (currentRank !== undefined && targetRank !== undefined && currentRank >= targetRank) {
+          return tx;
+        }
+      }
+    } catch (err) {
+      if (attempt === retries - 1) {
+        throw err;
+      }
+    }
+
+    await sleep(intervalMs);
+  }
+
+  throw new Error(`[GenLayer] Timed out waiting for transaction ${txHash} to reach ${targetStatus}`);
 }
 
 /**
@@ -74,7 +175,7 @@ async function deployJudgeContract(
   hackathonId: string,
   title: string,
   brief: string,
-): Promise<string> {
+): Promise<{ contractAddress: string; txHash: string }> {
   const { readFileSync } = await import("fs");
   const { resolve } = await import("path");
 
@@ -85,7 +186,7 @@ async function deployJudgeContract(
 
   const contractCode = new Uint8Array(readFileSync(contractPath));
 
-  const { client } = makeClient();
+  const { client } = await makeClient();
 
   console.log(`[GenLayer] Deploying HackathonJudge for hackathon ${hackathonId}...`);
 
@@ -94,22 +195,9 @@ async function deployJudgeContract(
     args: [hackathonId, title, brief],
   });
 
-  const receipt = await waitForReceipt(client, deployTx as string);
-
-  // v0.27.9: status comes back as BigInt from viem ABI decode; FINALIZED = 7 (not 6)
-  // simplifyTransactionReceipt renames statusName → status_name
-  const r = receipt as Record<string, unknown>;
-  const statusRaw = r.status;
-  const statusNum = statusRaw !== undefined ? Number(statusRaw) : undefined;
-  const statusName: string | undefined =
-    (r.status_name as string | undefined)  // v0.27.9 (renamed by simplifyTransactionReceipt)
-    ?? (r.statusName as string | undefined); // older versions
-  const isAccepted =
-    statusNum === 5 || statusNum === 7        // 5=ACCEPTED, 7=FINALIZED in v0.27.9
-    || statusName === "ACCEPTED" || statusName === "FINALIZED";
-  if (!isAccepted) {
-    throw new Error(`[GenLayer] Deploy failed. Receipt: ${JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`);
-  }
+  const receipt = await waitForReceipt(client, deployTx as string, TransactionStatus.ACCEPTED, 240, 5000);
+  const r = receipt as GenLayerReceipt;
+  assertAcceptedReceipt("Deploy", r);
 
   const data = r.data as Record<string, unknown> | undefined;
   const decoded = r.txDataDecoded as Record<string, unknown> | undefined;
@@ -125,14 +213,19 @@ async function deployJudgeContract(
   }
 
   console.log(`[GenLayer] HackathonJudge deployed at ${contractAddress}`);
-  return contractAddress;
+  return { contractAddress, txHash: String(deployTx) };
 }
 
 /**
  * Call a write method on the contract and wait for it to be accepted.
  */
-async function callWrite(contractAddress: string, functionName: string, args: string[]) {
-  const { client } = makeClient();
+async function callWrite(
+  contractAddress: string,
+  functionName: string,
+  args: string[],
+  status: TransactionStatus = TransactionStatus.ACCEPTED,
+) {
+  const { client } = await makeClient();
 
   const txHash = await client.writeContract({
     address:      contractAddress as `0x${string}`,
@@ -141,17 +234,18 @@ async function callWrite(contractAddress: string, functionName: string, args: st
     value:        BigInt(0),
   });
 
-  const receipt = await waitForReceipt(client, txHash as string, 300);
-  const r2 = receipt as Record<string, unknown>;
+  const receipt = await waitForReceipt(client, txHash as string, status, 240, 5000);
+  const r2 = receipt as GenLayerReceipt;
+  assertAcceptedReceipt(`${functionName}()`, r2);
   console.log(`[GenLayer] ${functionName}() accepted. Status: ${r2.status_name ?? r2.statusName ?? r2.status}`);
-  return receipt;
+  return { txHash: String(txHash), receipt };
 }
 
 /**
  * Read the current result from the judge contract (free view call).
  */
 async function readJudgeResult(contractAddress: string, hackathonId: string): Promise<GenLayerJudgeResult> {
-  const { client } = makeClient();
+  const { client } = await makeClient();
 
   const raw = await client.readContract({
     address:      contractAddress as `0x${string}`,
@@ -176,17 +270,13 @@ async function readJudgeResult(contractAddress: string, hackathonId: string): Pr
  * Check if GenLayer Bradbury testnet is reachable.
  */
 export async function isGenLayerAvailable(): Promise<boolean> {
+  if (!GENLAYER_PK) {
+    return false;
+  }
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(GENLAYER_RPC, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    return res.ok;
+    await makeClient();
+    return true;
   } catch {
     return false;
   }
@@ -195,8 +285,9 @@ export async function isGenLayerAvailable(): Promise<boolean> {
 /**
  * Full pipeline: (optionally reuse existing contract) → submit contenders → finalize → return result.
  *
- * If `priorContractAddress` is given and the contract is not yet finalized,
- * it reuses that contract instead of deploying a new one.
+ * Always deploy a fresh contract for each judging run. The contract stores
+ * contenders in persistent storage, so reusing an unfinished contract can mix
+ * old and new contender sets across retries.
  */
 export async function runGenLayerJudging(
   hackathonId: string,
@@ -207,27 +298,13 @@ export async function runGenLayerJudging(
 ): Promise<GenLayerJudgeResult> {
   console.log(`[GenLayer] Starting on-chain judging for "${hackathonTitle}" with ${topContenders.length} contenders`);
 
-  // 1. Determine contract address — reuse if not yet finalized
-  let contractAddress: string;
-
   if (priorContractAddress) {
-    try {
-      const existing = await readJudgeResult(priorContractAddress, hackathonId);
-      if (existing.finalized) {
-        // Already finalized — deploy a new one for this run
-        console.log(`[GenLayer] Prior contract ${priorContractAddress} already finalized, deploying fresh one`);
-        contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
-      } else {
-        contractAddress = priorContractAddress;
-        console.log(`[GenLayer] Reusing contract ${contractAddress}`);
-      }
-    } catch {
-      // Can't read — deploy new
-      contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
-    }
-  } else {
-    contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
+    console.log(`[GenLayer] Ignoring prior contract ${priorContractAddress} and deploying a fresh judge contract`);
   }
+
+  // 1. Deploy fresh contract
+  const deployment = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
+  const contractAddress = deployment.contractAddress;
 
   // 2. Submit contenders as JSON
   // ⚠ GenLayer Bradbury gas limit: eth_estimateGas fails → SDK falls back to 200k.
@@ -241,15 +318,20 @@ export async function runGenLayerJudging(
   })));
 
   console.log(`[GenLayer] Submitting ${topContenders.length} contenders...`);
-  await callWrite(contractAddress, "submit_contenders", [contendersPayload]);
+  const submit = await callWrite(contractAddress, "submit_contenders", [contendersPayload], TransactionStatus.ACCEPTED);
 
   // 3. Finalize — triggers LLM consensus among 5 validators
   console.log(`[GenLayer] Triggering finalize() — 5 validators will run LLM consensus...`);
-  await callWrite(contractAddress, "finalize", []);
+  const finalize = await callWrite(contractAddress, "finalize", [], TransactionStatus.FINALIZED);
 
   // 4. Read the result
   const result = await readJudgeResult(contractAddress, hackathonId);
   console.log(`[GenLayer] Winner: ${result.winner_team_name ?? "none"} (${result.winner_team_id ?? "none"})`);
 
-  return result;
+  return {
+    ...result,
+    deploy_tx_hash: deployment.txHash,
+    submit_tx_hash: submit.txHash,
+    finalize_tx_hash: finalize.txHash,
+  };
 }

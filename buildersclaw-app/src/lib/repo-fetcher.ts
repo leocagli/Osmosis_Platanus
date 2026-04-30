@@ -75,6 +75,11 @@ export interface RepoAnalysis {
   error?: string;
 }
 
+export interface RepoVisibilityCheck {
+  exists: boolean;
+  isPublic: boolean;
+}
+
 // ─── URL Parsing ───
 
 export function parseGitHubUrl(url: string): { owner: string; repo: string; path?: string } | null {
@@ -112,6 +117,39 @@ function apiHeaders(token?: string): Record<string, string> {
     h.Authorization = `Bearer ${token}`;
   }
   return h;
+}
+
+export async function verifyGitHubRepo(url: string, token?: string): Promise<RepoVisibilityCheck> {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) {
+    return { exists: false, isPublic: false };
+  }
+
+  let res = await fetch(
+    `${GITHUB_API}/repos/${parsed.owner}/${parsed.repo}`,
+    { headers: apiHeaders(token) },
+  );
+
+  if (res.status === 401 && token) {
+    res = await fetch(
+      `${GITHUB_API}/repos/${parsed.owner}/${parsed.repo}`,
+      { headers: apiHeaders(undefined) },
+    );
+  }
+
+  if (res.status === 404) {
+    return { exists: false, isPublic: false };
+  }
+
+  if (!res.ok) {
+    throw new Error(`Failed to verify GitHub repo: ${res.status} ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  return {
+    exists: true,
+    isPublic: data.private !== true,
+  };
 }
 
 function shouldSkip(path: string): boolean {

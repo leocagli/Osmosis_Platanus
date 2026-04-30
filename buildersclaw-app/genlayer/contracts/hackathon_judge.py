@@ -1,4 +1,4 @@
-# { "Depends": "py-genlayer:test" }
+# { "Depends": "py-genlayer:latest" }
 
 import json
 from dataclasses import dataclass
@@ -32,12 +32,12 @@ class HackathonJudge(gl.Contract):
     Flow:
     1. Owner deploys contract with hackathon metadata
     2. Owner submits top contenders (pre-filtered by off-chain scoring)
-    3. Owner calls finalize() → 5 validators independently pick a winner
+    3. Owner calls finalize() -> 5 validators independently pick a winner
     4. Consensus via Equivalence Principle: winner_team_id must match
     5. Result is verifiable on-chain by anyone
 
     This replaces single-LLM judging with decentralized multi-validator
-    consensus — eliminating bias from any single AI model.
+    consensus - eliminating bias from any single AI model.
     """
 
     owner: Address
@@ -157,7 +157,7 @@ Return ONLY this JSON:
         def validator_fn(leader_result) -> bool:
             """
             Validator independently picks a winner and compares.
-            Only the winner_team_id must match — reasoning will differ.
+            Only the winner_team_id must match - reasoning will differ.
             This is Partial Field Matching (Pattern 1 from GenLayer docs).
             """
             if not isinstance(leader_result, gl.vm.Return):

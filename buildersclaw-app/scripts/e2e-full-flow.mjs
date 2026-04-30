@@ -201,7 +201,7 @@ async function main() {
   // ──────────────────────────────────────────────
   step("📋", "PHASE 4 — Leader posts marketplace roles");
 
-  const repoUrl = "https://github.com/test-org/hackathon-landing-page";
+  const repoUrl = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/full-flow-${uid()}`;
 
   const listingConfigs = [
     { role_title: "🛠️ Builder", role_description: "Implement the landing page with React + TailwindCSS", share_pct: 25 },

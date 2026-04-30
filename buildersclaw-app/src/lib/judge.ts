@@ -81,7 +81,8 @@ Score each criterion 0-100. Be strict and fair. 100 = exceptional, 70 = good, 50
 10. **deploy_readiness_score**: Could this be deployed? Proper configs, environment handling, build scripts, CI/CD?
 
 ═══ OUTPUT FORMAT ═══
-Return ONLY a valid JSON object (no markdown fences, no commentary):
+Return ONLY a valid JSON object (no markdown fences, no commentary).
+IMPORTANT: All string values must be single-line JSON strings. Do not include literal newlines inside strings. Avoid double quotes inside the feedback text.
 {
   "functionality_score": <0-100>,
   "brief_compliance_score": <0-100>,
@@ -93,7 +94,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary):
   "testing_score": <0-100>,
   "security_score": <0-100>,
   "deploy_readiness_score": <0-100>,
-  "judge_feedback": "2-4 paragraph detailed feedback explaining scores, highlighting strengths, identifying weaknesses, and providing actionable improvement suggestions. Reference specific files and code when possible."
+  "judge_feedback": "One concise paragraph with strengths, weaknesses, and next steps. No line breaks."
 }`;
 }
 
@@ -172,17 +173,35 @@ export async function judgeSubmission(
   const userPrompt = buildJudgeUserPrompt(repoContent, submission);
 
   try {
-    const result = await generateCode({
-      provider: "gemini",
-      apiKey,
-      systemPrompt,
-      userPrompt,
-      maxTokens: 2048,
-      temperature: 0.15, // Very low for consistent, deterministic judging
-    });
+    let parsed: Omit<EvaluationResult, "total_score"> | null = null;
+    let lastError: unknown = null;
 
-    const jsonStr = result.text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(jsonStr) as Omit<EvaluationResult, "total_score">;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const result = await generateCode({
+          provider: "gemini",
+          apiKey,
+          systemPrompt,
+          userPrompt,
+          maxTokens: 2048,
+          temperature: 0, // Force deterministic judging output as much as possible
+        });
+
+        const jsonStr = result.text.replace(/```json/g, "").replace(/```/g, "").trim();
+        parsed = JSON.parse(jsonStr) as Omit<EvaluationResult, "total_score">;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          continue;
+        }
+      }
+    }
+
+    if (!parsed) {
+      throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "Unknown Gemini judging failure"));
+    }
 
     // Weighted total score: brief_compliance is worth 2x
     const weights = {
@@ -502,6 +521,10 @@ export async function judgeHackathon(hackathonId: string) {
       }
 
       if (winnerAgentId) updatedMeta.winner_agent_id = winnerAgentId;
+    }
+
+    if (!winnerTeamId) {
+      throw new Error("No winner could be determined from the submission evaluations");
     }
 
     updatedMeta.finalized_at = new Date().toISOString();

@@ -175,6 +175,8 @@ async function main() {
   const teamId = leaderJoin.json.data.team.id;
   const teamName = leaderJoin.json.data.team.name;
   console.log(`  Team: ${teamName} (${teamId})`);
+  const teamRepoUrl = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/full-team-flow-${Date.now()}`;
+  const outsiderRepoUrl = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/full-team-flow-outsider-${Date.now()}`;
 
   // Verify leader can GET teams
   const teams = await api("GET", `/hackathons/${hackathonId}/teams`);
@@ -192,7 +194,7 @@ async function main() {
     team_id: teamId,
     role_title: "Backend Dev",
     role_description: "Build the API layer",
-    repo_url: "https://github.com/test-leader/hackathon-solution",
+    repo_url: teamRepoUrl,
     share_pct: 30,
   }, leader.key);
   assertEqual(listing.status, 201, "Listing created (201)");
@@ -370,16 +372,16 @@ async function main() {
   logStep("🚀", "PHASE 9: Team submission");
 
   const submit = await api("POST", `/hackathons/${hackathonId}/teams/${teamId}/submit`, {
-    repo_url: "https://github.com/test-leader/hackathon-solution",
+    repo_url: teamRepoUrl,
     notes: "MVP complete with auth, API, and tests.",
   }, leader.key);
   assert(submit.ok, "Submission accepted");
   assert(submit.json.data.submission_id !== undefined, "Submission has an ID");
-  assertEqual(submit.json.data.repo_url, "https://github.com/test-leader/hackathon-solution", "Repo URL matches");
+  assertEqual(submit.json.data.repo_url, teamRepoUrl, "Repo URL matches");
 
   // Re-submit (update)
   const resubmit = await api("POST", `/hackathons/${hackathonId}/teams/${teamId}/submit`, {
-    repo_url: "https://github.com/test-leader/hackathon-solution",
+    repo_url: teamRepoUrl,
     notes: "Updated: Added documentation and deployment config.",
   }, leader.key);
   assert(resubmit.ok, "Re-submission accepted");
@@ -387,14 +389,14 @@ async function main() {
 
   // Hired member can also submit
   const hiredSubmit = await api("POST", `/hackathons/${hackathonId}/teams/${teamId}/submit`, {
-    repo_url: "https://github.com/test-leader/hackathon-solution",
+    repo_url: teamRepoUrl,
     notes: "Final: Added API docs.",
   }, hired.key);
   assert(hiredSubmit.ok, "Hired member can also submit for the team");
 
   // Outsider cannot submit
   const outsiderSubmit = await api("POST", `/hackathons/${hackathonId}/teams/${teamId}/submit`, {
-    repo_url: "https://github.com/outsider/fake-repo",
+    repo_url: outsiderRepoUrl,
   }, outsider.key);
   assert(!outsiderSubmit.ok, "Outsider cannot submit for the team");
 

@@ -50,6 +50,7 @@ loadEnvFile(path.join(appRoot, ".env"), { override: true });
 
 const BASE_URL = normalizeBaseUrl(process.env.BASE_URL || "http://localhost:3000");
 const TEST_CREDIT_SECRET = process.env.TEST_CREDIT_SECRET || process.env.ADMIN_API_KEY;
+const MARKETPLACE_REPO_URL = process.env.TEST_MARKETPLACE_REPO_URL || `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/marketplace-flow-${Date.now()}`;
 
 const OPTIONAL_ERC8004_AGENT_ID = process.env.TEST_ERC8004_AGENT_ID || "";
 const OPTIONAL_ERC8004_OWNER_PRIVATE_KEY = process.env.TEST_ERC8004_OWNER_PRIVATE_KEY || "";
@@ -376,7 +377,7 @@ async function main() {
     role_title: "API Engineer",
     role_type: "builder",
     role_description: "Implement the API endpoints and auth integration.",
-    repo_url: "https://github.com/buildersclaw/marketplace-flow-test",
+    repo_url: MARKETPLACE_REPO_URL,
     share_pct: 30,
   }, leader.key);
   assertEqual(listingCreate.status, 201, "Listing is created");
@@ -436,7 +437,7 @@ async function main() {
   assertEqual(outsiderChatRead.status, 403, "Outsider cannot read team chat");
 
   const submit = await api("POST", `/hackathons/${hackathonId}/teams/${teamId}/submit`, {
-    repo_url: "https://github.com/buildersclaw/marketplace-flow-test",
+    repo_url: MARKETPLACE_REPO_URL,
     notes: "Marketplace flow test submission",
   }, claimant.key);
   assert(submit.ok, "Hired member can submit for the team", JSON.stringify(submit.json));

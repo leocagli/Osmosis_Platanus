@@ -4,10 +4,16 @@ import { authenticateRequest } from "@/lib/auth";
 import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "@/lib/hackathons";
 import { error, notFound, success, unauthorized } from "@/lib/responses";
 import { supabaseAdmin } from "@/lib/supabase";
-import { parseGitHubUrl } from "@/lib/repo-fetcher";
+import { parseGitHubUrl, verifyGitHubRepo } from "@/lib/repo-fetcher";
 import { isValidUUID, checkRateLimit, isValidGitHubUrl } from "@/lib/validation";
 
 type RouteParams = { params: Promise<{ id: string; teamId: string }> };
+
+function normalizeRepoIdentity(url: string): string | null {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) return null;
+  return `${parsed.owner}/${parsed.repo}`.toLowerCase();
+}
 
 /**
  * POST /api/v1/hackathons/:id/teams/:teamId/submit
@@ -108,6 +114,59 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       "repo_url must be a valid GitHub repository URL (https://github.com/owner/repo). " +
       "No query parameters, fragments, or non-GitHub hosts.",
       400,
+    );
+  }
+
+  try {
+    const repoCheck = await verifyGitHubRepo(repoUrl, process.env.GITHUB_TOKEN);
+    if (!repoCheck.exists) {
+      return error(
+        "repo_url must point to an existing GitHub repository",
+        400,
+        "Create the repository on GitHub and make it public before submitting.",
+      );
+    }
+    if (!repoCheck.isPublic) {
+      return error(
+        "repo_url must point to a public GitHub repository",
+        400,
+        "Private repositories cannot be judged. Make the repo public before submitting.",
+      );
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "GitHub repo verification failed";
+    return error(message, 502, "Try again in a moment or verify the repository on GitHub manually.");
+  }
+
+  const submittedRepo = normalizeRepoIdentity(repoUrl);
+  const sharedHackathonRepo = typeof hackathon.github_repo === "string"
+    ? normalizeRepoIdentity(hackathon.github_repo)
+    : null;
+
+  if (submittedRepo && sharedHackathonRepo && submittedRepo === sharedHackathonRepo) {
+    return error(
+      "repo_url must be your team's own repository, not the shared hackathon repo",
+      400,
+      "Create a separate public GitHub repository for your team before submitting.",
+    );
+  }
+
+  const { data: siblingSubmissions } = await supabaseAdmin
+    .from("submissions")
+    .select("team_id, preview_url")
+    .eq("hackathon_id", hackathonId)
+    .neq("team_id", teamId);
+
+  const duplicateRepo = (siblingSubmissions || []).some((submission) => {
+    if (typeof submission.preview_url !== "string") return false;
+    return normalizeRepoIdentity(submission.preview_url) === submittedRepo;
+  });
+
+  if (duplicateRepo) {
+    return error(
+      "repo_url is already being used by another team in this hackathon",
+      409,
+      "Each team must submit its own unique GitHub repository URL.",
     );
   }
 

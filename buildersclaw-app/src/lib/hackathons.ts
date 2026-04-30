@@ -18,6 +18,10 @@ export interface HackathonMeta {
   token_symbol: string | null;
   token_decimals: number | null;
   criteria_text: string | null;
+  judge_method: string | null;
+  genlayer_contract: string | null;
+  genlayer_reasoning: string | null;
+  genlayer_result: Record<string, unknown> | null;
   winner_agent_id: string | null;
   winner_team_id: string | null;
   winners: Array<{ agent_id: string; wallet: string; share_bps: number }> | null;
@@ -66,6 +70,10 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     token_symbol: null,
     token_decimals: null,
     criteria_text: null,
+    judge_method: null,
+    genlayer_contract: null,
+    genlayer_reasoning: null,
+    genlayer_result: null,
     winner_agent_id: null,
     winner_team_id: null,
     winners: null,
@@ -104,6 +112,10 @@ export function parseHackathonMeta(raw: unknown): HackathonMeta {
     token_symbol: sanitizeString(parsed.token_symbol, 32),
     token_decimals: typeof parsed.token_decimals === "number" ? parsed.token_decimals : null,
     criteria_text: sanitizeString(parsed.criteria_text, 4000),
+    judge_method: sanitizeString(parsed.judge_method, 64),
+    genlayer_contract: sanitizeString(parsed.genlayer_contract, 128),
+    genlayer_reasoning: sanitizeString(parsed.genlayer_reasoning, 4000),
+    genlayer_result: isObject(parsed.genlayer_result) ? parsed.genlayer_result as Record<string, unknown> : null,
     winner_agent_id: sanitizeString(parsed.winner_agent_id, 64),
     winner_team_id: sanitizeString(parsed.winner_team_id, 64),
     winners: Array.isArray(parsed.winners) ? parsed.winners as HackathonMeta["winners"] : null,
@@ -124,6 +136,10 @@ export function serializeHackathonMeta(meta: Partial<HackathonMeta>): string {
     token_symbol: meta.token_symbol ?? null,
     token_decimals: meta.token_decimals ?? null,
     criteria_text: meta.criteria_text ?? null,
+    judge_method: meta.judge_method ?? null,
+    genlayer_contract: meta.genlayer_contract ?? null,
+    genlayer_reasoning: meta.genlayer_reasoning ?? null,
+    genlayer_result: meta.genlayer_result ?? null,
     winner_agent_id: meta.winner_agent_id ?? null,
     winner_team_id: meta.winner_team_id ?? null,
     winners: meta.winners ?? null,
@@ -205,6 +221,14 @@ export function formatHackathon(hackathon: JsonObject) {
           claim_instructions: meta.contract_address
             ? "Each winning team member calls claim() independently from their wallet. See GET /api/v1/hackathons/:id/contract for ABI and details."
             : null,
+        }
+      : null,
+    genlayer: meta.genlayer_contract
+      ? {
+          contract_address: meta.genlayer_contract,
+          judge_method: meta.judge_method,
+          reasoning: meta.genlayer_reasoning,
+          result: meta.genlayer_result,
         }
       : null,
   };
