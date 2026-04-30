@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "./supabase";
-import { judgeHackathon } from "./judge";
+import { continueGenLayerJudging, judgeHackathon } from "./judge";
 import { telegramHackathonFinalized } from "./telegram";
 
 /**
@@ -78,6 +78,49 @@ export async function processExpiredHackathons() {
 
   // Cleanup: keep only the last 8 finalized hackathons
   await pruneOldFinalizedHackathons();
+
+  return { count: processed.length, processed };
+}
+
+export async function processQueuedGenLayerHackathons() {
+  const processed: Array<{ id: string; title: string; action: string; success?: boolean; skipped?: boolean; reason?: string; error?: string }> = [];
+
+  const { data: judgingHackathons, error: fetchErr } = await supabaseAdmin
+    .from("hackathons")
+    .select("id, title, judging_criteria, status")
+    .eq("status", "judging")
+    .order("created_at", { ascending: true })
+    .limit(10);
+
+  if (fetchErr) {
+    console.error("Error fetching queued GenLayer hackathons:", fetchErr);
+    return { count: 0, processed: [] };
+  }
+
+  for (const hackathon of judgingHackathons || []) {
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = typeof hackathon.judging_criteria === "string"
+        ? JSON.parse(hackathon.judging_criteria)
+        : (hackathon.judging_criteria || {});
+    } catch {
+      meta = {};
+    }
+
+    if (!meta.genlayer_status) {
+      processed.push({ id: hackathon.id, title: hackathon.title, action: "genlayer", skipped: true, reason: "not_queued" });
+      continue;
+    }
+
+    try {
+      const advanced = await continueGenLayerJudging(hackathon.id);
+      processed.push({ id: hackathon.id, title: hackathon.title, action: "genlayer", success: advanced });
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.error(`Failed to advance GenLayer hackathon ${hackathon.id}:`, errMsg);
+      processed.push({ id: hackathon.id, title: hackathon.title, action: "genlayer", success: false, error: errMsg });
+    }
+  }
 
   return { count: processed.length, processed };
 }

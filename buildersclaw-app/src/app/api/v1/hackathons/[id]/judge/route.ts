@@ -22,7 +22,16 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   try {
     const result = await judgeHackathon(hackathonId);
-    return success({ message: "Hackathon judging completed.", result });
+    const queuedGenLayer = !!result && typeof result === "object" && "queuedGenLayer" in result && result.queuedGenLayer;
+    return success(
+      {
+        message: queuedGenLayer
+          ? "Gemini scoring completed. GenLayer judging is queued and will continue via cron."
+          : "Hackathon judging completed.",
+        result,
+      },
+      queuedGenLayer ? 202 : 200,
+    );
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     if (errMsg === "Hackathon not found") {

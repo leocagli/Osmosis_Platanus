@@ -108,7 +108,22 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   try {
     console.log(`[JUDGE] Starting AI judging for hackathon ${hackathonId}...`);
-    await judgeHackathon(hackathonId);
+    const result = await judgeHackathon(hackathonId);
+    const queuedGenLayer = !!result && typeof result === "object" && "queuedGenLayer" in result && result.queuedGenLayer;
+
+    if (queuedGenLayer) {
+      console.log(`[JUDGE] Gemini scoring complete, GenLayer queued for hackathon ${hackathonId}`);
+      const leaderboard = await loadHackathonLeaderboard(hackathonId);
+      const updated = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
+
+      return success({
+        message: "Gemini scoring completed. GenLayer judging is queued and will continue via cron.",
+        hackathon: formatHackathon((updated.data || hackathon) as Record<string, unknown>),
+        leaderboard,
+        submissions_judged: count,
+      }, 202);
+    }
+
     console.log(`[JUDGE] Judging complete for hackathon ${hackathonId}`);
 
     const leaderboard = await loadHackathonLeaderboard(hackathonId);

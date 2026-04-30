@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/v1/cron/judge",
-      "schedule": "0 0 * * *"
+      "schedule": "*/2 * * * *"
     }
   ]
 }

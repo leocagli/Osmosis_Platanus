@@ -3,11 +3,17 @@ import { generateCode } from "./llm";
 import { fetchRepoForJudging, formatRepoForPrompt, parseGitHubUrl } from "./repo-fetcher";
 import { Hackathon, Submission } from "./types";
 import {
-  runGenLayerJudging,
   isGenLayerAvailable,
+  startGenLayerDeployment,
+  pollGenLayerDeployment,
+  startGenLayerSubmit,
+  pollGenLayerWrite,
+  startGenLayerFinalize,
+  getGenLayerJudgeResult,
   type GenLayerContender,
 } from "./genlayer";
 import { isViableSubmission } from "./validation";
+import { TransactionStatus } from "genlayer-js/types";
 
 export interface EvaluationResult {
   functionality_score: number;
@@ -22,6 +28,267 @@ export interface EvaluationResult {
   deploy_readiness_score: number;
   total_score: number;
   judge_feedback: string;
+}
+
+type JudgingMeta = Record<string, unknown>;
+
+interface JudgingRunResult {
+  completed: boolean;
+  queuedGenLayer: boolean;
+  submissionsJudged: number;
+}
+
+function parseJudgingMeta(raw: unknown): JudgingMeta {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed as JudgingMeta : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return raw && typeof raw === "object" ? raw as JudgingMeta : {};
+}
+
+async function updateHackathonJudgingMeta(hackathonId: string, meta: JudgingMeta, status?: string) {
+  const payload: Record<string, unknown> = { judging_criteria: meta };
+  if (status) payload.status = status;
+
+  await supabaseAdmin.from("hackathons").update(payload).eq("id", hackathonId);
+}
+
+function buildTopContenders(
+  evaluationsToUpsert: Array<{ submission_id: string; total_score: number; judge_feedback: string | null }>,
+  submissions: Array<Submission & { teams?: { name?: string } | { name?: string }[] }>,
+) {
+  const topEvals = evaluationsToUpsert
+    .filter((e) => e.total_score > 0)
+    .sort((a, b) => b.total_score - a.total_score)
+    .slice(0, 3);
+
+  const contenders: GenLayerContender[] = [];
+  for (const ev of topEvals) {
+    const sub = submissions.find((s) => s.id === ev.submission_id);
+    if (!sub) continue;
+    const teamData = Array.isArray(sub.teams) ? sub.teams[0] : sub.teams;
+    contenders.push({
+      team_id: sub.team_id,
+      team_name: teamData?.name || sub.team_id,
+      repo_summary: (ev.judge_feedback || "").slice(0, 1500),
+      gemini_score: ev.total_score,
+    });
+  }
+
+  return { topEvals, contenders };
+}
+
+async function resolveWinnerAgentId(winnerTeamId: string) {
+  const { data: leaderMember } = await supabaseAdmin
+    .from("team_members")
+    .select("agent_id")
+    .eq("team_id", winnerTeamId)
+    .eq("role", "leader")
+    .single();
+
+  if (leaderMember?.agent_id) return leaderMember.agent_id as string;
+
+  const { data: anyMember } = await supabaseAdmin
+    .from("team_members")
+    .select("agent_id")
+    .eq("team_id", winnerTeamId)
+    .limit(1)
+    .single();
+
+  return (anyMember?.agent_id as string | undefined) || null;
+}
+
+async function finalizeJudging(
+  hackathonId: string,
+  meta: JudgingMeta,
+  winnerTeamId: string,
+  judgeMethod: string,
+  notes: string,
+) {
+  meta.winner_team_id = winnerTeamId;
+  meta.winner_agent_id = await resolveWinnerAgentId(winnerTeamId);
+  meta.finalized_at = new Date().toISOString();
+  meta.judge_method = judgeMethod;
+  meta.notes = notes;
+
+  await updateHackathonJudgingMeta(hackathonId, meta, "completed");
+}
+
+async function finalizeGeminiFallback(hackathonId: string, meta: JudgingMeta, reason?: string) {
+  const fallbackTeamId = typeof meta.genlayer_fallback_team_id === "string"
+    ? meta.genlayer_fallback_team_id
+    : typeof meta.winner_team_id === "string"
+      ? meta.winner_team_id
+      : null;
+
+  if (!fallbackTeamId) {
+    throw new Error("No Gemini fallback winner available")
+  }
+
+  meta.genlayer_status = reason ? "failed" : meta.genlayer_status;
+  if (reason) meta.genlayer_last_error = reason;
+
+  await finalizeJudging(
+    hackathonId,
+    meta,
+    fallbackTeamId,
+    "gemini",
+    reason
+      ? `GenLayer fallback to Gemini winner after error: ${reason}`
+      : "Automatically judged by Gemini AI. Code repositories were analyzed.",
+  );
+}
+
+async function persistGenLayerVerdict(hackathonId: string, meta: JudgingMeta) {
+  const contractAddress = typeof meta.genlayer_contract === "string" ? meta.genlayer_contract : null;
+  if (!contractAddress) return false;
+
+  const result = await getGenLayerJudgeResult(contractAddress, hackathonId);
+  if (!result.finalized || !result.winner_team_id) {
+    return false;
+  }
+
+  const enrichResult = {
+    ...result,
+    deploy_tx_hash: meta.genlayer_deploy_tx_hash,
+    submit_tx_hash: meta.genlayer_submit_tx_hash,
+    finalize_tx_hash: meta.genlayer_finalize_tx_hash,
+  };
+
+  meta.genlayer_status = "completed";
+  meta.genlayer_result = enrichResult;
+  meta.genlayer_reasoning = result.reasoning || null;
+
+  if (result.final_score) {
+    const { data: winnerSub } = await supabaseAdmin
+      .from("submissions")
+      .select("id")
+      .eq("hackathon_id", hackathonId)
+      .eq("team_id", result.winner_team_id)
+      .single();
+
+    if (winnerSub?.id) {
+      const { data: existingEval } = await supabaseAdmin
+        .from("evaluations")
+        .select("raw_response")
+        .eq("submission_id", winnerSub.id)
+        .single();
+
+      const glFeedback = `🔗 GenLayer On-Chain Verdict (5 validators):\nFinal Score: ${result.final_score}/100\n${result.reasoning || ""}`;
+
+      let rawResponse: Record<string, unknown> = {};
+      try {
+        rawResponse = typeof existingEval?.raw_response === "string"
+          ? JSON.parse(existingEval.raw_response)
+          : {};
+      } catch {
+        rawResponse = {};
+      }
+
+      await supabaseAdmin
+        .from("evaluations")
+        .update({
+          total_score: result.final_score,
+          judge_feedback: glFeedback,
+          raw_response: JSON.stringify({ ...rawResponse, genlayer_result: enrichResult }),
+        })
+        .eq("submission_id", winnerSub.id);
+    }
+  }
+
+  await finalizeJudging(
+    hackathonId,
+    meta,
+    result.winner_team_id,
+    "gemini+genlayer",
+    `Gemini pre-scored submissions. Top contenders went to GenLayer on-chain consensus. Winner verified by 5 independent validators.`,
+  );
+
+  return true;
+}
+
+export async function continueGenLayerJudging(hackathonId: string) {
+  const { data: hackathon } = await supabaseAdmin
+    .from("hackathons")
+    .select("id, title, brief, status, judging_criteria")
+    .eq("id", hackathonId)
+    .single();
+
+  if (!hackathon || hackathon.status !== "judging") return false;
+
+  const meta = parseJudgingMeta(hackathon.judging_criteria);
+  const status = typeof meta.genlayer_status === "string" ? meta.genlayer_status : null;
+  const contenders = Array.isArray(meta.genlayer_contenders)
+    ? meta.genlayer_contenders as GenLayerContender[]
+    : [];
+
+  if (!status) return false;
+
+  try {
+    if (status === "queued") {
+      const deployment = await startGenLayerDeployment(hackathon.id, hackathon.title, hackathon.brief);
+      meta.genlayer_status = "deploying";
+      meta.genlayer_deploy_tx_hash = deployment.txHash;
+      await updateHackathonJudgingMeta(hackathon.id, meta);
+      return true;
+    }
+
+    if (status === "deploying") {
+      const txHash = typeof meta.genlayer_deploy_tx_hash === "string" ? meta.genlayer_deploy_tx_hash : null;
+      if (!txHash) throw new Error("Missing GenLayer deploy tx hash");
+      const progress = await pollGenLayerDeployment(txHash);
+      if (!progress.done || !progress.contractAddress) return false;
+
+      meta.genlayer_contract = progress.contractAddress;
+      const submit = await startGenLayerSubmit(progress.contractAddress, contenders);
+      meta.genlayer_submit_tx_hash = submit.txHash;
+      meta.genlayer_status = "submitting";
+      await updateHackathonJudgingMeta(hackathon.id, meta);
+      return true;
+    }
+
+    if (status === "submitting") {
+      const txHash = typeof meta.genlayer_submit_tx_hash === "string" ? meta.genlayer_submit_tx_hash : null;
+      const contractAddress = typeof meta.genlayer_contract === "string" ? meta.genlayer_contract : null;
+      if (!txHash || !contractAddress) throw new Error("Missing GenLayer submit state");
+      const progress = await pollGenLayerWrite(txHash, TransactionStatus.ACCEPTED);
+      if (!progress.done) return false;
+
+      const finalize = await startGenLayerFinalize(contractAddress);
+      meta.genlayer_finalize_tx_hash = finalize.txHash;
+      meta.genlayer_status = "finalizing";
+      await updateHackathonJudgingMeta(hackathon.id, meta);
+      return true;
+    }
+
+    if (status === "finalizing") {
+      const txHash = typeof meta.genlayer_finalize_tx_hash === "string" ? meta.genlayer_finalize_tx_hash : null;
+      if (!txHash) throw new Error("Missing GenLayer finalize tx hash");
+      const progress = await pollGenLayerWrite(txHash, TransactionStatus.FINALIZED);
+      if (!progress.done) return false;
+
+      meta.genlayer_status = "reading_result";
+      await updateHackathonJudgingMeta(hackathon.id, meta);
+      return true;
+    }
+
+    if (status === "reading_result") {
+      return await persistGenLayerVerdict(hackathon.id, meta);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`continueGenLayerJudging(${hackathon.id}) failed:`, msg);
+    await finalizeGeminiFallback(hackathon.id, meta, msg);
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -387,101 +654,32 @@ export async function judgeHackathon(hackathonId: string) {
         .upsert(evaluationsToUpsert, { onConflict: "submission_id" });
     }
 
-    // Determine winner: top 3 from Gemini → GenLayer on-chain consensus
+    // Determine winner: top Gemini contenders can be escalated to GenLayer.
     evaluationsToUpsert.sort((a, b) => b.total_score - a.total_score);
-
-    // ── GenLayer impartial judging for top contenders ──
-    const TOP_N = 3;
-    const topEvals = evaluationsToUpsert
-      .filter((e) => e.total_score > 0)
-      .slice(0, TOP_N);
+    const { topEvals, contenders } = buildTopContenders(
+      evaluationsToUpsert,
+      submissions as Array<Submission & { teams?: { name?: string } | { name?: string }[] }>,
+    );
 
     let winnerTeamId: string | null = null;
     let winnerAgentId: string | null = null;
-    let genlayerUsed = false;
+    const genlayerUsed = false;
 
     // Only use GenLayer if there are 2+ viable contenders and GenLayer is reachable
     if (topEvals.length >= 2 && (await isGenLayerAvailable())) {
-      try {
-        // Build contender data for GenLayer.
-        // Use Gemini's judge_feedback as repo_summary — it's already a structured
-        // 2-4 paragraph evaluation, far more useful to validators than raw code.
-        // No extra GitHub fetch needed.
-        const contenders: GenLayerContender[] = [];
-        for (const ev of topEvals) {
-          const sub = submissions.find((s) => s.id === ev.submission_id);
-          if (!sub) continue;
-          const teamData = sub.teams as { name?: string } | undefined;
-
-          contenders.push({
-            team_id: sub.team_id,
-            team_name: teamData?.name || sub.team_id,
-            repo_summary: (ev.judge_feedback || "").slice(0, 1500),
-            gemini_score: ev.total_score,
-          });
-        }
-
-        if (contenders.length >= 2) {
-          console.log(`GenLayer: sending ${contenders.length} top contenders for on-chain judging`);
-
-          const glResult = await runGenLayerJudging(
-            hackathonId,
-            hackathon.title,
-            hackathon.brief,
-            contenders,
-            updatedMeta.genlayer_contract as string | undefined,
-          );
-
-          // Save the contract address for future reference / reuse
-          if (glResult.contractAddress) {
-            updatedMeta.genlayer_contract = glResult.contractAddress;
-          }
-
-          if (glResult.finalized && glResult.winner_team_id) {
-            winnerTeamId = glResult.winner_team_id;
-            genlayerUsed = true;
-            updatedMeta.genlayer_result = glResult;
-            updatedMeta.genlayer_reasoning = glResult.reasoning;
-            console.log(`GenLayer: winner is ${glResult.winner_team_name} (${glResult.winner_team_id})`);
-
-            // ── Save GenLayer score into evaluations so the leaderboard picks it up ──
-            if (glResult.final_score) {
-              const winnerSub = submissions.find((s) => s.team_id === glResult.winner_team_id);
-              if (winnerSub) {
-                // Update the winner's evaluation with GenLayer's final score + reasoning
-                const glFeedback = `🔗 GenLayer On-Chain Verdict (5 validators):\n` +
-                  `Final Score: ${glResult.final_score}/100\n` +
-                  `${glResult.reasoning || ""}`;
-
-                await supabaseAdmin
-                  .from("evaluations")
-                  .update({
-                    total_score: glResult.final_score,
-                    judge_feedback: glFeedback,
-                    raw_response: JSON.stringify({
-                      ...JSON.parse(
-                        evaluationsToUpsert.find((e) => e.submission_id === winnerSub.id)?.raw_response || "{}"
-                      ),
-                      genlayer_result: glResult,
-                    }),
-                  })
-                  .eq("submission_id", winnerSub.id);
-
-                // Also update our in-memory array so the rest of the flow is consistent
-                const idx = evaluationsToUpsert.findIndex((e) => e.submission_id === winnerSub.id);
-                if (idx >= 0) {
-                  evaluationsToUpsert[idx].total_score = glResult.final_score;
-                  evaluationsToUpsert[idx].judge_feedback = glFeedback;
-                }
-
-                console.log(`GenLayer: saved final_score=${glResult.final_score} to evaluations for ${winnerSub.id}`);
-              }
-            }
-          }
-        }
-      } catch (glErr) {
-        console.error("GenLayer judging failed, falling back to Gemini ranking:", glErr);
-        // Fall through to Gemini-only winner selection below
+      if (contenders.length >= 2) {
+        console.log(`GenLayer: queued ${contenders.length} top contenders for cron-driven on-chain judging`);
+        updatedMeta.genlayer_status = "queued";
+        updatedMeta.genlayer_contenders = contenders;
+        updatedMeta.genlayer_fallback_team_id = contenders[0].team_id;
+        updatedMeta.judge_method = "gemini_pending_genlayer";
+        updatedMeta.notes = `Gemini pre-scored ${submissions.length} submissions. Top ${contenders.length} contenders are queued for GenLayer on-chain consensus.`;
+        await updateHackathonJudgingMeta(hackathonId, updatedMeta, "judging");
+        return {
+          completed: false,
+          queuedGenLayer: true,
+          submissionsJudged: submissions.length,
+        } satisfies JudgingRunResult;
       }
     }
 
@@ -496,30 +694,8 @@ export async function judgeHackathon(hackathonId: string) {
 
     // Resolve winner agent
     if (winnerTeamId) {
-      // Always save winner_team_id regardless of agent resolution
+      winnerAgentId = await resolveWinnerAgentId(winnerTeamId);
       updatedMeta.winner_team_id = winnerTeamId;
-
-      // Try leader first, fall back to any team member
-      const { data: leaderMember } = await supabaseAdmin
-        .from("team_members")
-        .select("agent_id")
-        .eq("team_id", winnerTeamId)
-        .eq("role", "leader")
-        .single();
-
-      if (leaderMember?.agent_id) {
-        winnerAgentId = leaderMember.agent_id;
-      } else {
-        // No leader — take any member
-        const { data: anyMember } = await supabaseAdmin
-          .from("team_members")
-          .select("agent_id")
-          .eq("team_id", winnerTeamId)
-          .limit(1)
-          .single();
-        if (anyMember?.agent_id) winnerAgentId = anyMember.agent_id;
-      }
-
       if (winnerAgentId) updatedMeta.winner_agent_id = winnerAgentId;
     }
 
@@ -535,12 +711,13 @@ export async function judgeHackathon(hackathonId: string) {
         ? "Won by default (only participant). Judged for feedback."
         : "Automatically judged by Gemini AI. Code repositories were analyzed.";
 
-    await supabaseAdmin
-      .from("hackathons")
-      .update({ status: "completed", judging_criteria: updatedMeta })
-      .eq("id", hackathonId);
+    await updateHackathonJudgingMeta(hackathonId, updatedMeta, "completed");
 
-    return true;
+    return {
+      completed: true,
+      queuedGenLayer: false,
+      submissionsJudged: submissions.length,
+    } satisfies JudgingRunResult;
   } catch (err) {
     // On unexpected failure, revert to in_progress so cron can retry
     console.error(`judgeHackathon(${hackathonId}) fatal error, reverting status:`, err);

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { processExpiredHackathons } from "@/lib/judge-trigger";
+import { processExpiredHackathons, processQueuedGenLayerHackathons } from "@/lib/judge-trigger";
 
 export async function GET(request: Request) {
   try {
@@ -35,12 +35,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const result = await processExpiredHackathons();
+    const [expired, queued] = await Promise.all([
+      processExpiredHackathons(),
+      processQueuedGenLayerHackathons(),
+    ]);
 
     return NextResponse.json({
       success: true,
-      message: `Processed ${result?.count || 0} hackathons`,
-      details: result?.processed || [],
+      message: `Processed ${(expired?.count || 0) + (queued?.count || 0)} cron tasks`,
+      details: {
+        expired: expired?.processed || [],
+        genlayer: queued?.processed || [],
+      },
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
