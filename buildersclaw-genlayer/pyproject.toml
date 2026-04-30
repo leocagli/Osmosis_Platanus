@@ -1,0 +1,16 @@
+[project]
+name = "buildersclaw-genlayer-contracts"
+version = "0.1.0"
+description = "GenLayer contracts and test environment for BuildersClaw."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "eth-account==0.13.3",
+  "eth-utils==5.0.0",
+  "genlayer-test==0.1.1",
+  "genvm-linter==0.10.0",
+  "python-dotenv==1.0.1",
+  "requests==2.31.0",
+]
+
+[tool.uv]
+package = false

@@ -156,20 +156,18 @@ function filePriority(path: string): number {
  * Fetch the full file tree of a GitHub repository using the Git Trees API.
  */
 async function fetchTree(owner: string, repo: string, token?: string): Promise<string[]> {
-  // Try with token first; on 401 retry without token (handles expired tokens gracefully)
-  async function tryFetch(branch: string, tok: string | undefined): Promise<Response> {
-    return fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
-      { headers: apiHeaders(tok) }
+  // First try the recursive tree endpoint (efficient, single request)
+  const treeRes = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
+    { headers: apiHeaders(token) }
+  );
+
+  if (!treeRes.ok) {
+    // Fallback: try main branch
+    const mainRes = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/trees/main?recursive=1`,
+      { headers: apiHeaders(token) }
     );
-  }
-
-  let res = await tryFetch("HEAD", token);
-  if (res.status === 401 && token) res = await tryFetch("HEAD", undefined);
-
-  if (!res.ok) {
-    let mainRes = await tryFetch("main", token);
-    if (mainRes.status === 401 && token) mainRes = await tryFetch("main", undefined);
     if (!mainRes.ok) {
       throw new Error(`Failed to fetch repo tree: ${mainRes.status} ${mainRes.statusText}`);
     }
@@ -179,7 +177,7 @@ async function fetchTree(owner: string, repo: string, token?: string): Promise<s
       .map((item: { path: string }) => item.path);
   }
 
-  const data = await res.json();
+  const data = await treeRes.json();
   return (data.tree || [])
     .filter((item: { type: string }) => item.type === "blob")
     .map((item: { path: string }) => item.path);
@@ -195,18 +193,13 @@ async function fetchFileContent(
   token?: string
 ): Promise<string | null> {
   try {
-    let res = await fetch(
+    const res = await fetch(
       `${GITHUB_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`,
       { headers: { ...apiHeaders(token), Accept: "application/vnd.github.raw+json" } }
     );
-    // Retry without token on 401 (expired/revoked)
-    if (res.status === 401 && token) {
-      res = await fetch(
-        `${GITHUB_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`,
-        { headers: { ...apiHeaders(undefined), Accept: "application/vnd.github.raw+json" } }
-      );
-    }
+
     if (!res.ok) return null;
+
     const text = await res.text();
     return text;
   } catch {
@@ -240,10 +233,18 @@ export async function fetchRepoForJudging(
 
   const { owner, repo } = parsed;
   
-  // Use GITHUB_TOKEN if it looks like a valid token (no live validation — avoids wasting rate limit)
+  // Use GITHUB_TOKEN only if it looks valid (skip expired/bad tokens)
   const envToken = process.env.GITHUB_TOKEN;
-  const token: string | undefined =
-    envToken && envToken.length > 10 && !envToken.includes("your-key") ? envToken : undefined;
+  let token: string | undefined;
+  if (envToken && envToken.startsWith("ghp_") && envToken.length > 20) {
+    // Verify token works with a quick check
+    try {
+      const testRes = await fetch(`${GITHUB_API}/rate_limit`, { headers: apiHeaders(envToken) });
+      if (testRes.ok) {
+        token = envToken;
+      }
+    } catch { /* token is bad, skip it */ }
+  }
 
   let tree: string[];
   try {
