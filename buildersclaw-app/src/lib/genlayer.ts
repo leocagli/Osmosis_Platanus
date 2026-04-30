@@ -24,12 +24,12 @@ const GENLAYER_PK  = process.env.GENLAYER_PRIVATE_KEY || "";
 // ─── Types ───
 
 export interface GenLayerContender {
-  team_id:    string;
-  team_name:  string;
-  /** Structured repo summary (no raw code, no repo URL for impartiality) */
+  team_id:      string;
+  team_name:    string;
+  /** Gemini's structured evaluation (2-4 paragraphs). Used as the main context
+   *  for validators — more informative than raw code snippets. */
   repo_summary: string;
   gemini_score: number;
-  gemini_feedback: string;
 }
 
 export interface GenLayerJudgeResult {
@@ -233,16 +233,15 @@ export async function runGenLayerJudging(
   // ⚠ GenLayer Bradbury gas limit: eth_estimateGas fails → SDK falls back to 200k.
   // Intrinsic cost = 21k + 16 gas/byte calldata → payload must stay under ~10KB total.
   // Cap each text field to fit comfortably within the 200k ceiling.
-  const contiendersPayload = JSON.stringify(topContenders.map(c => ({
-    team_id:         c.team_id,
-    team_name:       c.team_name,
-    repo_summary:    c.repo_summary.slice(0, 800),
-    gemini_score:    Math.round(c.gemini_score),
-    gemini_feedback: c.gemini_feedback.slice(0, 600),
+  const contendersPayload = JSON.stringify(topContenders.map(c => ({
+    team_id:      c.team_id,
+    team_name:    c.team_name,
+    repo_summary: c.repo_summary.slice(0, 1500),
+    gemini_score: Math.round(c.gemini_score),
   })));
 
   console.log(`[GenLayer] Submitting ${topContenders.length} contenders...`);
-  await callWrite(contractAddress, "submit_contenders", [contiendersPayload]);
+  await callWrite(contractAddress, "submit_contenders", [contendersPayload]);
 
   // 3. Finalize — triggers LLM consensus among 5 validators
   console.log(`[GenLayer] Triggering finalize() — 5 validators will run LLM consensus...`);

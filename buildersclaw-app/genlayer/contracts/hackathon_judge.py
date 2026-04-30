@@ -10,10 +10,8 @@ from genlayer import *
 class Contender:
     team_id: str
     team_name: str
-    repo_url: str
     repo_summary: str
     gemini_score: u256
-    gemini_feedback: str
 
 
 @allow_storage
@@ -87,10 +85,8 @@ class HackathonJudge(gl.Contract):
             self.contenders[c["team_id"]] = Contender(
                 team_id=c["team_id"],
                 team_name=c["team_name"],
-                repo_url=c.get("repo_url", ""),
                 repo_summary=c.get("repo_summary", ""),
                 gemini_score=u256(c.get("gemini_score", 0)),
-                gemini_feedback=c.get("gemini_feedback", ""),
             )
         self.contenders_submitted = True
 
@@ -119,10 +115,8 @@ class HackathonJudge(gl.Contract):
             contender_list.append({
                 "team_id": c.team_id,
                 "team_name": c.team_name,
-                "repo_url": c.repo_url,
                 "gemini_score": int(c.gemini_score),
-                "gemini_feedback": c.gemini_feedback,
-                "repo_summary": c.repo_summary[:8000],
+                "evaluation": c.repo_summary[:2000],
             })
 
         contenders_text = json.dumps(contender_list, indent=2)
@@ -137,25 +131,28 @@ class HackathonJudge(gl.Contract):
 CHALLENGE BRIEF:
 {self.brief}
 
-CONTENDERS (pre-scored by another AI, you must form your OWN independent opinion):
+CONTENDERS:
 {contenders_text}
 
-INSTRUCTIONS:
-- Read each contender's repo summary and feedback carefully.
-- Evaluate which submission BEST solves the challenge brief.
-- Pre-scores are advisory only — you may disagree.
-- Focus on: brief compliance, code quality, completeness, innovation.
-- You MUST pick exactly one winner from the contenders above.
+Each contender has:
+- team_id / team_name: identification
+- gemini_score: advisory pre-score from another AI (0-100), you may disagree
+- evaluation: structured AI analysis of the submission
 
-Return a JSON object with exactly these fields:
+INSTRUCTIONS:
+- Read each evaluation carefully.
+- Pick the submission that BEST solves the challenge brief.
+- Prioritize: brief compliance, functionality, completeness, code quality.
+- You MUST pick exactly one winner.
+
+Return ONLY this JSON:
 {{
-    "winner_team_id": "<team_id of the winner>",
-    "winner_team_name": "<team_name of the winner>",
-    "final_score": <0-100 your overall score for the winner>,
-    "reasoning": "<2-3 sentences explaining why this team won>"
+    "winner_team_id": "<team_id>",
+    "winner_team_name": "<team_name>",
+    "final_score": <0-100>,
+    "reasoning": "<2-3 sentences why this team won>"
 }}"""
-            result = gl.nondet.exec_prompt(task, response_format="json")
-            return result
+            return gl.nondet.exec_prompt(task, response_format="json")
 
         def validator_fn(leader_result) -> bool:
             """
@@ -210,9 +207,7 @@ Return a JSON object with exactly these fields:
             out.append({
                 "team_id": c.team_id,
                 "team_name": c.team_name,
-                "repo_url": c.repo_url,
                 "gemini_score": int(c.gemini_score),
-                "gemini_feedback": c.gemini_feedback,
             })
         return out
 

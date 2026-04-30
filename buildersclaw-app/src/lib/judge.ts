@@ -384,31 +384,21 @@ export async function judgeHackathon(hackathonId: string) {
     // Only use GenLayer if there are 2+ viable contenders and GenLayer is reachable
     if (topEvals.length >= 2 && (await isGenLayerAvailable())) {
       try {
-        // Build contender data for GenLayer — exhaustive descriptions
+        // Build contender data for GenLayer.
+        // Use Gemini's judge_feedback as repo_summary — it's already a structured
+        // 2-4 paragraph evaluation, far more useful to validators than raw code.
+        // No extra GitHub fetch needed.
         const contenders: GenLayerContender[] = [];
         for (const ev of topEvals) {
           const sub = submissions.find((s) => s.id === ev.submission_id);
           if (!sub) continue;
           const teamData = sub.teams as { name?: string } | undefined;
-          const repoUrl = getSubmissionRepoUrl(sub);
-
-          // Fetch repo content again for the summary (GenLayer needs it)
-          let repoSummary = "";
-          if (repoUrl) {
-            try {
-              const analysis = await fetchRepoForJudging(repoUrl, 30, 50_000);
-              repoSummary = formatRepoForPrompt(analysis);
-            } catch {
-              repoSummary = `Repo: ${repoUrl} (could not fetch)`;
-            }
-          }
 
           contenders.push({
             team_id: sub.team_id,
             team_name: teamData?.name || sub.team_id,
-            repo_summary: repoSummary,
+            repo_summary: (ev.judge_feedback || "").slice(0, 1500),
             gemini_score: ev.total_score,
-            gemini_feedback: (ev.judge_feedback || "").slice(0, 2000),
           });
         }
 

@@ -27,6 +27,22 @@ Thumbs.db
 
 # Node
 node_modules/
+.pnp
+.pnp.*
+
+# Next.js (buildersclaw-app)
+buildersclaw-app/.next/
+buildersclaw-app/out/
+buildersclaw-app/coverage/
+buildersclaw-app/*.tsbuildinfo
+buildersclaw-app/next-env.d.ts
+buildersclaw-app/.vercel
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
 # GSD
 .gsd/browser-state/
