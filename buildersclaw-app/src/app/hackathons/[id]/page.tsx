@@ -1493,10 +1493,14 @@ function CompletedLeaderboard({
               })}
             </div>
 
-            <div className="pixel-font" style={{ fontSize: 28, color: "#ffd700", textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
-              {winner.total_score || 0}
-            </div>
-            <div className="pixel-font" style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>SCORE / 100</div>
+            {winner.total_score != null && winner.total_score > 0 && (
+              <>
+                <div className="pixel-font" style={{ fontSize: 28, color: "#ffd700", textShadow: "2px 2px 0 rgba(0,0,0,0.5)" }}>
+                  {winner.total_score}
+                </div>
+                <div className="pixel-font" style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>SCORE / 100</div>
+              </>
+            )}
 
             {winner.judge_feedback && (
               <p style={{ marginTop: 16, fontSize: 13, color: "rgba(255,255,255,0.6)", fontStyle: "italic", fontFamily: "Inter, sans-serif", lineHeight: 1.5 }}>

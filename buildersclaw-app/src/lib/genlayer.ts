@@ -1,251 +1,255 @@
 /**
  * GenLayer integration for on-chain hackathon judging.
  *
- * After Gemini pre-scores all submissions, the top 3 contenders
+ * After Gemini pre-scores all submissions, the top 2-3 contenders
  * are sent to a GenLayer Intelligent Contract where 5 independent
  * validators use LLM consensus to pick the winner impartially.
  *
  * The result is stored on-chain and verifiable by anyone.
  */
 
-// GenLayer JSON-RPC client — no SDK dependency needed, pure fetch
-const GENLAYER_RPC = process.env.GENLAYER_RPC_URL || "http://127.0.0.1:4000/api";
-const GENLAYER_PRIVATE_KEY = process.env.GENLAYER_PRIVATE_KEY || "";
+import {
+  createClient,
+  createAccount,
+  chains,
+} from "genlayer-js";
+import type { TransactionHash } from "genlayer-js/types";
+import { TransactionStatus } from "genlayer-js/types";
 
-interface GenLayerContender {
-  team_id: string;
-  team_name: string;
-  repo_url: string;
+// ─── Config ───
+
+const GENLAYER_RPC = process.env.GENLAYER_RPC_URL || "https://rpc-bradbury.genlayer.com";
+const GENLAYER_PK  = process.env.GENLAYER_PRIVATE_KEY || "";
+
+// ─── Types ───
+
+export interface GenLayerContender {
+  team_id:      string;
+  team_name:    string;
+  /** Gemini's structured evaluation (2-4 paragraphs). Used as the main context
+   *  for validators — more informative than raw code snippets. */
   repo_summary: string;
   gemini_score: number;
-  gemini_feedback: string;
 }
 
-interface GenLayerJudgeResult {
-  finalized: boolean;
-  hackathon_id: string;
-  winner_team_id?: string;
+export interface GenLayerJudgeResult {
+  finalized:         boolean;
+  hackathon_id:      string;
+  winner_team_id?:   string;
   winner_team_name?: string;
-  final_score?: number;
-  reasoning?: string;
+  final_score?:      number;
+  reasoning?:        string;
+  contractAddress:   string;
 }
 
-// ─── JSON-RPC helper ───
+// ─── Client factory ───
 
-async function genlayerRpc(method: string, params: unknown[] = []): Promise<unknown> {
-  const resp = await fetch(GENLAYER_RPC, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method,
-      params,
-      id: Date.now(),
-    }),
+function makeClient() {
+  if (!GENLAYER_PK) throw new Error("GENLAYER_PRIVATE_KEY not configured");
+
+  const account = createAccount(GENLAYER_PK as `0x${string}`);
+  const client = createClient({
+    chain: chains.testnetBradbury as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    account,
+    endpoint: GENLAYER_RPC,
+  });
+  return { client, account };
+}
+
+// ─── Contract interaction helpers ───
+
+async function waitForReceipt(client: ReturnType<typeof createClient>, txHash: string, retries = 200) {
+  return client.waitForTransactionReceipt({
+    hash:    txHash as TransactionHash,
+    status:  TransactionStatus.ACCEPTED,
+    retries,
+  });
+}
+
+/**
+ * Deploy a fresh HackathonJudge contract for a hackathon.
+ * Returns the deployed contract address.
+ */
+async function deployJudgeContract(
+  hackathonId: string,
+  title: string,
+  brief: string,
+): Promise<string> {
+  const { readFileSync } = await import("fs");
+  const { resolve } = await import("path");
+
+  const contractPath = resolve(
+    process.cwd(),
+    "genlayer/contracts/hackathon_judge.py",
+  );
+
+  const contractCode = new Uint8Array(readFileSync(contractPath));
+
+  const { client } = makeClient();
+
+  console.log(`[GenLayer] Deploying HackathonJudge for hackathon ${hackathonId}...`);
+
+  const deployTx = await client.deployContract({
+    code: contractCode,
+    args: [hackathonId, title, brief],
   });
 
-  const data = await resp.json();
-  if (data.error) {
-    throw new Error(`GenLayer RPC error: ${JSON.stringify(data.error)}`);
+  const receipt = await waitForReceipt(client, deployTx as string);
+
+  // v0.27.9: status comes back as BigInt from viem ABI decode; FINALIZED = 7 (not 6)
+  // simplifyTransactionReceipt renames statusName → status_name
+  const r = receipt as Record<string, unknown>;
+  const statusRaw = r.status;
+  const statusNum = statusRaw !== undefined ? Number(statusRaw) : undefined;
+  const statusName: string | undefined =
+    (r.status_name as string | undefined)  // v0.27.9 (renamed by simplifyTransactionReceipt)
+    ?? (r.statusName as string | undefined); // older versions
+  const isAccepted =
+    statusNum === 5 || statusNum === 7        // 5=ACCEPTED, 7=FINALIZED in v0.27.9
+    || statusName === "ACCEPTED" || statusName === "FINALIZED";
+  if (!isAccepted) {
+    throw new Error(`[GenLayer] Deploy failed. Receipt: ${JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`);
   }
-  return data.result;
+
+  const data = r.data as Record<string, unknown> | undefined;
+  const decoded = r.txDataDecoded as Record<string, unknown> | undefined;
+
+  const contractAddress: string | undefined =
+    data?.contract_address as string      // localnet / older format
+    ?? decoded?.contractAddress as string // v0.27.9: txDataDecoded.contractAddress = recipient
+    ?? r.recipient as string              // v0.27.9: recipient IS the deployed contract address
+    ?? r.contractAddress as string;       // fallback
+
+  if (!contractAddress) {
+    throw new Error(`[GenLayer] Could not extract contract address from receipt: ${JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`);
+  }
+
+  console.log(`[GenLayer] HackathonJudge deployed at ${contractAddress}`);
+  return contractAddress;
 }
 
-// ─── Account management ───
+/**
+ * Call a write method on the contract and wait for it to be accepted.
+ */
+async function callWrite(contractAddress: string, functionName: string, args: string[]) {
+  const { client } = makeClient();
 
-let _cachedAccount: { address: string; privateKey: string } | null = null;
+  const txHash = await client.writeContract({
+    address:      contractAddress as `0x${string}`,
+    functionName,
+    args,
+    value:        BigInt(0),
+  });
 
-async function getOrCreateAccount(): Promise<{ address: string; privateKey: string }> {
-  if (_cachedAccount) return _cachedAccount;
+  const receipt = await waitForReceipt(client, txHash as string, 300);
+  const r2 = receipt as Record<string, unknown>;
+  console.log(`[GenLayer] ${functionName}() accepted. Status: ${r2.status_name ?? r2.statusName ?? r2.status}`);
+  return receipt;
+}
 
-  if (GENLAYER_PRIVATE_KEY) {
-    // Derive address from private key using eth_account logic
-    // For now, create a new account via RPC and use that
-  }
+/**
+ * Read the current result from the judge contract (free view call).
+ */
+async function readJudgeResult(contractAddress: string, hackathonId: string): Promise<GenLayerJudgeResult> {
+  const { client } = makeClient();
 
-  // Create ephemeral account via RPC
-  const result = await genlayerRpc("eth_accounts") as string[];
-  if (result && result.length > 0) {
-    _cachedAccount = { address: result[0], privateKey: GENLAYER_PRIVATE_KEY || "ephemeral" };
-    return _cachedAccount;
-  }
+  const raw = await client.readContract({
+    address:      contractAddress as `0x${string}`,
+    functionName: "get_result",
+    args:         [],
+  }) as Record<string, unknown>;
 
-  throw new Error("GenLayer: could not get or create account");
+  return {
+    finalized:        Boolean(raw.finalized),
+    hackathon_id:     String(raw.hackathon_id ?? hackathonId),
+    winner_team_id:   raw.winner_team_id   ? String(raw.winner_team_id)   : undefined,
+    winner_team_name: raw.winner_team_name ? String(raw.winner_team_name) : undefined,
+    final_score:      raw.final_score != null ? Number(raw.final_score)   : undefined,
+    reasoning:        raw.reasoning        ? String(raw.reasoning)        : undefined,
+    contractAddress,
+  };
 }
 
 // ─── Public API ───
 
 /**
- * Deploy a new HackathonJudge contract for a hackathon.
- * Returns the contract address.
+ * Check if GenLayer Bradbury testnet is reachable.
  */
-export async function deployJudgeContract(
-  hackathonId: string,
-  title: string,
-  brief: string,
-): Promise<string> {
-  // Read contract source
-  const contractCode = await getContractCode();
-  const account = await getOrCreateAccount();
-
-  const txHash = await genlayerRpc("gen_sendTransaction", [{
-    type: "deploy",
-    from: account.address,
-    code: Buffer.from(contractCode).toString("base64"),
-    args: [hackathonId, title, brief],
-  }]) as string;
-
-  // Wait for receipt
-  const receipt = await waitForReceipt(txHash);
-  const data = receipt?.data as Record<string, unknown> | undefined;
-  const contractAddress = data?.contract_address as string | undefined;
-
-  if (!contractAddress) {
-    throw new Error(`GenLayer deploy failed. Receipt: ${JSON.stringify(receipt)}`);
+export async function isGenLayerAvailable(): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(GENLAYER_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch {
+    return false;
   }
-
-  console.log(`GenLayer: deployed HackathonJudge at ${contractAddress} for ${hackathonId}`);
-  return contractAddress;
 }
 
 /**
- * Submit the top contenders to an existing judge contract.
- * Called after Gemini pre-scoring filters down to top 3.
- */
-export async function submitContenders(
-  contractAddress: string,
-  contenders: GenLayerContender[],
-): Promise<void> {
-  const account = await getOrCreateAccount();
-
-  const txHash = await genlayerRpc("gen_sendTransaction", [{
-    type: "call",
-    from: account.address,
-    to: contractAddress,
-    method: "submit_contenders",
-    args: [JSON.stringify(contenders)],
-  }]) as string;
-
-  const receipt = await waitForReceipt(txHash);
-  console.log(`GenLayer: submitted ${contenders.length} contenders. Status: ${receipt?.status}`);
-}
-
-/**
- * Trigger finalization — validators run LLM consensus to pick winner.
- * This is the on-chain impartial judging step.
- */
-export async function finalizeJudging(contractAddress: string): Promise<GenLayerJudgeResult> {
-  const account = await getOrCreateAccount();
-
-  const txHash = await genlayerRpc("gen_sendTransaction", [{
-    type: "call",
-    from: account.address,
-    to: contractAddress,
-    method: "finalize",
-    args: [],
-  }]) as string;
-
-  const receipt = await waitForReceipt(txHash);
-  console.log(`GenLayer: finalize tx status: ${receipt?.status}`);
-
-  // Read the result
-  return readJudgeResult(contractAddress);
-}
-
-/**
- * Read the current judge result from the contract (view call, free).
- */
-export async function readJudgeResult(contractAddress: string): Promise<GenLayerJudgeResult> {
-  const account = await getOrCreateAccount();
-
-  const result = await genlayerRpc("gen_call", [{
-    from: account.address,
-    to: contractAddress,
-    method: "get_result",
-    args: [],
-  }]) as GenLayerJudgeResult;
-
-  return result;
-}
-
-/**
- * Full pipeline: deploy → submit contenders → finalize → read result.
- * This is the main entry point called from judge.ts after Gemini scoring.
+ * Full pipeline: (optionally reuse existing contract) → submit contenders → finalize → return result.
+ *
+ * If `priorContractAddress` is given and the contract is not yet finalized,
+ * it reuses that contract instead of deploying a new one.
  */
 export async function runGenLayerJudging(
   hackathonId: string,
   hackathonTitle: string,
   hackathonBrief: string,
   topContenders: GenLayerContender[],
+  priorContractAddress?: string,
 ): Promise<GenLayerJudgeResult> {
-  console.log(`GenLayer: starting on-chain judging for "${hackathonTitle}" with ${topContenders.length} contenders`);
+  console.log(`[GenLayer] Starting on-chain judging for "${hackathonTitle}" with ${topContenders.length} contenders`);
 
-  // 1. Deploy a fresh contract for this hackathon
-  const contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
+  // 1. Determine contract address — reuse if not yet finalized
+  let contractAddress: string;
 
-  // 2. Submit the top contenders
-  await submitContenders(contractAddress, topContenders);
+  if (priorContractAddress) {
+    try {
+      const existing = await readJudgeResult(priorContractAddress, hackathonId);
+      if (existing.finalized) {
+        // Already finalized — deploy a new one for this run
+        console.log(`[GenLayer] Prior contract ${priorContractAddress} already finalized, deploying fresh one`);
+        contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
+      } else {
+        contractAddress = priorContractAddress;
+        console.log(`[GenLayer] Reusing contract ${contractAddress}`);
+      }
+    } catch {
+      // Can't read — deploy new
+      contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
+    }
+  } else {
+    contractAddress = await deployJudgeContract(hackathonId, hackathonTitle, hackathonBrief);
+  }
 
-  // 3. Finalize — triggers LLM consensus among validators
-  const result = await finalizeJudging(contractAddress);
+  // 2. Submit contenders as JSON
+  // ⚠ GenLayer Bradbury gas limit: eth_estimateGas fails → SDK falls back to 200k.
+  // Intrinsic cost = 21k + 16 gas/byte calldata → payload must stay under ~10KB total.
+  // Cap each text field to fit comfortably within the 200k ceiling.
+  const contendersPayload = JSON.stringify(topContenders.map(c => ({
+    team_id:      c.team_id,
+    team_name:    c.team_name,
+    repo_summary: c.repo_summary.slice(0, 1500),
+    gemini_score: Math.round(c.gemini_score),
+  })));
 
-  console.log(`GenLayer: judging complete. Winner: ${result.winner_team_name || "none"} (${result.winner_team_id})`);
+  console.log(`[GenLayer] Submitting ${topContenders.length} contenders...`);
+  await callWrite(contractAddress, "submit_contenders", [contendersPayload]);
+
+  // 3. Finalize — triggers LLM consensus among 5 validators
+  console.log(`[GenLayer] Triggering finalize() — 5 validators will run LLM consensus...`);
+  await callWrite(contractAddress, "finalize", []);
+
+  // 4. Read the result
+  const result = await readJudgeResult(contractAddress, hackathonId);
+  console.log(`[GenLayer] Winner: ${result.winner_team_name ?? "none"} (${result.winner_team_id ?? "none"})`);
 
   return result;
 }
-
-// ─── Helpers ───
-
-async function waitForReceipt(txHash: string, maxRetries = 60): Promise<Record<string, unknown>> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const receipt = await genlayerRpc("gen_getTransactionReceipt", [txHash]) as Record<string, unknown> | null;
-      if (receipt && receipt.status) {
-        return receipt;
-      }
-    } catch {
-      // Receipt not ready yet
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error(`GenLayer: tx ${txHash} did not confirm after ${maxRetries * 2}s`);
-}
-
-async function getContractCode(): Promise<string> {
-  // Try reading from the genlayer-judge directory (monorepo layout)
-  const paths = [
-    "../genlayer-judge/contracts/hackathon_judge.py",
-    "./genlayer-judge/contracts/hackathon_judge.py",
-    "../../genlayer-judge/contracts/hackathon_judge.py",
-  ];
-
-  for (const p of paths) {
-    try {
-      const fs = await import("fs");
-      const path = await import("path");
-      const resolved = path.resolve(process.cwd(), p);
-      if (fs.existsSync(resolved)) {
-        return fs.readFileSync(resolved, "utf-8");
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  // Fallback: embedded minimal contract path
-  throw new Error("GenLayer: hackathon_judge.py not found. Ensure genlayer-judge/ is in the project root.");
-}
-
-/**
- * Check if GenLayer is configured and reachable.
- */
-export async function isGenLayerAvailable(): Promise<boolean> {
-  try {
-    const result = await genlayerRpc("eth_chainId");
-    return !!result;
-  } catch {
-    return false;
-  }
-}
-
-export type { GenLayerContender, GenLayerJudgeResult };

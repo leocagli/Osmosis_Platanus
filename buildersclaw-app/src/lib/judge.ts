@@ -1,6 +1,5 @@
 import { supabaseAdmin } from "./supabase";
 import { generateCode } from "./llm";
-import { slugify } from "./github";
 import { fetchRepoForJudging, formatRepoForPrompt, parseGitHubUrl } from "./repo-fetcher";
 import { Hackathon, Submission } from "./types";
 import {
@@ -148,7 +147,6 @@ function getSubmissionRepoUrl(submission: Submission): string | null {
 export async function judgeSubmission(
   submission: Submission,
   hackathon: Hackathon,
-  teamSlug?: string,
 ): Promise<EvaluationResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -331,9 +329,7 @@ export async function judgeHackathon(hackathonId: string) {
     const evaluationsToUpsert = [];
     for (const submission of submissions) {
       try {
-        const teamData = submission.teams as { name?: string } | undefined;
-        const teamSlug = teamData?.name ? slugify(teamData.name) : undefined;
-        const result = await judgeSubmission(submission, hackathon, teamSlug);
+        const result = await judgeSubmission(submission, hackathon);
 
         evaluationsToUpsert.push({
           submission_id: submission.id,
@@ -388,32 +384,21 @@ export async function judgeHackathon(hackathonId: string) {
     // Only use GenLayer if there are 2+ viable contenders and GenLayer is reachable
     if (topEvals.length >= 2 && (await isGenLayerAvailable())) {
       try {
-        // Build contender data for GenLayer — exhaustive descriptions
+        // Build contender data for GenLayer.
+        // Use Gemini's judge_feedback as repo_summary — it's already a structured
+        // 2-4 paragraph evaluation, far more useful to validators than raw code.
+        // No extra GitHub fetch needed.
         const contenders: GenLayerContender[] = [];
         for (const ev of topEvals) {
           const sub = submissions.find((s) => s.id === ev.submission_id);
           if (!sub) continue;
           const teamData = sub.teams as { name?: string } | undefined;
-          const repoUrl = getSubmissionRepoUrl(sub);
-
-          // Fetch repo content again for the summary (GenLayer needs it)
-          let repoSummary = "";
-          if (repoUrl) {
-            try {
-              const analysis = await fetchRepoForJudging(repoUrl, 30, 50_000);
-              repoSummary = formatRepoForPrompt(analysis);
-            } catch {
-              repoSummary = `Repo: ${repoUrl} (could not fetch)`;
-            }
-          }
 
           contenders.push({
             team_id: sub.team_id,
             team_name: teamData?.name || sub.team_id,
-            repo_url: repoUrl || "",
-            repo_summary: repoSummary,
+            repo_summary: (ev.judge_feedback || "").slice(0, 1500),
             gemini_score: ev.total_score,
-            gemini_feedback: (ev.judge_feedback || "").slice(0, 2000),
           });
         }
 
@@ -425,7 +410,13 @@ export async function judgeHackathon(hackathonId: string) {
             hackathon.title,
             hackathon.brief,
             contenders,
+            updatedMeta.genlayer_contract as string | undefined,
           );
+
+          // Save the contract address for future reference / reuse
+          if (glResult.contractAddress) {
+            updatedMeta.genlayer_contract = glResult.contractAddress;
+          }
 
           if (glResult.finalized && glResult.winner_team_id) {
             winnerTeamId = glResult.winner_team_id;
@@ -486,18 +477,31 @@ export async function judgeHackathon(hackathonId: string) {
 
     // Resolve winner agent
     if (winnerTeamId) {
-      const { data: teamMembers } = await supabaseAdmin
+      // Always save winner_team_id regardless of agent resolution
+      updatedMeta.winner_team_id = winnerTeamId;
+
+      // Try leader first, fall back to any team member
+      const { data: leaderMember } = await supabaseAdmin
         .from("team_members")
         .select("agent_id")
         .eq("team_id", winnerTeamId)
         .eq("role", "leader")
         .single();
 
-      if (teamMembers?.agent_id) {
-        winnerAgentId = teamMembers.agent_id;
-        updatedMeta.winner_agent_id = winnerAgentId;
-        updatedMeta.winner_team_id = winnerTeamId;
+      if (leaderMember?.agent_id) {
+        winnerAgentId = leaderMember.agent_id;
+      } else {
+        // No leader — take any member
+        const { data: anyMember } = await supabaseAdmin
+          .from("team_members")
+          .select("agent_id")
+          .eq("team_id", winnerTeamId)
+          .limit(1)
+          .single();
+        if (anyMember?.agent_id) winnerAgentId = anyMember.agent_id;
       }
+
+      if (winnerAgentId) updatedMeta.winner_agent_id = winnerAgentId;
     }
 
     updatedMeta.finalized_at = new Date().toISOString();

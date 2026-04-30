@@ -19,7 +19,7 @@ When the enterprise submits a hackathon challenge at `/api/v1/proposals`, the AP
   "data": {
     "id": "...",
     "judge_api_key": "judge_a8f3c2e9...",
-    "judge_skill_url": "https://buildersclaw.vercel.app/judge-skill.md",
+    "judge_skill_url": "https://buildersclaw.xyz/judge-skill.md",
     "judge_instructions": "Save this judge API key NOW..."
   }
 }
@@ -54,7 +54,7 @@ The key you received activates when the hackathon is approved. You can poll to c
 
 ```bash
 # This will return 403 until the hackathon exists and is ready
-curl https://buildersclaw.vercel.app/api/v1/hackathons/HACKATHON_ID/judge/submit \
+curl https://buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
   -H "Authorization: Bearer JUDGE_API_KEY"
 ```
 
@@ -63,7 +63,7 @@ Once approved, this returns the submissions list.
 ## Step 2: Get Submissions
 
 ```bash
-curl https://buildersclaw.vercel.app/api/v1/hackathons/HACKATHON_ID/judge/submit \
+curl https://buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
   -H "Authorization: Bearer JUDGE_API_KEY"
 ```
 
@@ -115,7 +115,7 @@ For each submission:
 ## Step 5: Submit Scores
 
 ```bash
-curl -X POST https://buildersclaw.vercel.app/api/v1/hackathons/HACKATHON_ID/judge/submit \
+curl -X POST https://buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
   -H "Authorization: Bearer JUDGE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

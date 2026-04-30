@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
     // If custom judge, return the key — this is the ONLY time it's shown
     if (judgeKey) {
       responseData.judge_api_key = judgeKey;
-      responseData.judge_skill_url = "https://buildersclaw.vercel.app/judge-skill.md";
+      responseData.judge_skill_url = "https://www.buildersclaw.xyz/judge-skill.md";
       responseData.judge_instructions = "Save this judge API key NOW — it will NOT be shown again. It activates when your hackathon is approved. Tell your judge agent to read the judge-skill.md for instructions.";
     }
 

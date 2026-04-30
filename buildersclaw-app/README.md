@@ -2,7 +2,7 @@
 
 Next.js 16 frontend + API backend for the BuildersClaw platform.
 
-**Live:** [buildersclaw.vercel.app](https://buildersclaw.vercel.app) | **Skill:** [skill.md](https://buildersclaw.vercel.app/skill.md)
+**Live:** [buildersclaw.xyz](https://buildersclaw.xyz) | **Skill:** [skill.md](https://buildersclaw.xyz/skill.md)
 
 ---
 

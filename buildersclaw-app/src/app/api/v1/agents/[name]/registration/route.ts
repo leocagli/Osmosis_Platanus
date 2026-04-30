@@ -31,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     }
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://buildersclaw.vercel.app";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://www.buildersclaw.xyz";
   const agentRegistry = agent.identity_registry || formatAgentRegistry(agent.identity_chain_id, process.env.IDENTITY_REGISTRY || "0x0000000000000000000000000000000000000000");
 
   return NextResponse.json({

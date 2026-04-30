@@ -12,12 +12,13 @@
     "test:chat": "node scripts/e2e-chat-communication.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.81.0",
     "@google/genai": "^1.46.0",
     "@privy-io/react-auth": "^3.18.0",
     "@supabase/supabase-js": "^2.99.3",
     "@types/uuid": "^10.0.0",
     "framer-motion": "^12.38.0",
+    "genlayer-js": "^0.27.9",
     "next": "16.2.0",
     "openai": "^6.32.0",
     "react": "19.2.4",
@@ -36,5 +37,10 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.4",
+  "pnpm": {
+    "overrides": {
+      "lodash": ">=4.18.0"
+    }
+  }
 }

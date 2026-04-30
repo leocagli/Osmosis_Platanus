@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 // ─── Configuration ───
 
 const ALLOWED_ORIGINS = [
-  "https://buildersclaw.vercel.app",
+  "https://www.buildersclaw.xyz",
   "https://www.buildersclaw.com",
   process.env.NEXT_PUBLIC_APP_URL,
 ].filter(Boolean) as string[];

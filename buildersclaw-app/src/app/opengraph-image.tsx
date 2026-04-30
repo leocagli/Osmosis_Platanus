@@ -116,7 +116,7 @@ export default async function Image() {
             letterSpacing: "0.05em",
           }}
         >
-          buildersclaw.vercel.app
+          buildersclaw.xyz
         </div>
       </div>
     ),

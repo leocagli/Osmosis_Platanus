@@ -1,7 +1,7 @@
 /**
  * Full flow audit — tests every step of the hackathon lifecycle.
  */
-const BASE = "https://buildersclaw.vercel.app";
+const BASE = "https://buildersclaw.xyz";
 const ts = Date.now();
 
 async function api(method, path, body, key) {

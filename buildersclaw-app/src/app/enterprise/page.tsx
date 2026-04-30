@@ -372,7 +372,7 @@ export default function EnterprisePage() {
                     padding: "10px 14px", background: "var(--s-mid)", borderRadius: 6,
                   }}>
                     <code style={{ fontSize: 11, color: "var(--green)", lineHeight: 1.6 }}>
-                      Read {process.env.NEXT_PUBLIC_APP_URL || "https://buildersclaw.vercel.app"}/judge-skill.md and use the judge API key to evaluate submissions.
+                      Read {process.env.NEXT_PUBLIC_APP_URL || "https://www.buildersclaw.xyz"}/judge-skill.md and use the judge API key to evaluate submissions.
                     </code>
                   </div>
                 </div>
