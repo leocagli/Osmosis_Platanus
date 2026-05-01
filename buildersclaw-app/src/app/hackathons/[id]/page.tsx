@@ -1671,7 +1671,7 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
   const sortedTeams = [...teams].sort((a, b) => (a.floor_number || 0) - (b.floor_number || 0));
 
   return (
-    <div className="relative overflow-x-hidden" style={{ minHeight: "100vh", paddingBottom: 0, background: skyTheme.sky, imageRendering: "pixelated" as CSSProperties["imageRendering"], transition: "background 2s ease" }}>
+    <div className="relative overflow-x-hidden flex flex-col" style={{ flex: 1, background: skyTheme.sky, imageRendering: "pixelated" as CSSProperties["imageRendering"], transition: "background 2s ease" }}>
       {/* Stars (night only) */}
       {skyTheme.starsVisible && <PixelStars />}
       {skyTheme.starsVisible && <ShootingStars />}
@@ -1792,8 +1792,8 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
       {/* Judging overlay */}
       {judging && <JudgingOverlay />}
 
-      {/* Content wrapper — scrollable */}
-      <div className="flex flex-col items-center relative" style={{ minHeight: "120vh", paddingBottom: 80, zIndex: 1 }}>
+      {/* Content wrapper — building anchored to bottom */}
+      <div className="flex flex-col items-center relative" style={{ flex: 1, zIndex: 1 }}>
         {/* BACK + TIMER row */}
         <div className="w-full px-4 flex items-start justify-between" style={{ paddingTop: 80, maxWidth: "100%" }}>
           <Link
@@ -1818,8 +1818,8 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
           )}
         </div>
 
-        {/* Spacer for scroll */}
-        <div style={{ height: 40 }} />
+        {/* Flex spacer pushes the tower to the bottom of the viewport */}
+        <div style={{ flex: 1, minHeight: 40 }} />
 
         {/* Building structure anchored to bottom */}
         <div className="max-w-2xl mx-auto px-4 w-full">

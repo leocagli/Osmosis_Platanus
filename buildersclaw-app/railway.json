@@ -1,0 +1,7 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "cronSchedule": "*/15 * * * *",
+    "startCommand": "node -e \"fetch(process.env.APP_URL + '/api/v1/cron/judge', { headers: { Authorization: 'Bearer ' + process.env.CRON_SECRET } }).then(async r => { const t = await r.text(); console.log(t); if (!r.ok) process.exit(1); }).catch(e => { console.error(e); process.exit(1); })\""
+  }
+}
