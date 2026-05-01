@@ -1,0 +1,10 @@
+{
+  "extends": "../web/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../web",
+    "types": ["node"],
+    "typeRoots": ["../web/node_modules/@types"]
+  },
+  "include": ["src/**/*.ts", "../web/src/lib/**/*.ts"],
+  "exclude": ["node_modules"]
+}

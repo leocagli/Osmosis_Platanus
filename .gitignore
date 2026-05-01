@@ -3,6 +3,7 @@
 # Claude Code settings (may contain secrets in allow rules)
 .claude/
 .ruff_cache/
+.agents/
 
 # Background shell state
 .bg-shell/
@@ -31,13 +32,13 @@ node_modules/
 .pnp
 .pnp.*
 
-# Next.js (buildersclaw-app)
-buildersclaw-app/.next/
-buildersclaw-app/out/
-buildersclaw-app/coverage/
-buildersclaw-app/*.tsbuildinfo
-buildersclaw-app/next-env.d.ts
-buildersclaw-app/.vercel
+# Next.js (apps/web)
+apps/web/.next/
+apps/web/out/
+apps/web/coverage/
+apps/web/*.tsbuildinfo
+apps/web/next-env.d.ts
+apps/web/.vercel
 
 # Logs
 npm-debug.log*
@@ -74,3 +75,5 @@ genlayer-project-boilerplate/
 LobsterAI/
 moltbook-frontend/
 openclaw/
+openspec/
+

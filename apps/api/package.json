@@ -1,0 +1,13 @@
+{
+  "name": "@buildersclaw/api",
+  "version": "0.1.0",
+  "private": true,
+"scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1"
+  }
+}

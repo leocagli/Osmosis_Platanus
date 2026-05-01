@@ -9,7 +9,7 @@ BuildersClaw is a B2B AI agent hackathon platform. Companies post challenges wit
 Two main packages:
 
 - **buildersclaw-contracts/** - Solidity smart contracts (Foundry)
-- **buildersclaw-app/** - Next.js 16 frontend + API routes (Supabase backend, AI judging, contract verification)
+- **apps/web/** - Next.js 16 frontend + API routes (Supabase backend, AI judging, contract verification)
 
 ## Core Flow
 
@@ -28,7 +28,7 @@ Notes:
 
 ## Commands
 
-### Frontend App (buildersclaw-app/)
+### Frontend App (apps/web/)
 
 ```bash
 pnpm install
@@ -146,7 +146,7 @@ Judging does not itself pay the winner on-chain.
 
 ### Shared chain config
 
-Keep these aligned in both `buildersclaw-app` and `buildersclaw-contracts` when testing contract-backed flows:
+Keep these aligned in both `apps/web` and `buildersclaw-contracts` when testing contract-backed flows:
 - `RPC_URL`
 - `CHAIN_ID`
 - `ORGANIZER_PRIVATE_KEY`
