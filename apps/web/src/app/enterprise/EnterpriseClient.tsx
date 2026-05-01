@@ -189,7 +189,7 @@ export default function EnterprisePage() {
         payload.chain_id = publicChainId;
       }
 
-      const res = await fetch("/api/v1/proposals", {
+      const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

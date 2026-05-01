@@ -1579,8 +1579,8 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
 
   const fetchData = useCallback(() => {
     return Promise.all([
-      fetch(`/api/v1/hackathons/${id}`).then((r) => r.json()),
-      fetch(`/api/v1/hackathons/${id}/judge`).then((r) => r.json()),
+      fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons/${id}`).then((r) => r.json()),
+      fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons/${id}/judge`).then((r) => r.json()),
     ]).then(([hRes, tRes]) => {
       if (hRes.success) setHackathon(hRes.data);
       if (tRes.success) setTeams(tRes.data);
@@ -1596,7 +1596,7 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
   const handleDeadlineExpired = useCallback(async () => {
     setJudging(true);
     try {
-      const res = await fetch(`/api/v1/hackathons/${id}/check-deadline`, { method: "POST" });
+      const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons/${id}/check-deadline`, { method: "POST" });
       const data = await res.json();
       if (data.success && data.data?.status === "finalized") {
         // Refresh everything to get final scores
@@ -1605,7 +1605,7 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
       } else if (data.success && data.data?.status === "judging") {
         // Still judging, poll until done
         const poll = setInterval(async () => {
-          const r = await fetch(`/api/v1/hackathons/${id}`).then(r2 => r2.json());
+          const r = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons/${id}`).then(r2 => r2.json());
           if (r.success && (r.data.status === "finalized" || r.data.internal_status === "completed")) {
             clearInterval(poll);
             await fetchData();
@@ -1627,7 +1627,7 @@ export default function HackathonDetailPage({ params }: { params: Promise<{ id: 
   useEffect(() => {
     if (!hackathon || hackathon.status === "finalized" || judging) return;
     const interval = setInterval(() => {
-      fetch(`/api/v1/hackathons/${id}/judge`).then(r => r.json()).then(tRes => {
+      fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons/${id}/judge`).then(r => r.json()).then(tRes => {
         if (tRes.success) setTeams(tRes.data);
       }).catch(() => {});
     }, 10_000);

@@ -4,6 +4,7 @@ import { processTelegramUpdate } from "../../web/src/lib/telegram-webhook";
 import { dispatchQueuedWebhookDelivery } from "../../web/src/lib/agent-webhooks";
 import { enqueueJob, pruneTerminalJobs, type JobRecord } from "../../web/src/lib/queue";
 import { runEscrowFinalization } from "../../web/src/lib/finalization";
+import * as pipeline from "../../web/src/lib/judging-pipeline";
 
 function getString(payload: Record<string, unknown>, key: string) {
   const value = payload[key];
@@ -18,6 +19,79 @@ export async function handleJob(job: JobRecord) {
       await processExpiredHackathons({ enqueueOnly: true });
       await processQueuedGenLayerHackathons({ enqueueOnly: true });
       return;
+
+    case "judging.freeze_submissions": {
+      const hackathonId = getString(payload, "hackathon_id");
+      const judgingRunId = getString(payload, "judging_run_id");
+      if (!hackathonId || !judgingRunId) throw new Error("judging.freeze_submissions missing payload");
+      await pipeline.freezeSubmissions(hackathonId, judgingRunId);
+      return;
+    }
+
+    case "judging.repo_score": {
+      const hackathonId = getString(payload, "hackathon_id");
+      const submissionId = getString(payload, "submission_id");
+      if (!hackathonId || !submissionId) throw new Error("judging.repo_score missing payload");
+      await pipeline.repoScore(hackathonId, submissionId);
+      return;
+    }
+
+    case "judging.runtime_score": {
+      const hackathonId = getString(payload, "hackathon_id");
+      const submissionId = getString(payload, "submission_id");
+      if (!hackathonId || !submissionId) throw new Error("judging.runtime_score missing payload");
+      await pipeline.runtimeScore(hackathonId, submissionId);
+      return;
+    }
+
+    case "judging.assign_peer_reviews": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("judging.assign_peer_reviews missing hackathon_id");
+      await pipeline.assignPeerReviews(hackathonId);
+      return;
+    }
+
+    case "judging.close_peer_reviews": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("judging.close_peer_reviews missing hackathon_id");
+      await pipeline.closePeerReviews(hackathonId);
+      return;
+    }
+
+    case "judging.aggregate_finalists": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("judging.aggregate_finalists missing hackathon_id");
+      await pipeline.aggregateFinalists(hackathonId);
+      return;
+    }
+
+    case "genlayer.start": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("genlayer.start missing hackathon_id");
+      await pipeline.startGenLayer(hackathonId);
+      return;
+    }
+
+    case "genlayer.continue": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("genlayer.continue missing hackathon_id");
+      await pipeline.continueGenLayer(hackathonId);
+      return;
+    }
+
+    case "genlayer.persist": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("genlayer.persist missing hackathon_id");
+      await pipeline.persistGenLayerResult(hackathonId);
+      return;
+    }
+
+    case "genlayer.notify": {
+      const hackathonId = getString(payload, "hackathon_id");
+      if (!hackathonId) throw new Error("genlayer.notify missing hackathon_id");
+      await pipeline.notifyGenLayerResult(hackathonId);
+      return;
+    }
 
     case "continue_genlayer_judging": {
       const hackathonId = getString(payload, "hackathon_id");

@@ -43,7 +43,7 @@ export default function AdminProposalsPage() {
   const fetchProposals = async (key: string, status?: string) => {
     setLoading(true);
     const qs = status ? `?status=${status}` : "";
-    const res = await fetch(`/api/v1/proposals${qs}`, {
+    const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals${qs}`, {
       headers: { Authorization: `Bearer ${key}` },
     });
     const data = await res.json();
@@ -58,7 +58,7 @@ export default function AdminProposalsPage() {
 
   const handleAction = async (id: string, status: "approved" | "rejected") => {
     setActing(id);
-    const res = await fetch("/api/v1/proposals", {
+    const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminKey}` },
       body: JSON.stringify({ id, status }),

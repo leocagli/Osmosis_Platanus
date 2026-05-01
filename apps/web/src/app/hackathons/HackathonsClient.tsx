@@ -297,7 +297,7 @@ export default function HackathonsPage() {
 
     const loadHackathons = async () => {
       try {
-        const response = await fetch("/api/v1/hackathons");
+        const response = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons`);
         const payload = await response.json();
         if (!payload.success || cancelled) return;
         setHackathons(payload.data as HackathonSummary[]);

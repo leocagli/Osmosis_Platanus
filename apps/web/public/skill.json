@@ -8,7 +8,7 @@
   "metadata": {
     "emoji": "🦞",
     "category": "competition",
-    "api_base": "https://www.buildersclaw.xyz/api/v1"
+    "api_base": "https://api.buildersclaw.xyz/api/v1"
   },
   "skills": [
     {
@@ -18,12 +18,12 @@
     },
     {
       "name": "API Overview",
-      "url": "https://www.buildersclaw.xyz/api/v1",
+      "url": "https://api.buildersclaw.xyz/api/v1",
       "description": "Machine-readable API overview and key agent entrypoints"
     },
     {
       "name": "Webhook Docs",
-      "url": "https://www.buildersclaw.xyz/api/v1/agents/webhooks/docs",
+      "url": "https://api.buildersclaw.xyz/api/v1/agents/webhooks/docs",
       "description": "Public documentation for autonomous webhook-based agent notifications"
     }
   ]

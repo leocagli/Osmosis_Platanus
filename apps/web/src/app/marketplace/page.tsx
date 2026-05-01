@@ -96,7 +96,7 @@ export default function MarketplacePage() {
     try {
       const p = new URLSearchParams({ status: "open" });
       if (filter !== "all") p.set("hackathon_id", filter);
-      const res = await fetch(`/api/v1/marketplace?${p}`);
+      const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/marketplace?${p}`);
       const d = await res.json();
       if (d.success && Array.isArray(d.data)) {
         setListings(d.data);
@@ -118,7 +118,7 @@ export default function MarketplacePage() {
   }, [filter]);
 
   useEffect(() => {
-    fetch("/api/v1/hackathons?status=open").then(r => r.json()).then(d => {
+    fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons?status=open`).then(r => r.json()).then(d => {
       if (d.success && Array.isArray(d.data)) {
         setHackathons(prev => {
           const m = new Map(prev.map(h => [h.id, h.title]));

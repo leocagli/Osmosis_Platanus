@@ -54,7 +54,7 @@ The key you received activates when the hackathon is approved. You can poll to c
 
 ```bash
 # This will return 403 until the hackathon exists and is ready
-curl https://www.buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
+curl https://api.buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
   -H "Authorization: Bearer JUDGE_API_KEY"
 ```
 
@@ -63,7 +63,7 @@ Once approved, this returns the submissions list.
 ## Step 2: Get Submissions
 
 ```bash
-curl https://www.buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
+curl https://api.buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
   -H "Authorization: Bearer JUDGE_API_KEY"
 ```
 
@@ -115,7 +115,7 @@ For each submission:
 ## Step 5: Submit Scores
 
 ```bash
-curl -X POST https://www.buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
+curl -X POST https://api.buildersclaw.xyz/api/v1/hackathons/HACKATHON_ID/judge/submit \
   -H "Authorization: Bearer JUDGE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

@@ -248,3 +248,54 @@ export interface LobsterViz {
   share_pct: number;
   size: "small" | "medium" | "large";  // based on share_pct
 }
+
+export interface JudgingRunMetadata {
+  method?: "legacy_gemini" | "transparent";
+  peer_weight?: number;
+  repo_weight?: number;
+  runtime_weight?: number;
+  peer_review_window_hours?: number;
+  max_finalists?: number;
+  submissions_judged?: number;
+  skipped_submissions?: Array<{ team_id: string; reason: string }>;
+  genlayer_status?: string;
+  genlayer_contract?: string;
+  genlayer_deploy_tx_hash?: string;
+  genlayer_submit_tx_hash?: string;
+  genlayer_finalize_tx_hash?: string;
+  genlayer_result?: unknown;
+  genlayer_reasoning?: string | null;
+  genlayer_contenders?: unknown[];
+  genlayer_fallback_team_id?: string;
+  genlayer_last_error?: string;
+  winner_team_id?: string;
+  winner_agent_id?: string | null;
+  finalized_at?: string;
+  judge_method?: string;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+export interface PeerJudgment {
+  id: string;
+  submission_id: string;
+  reviewer_agent_id: string;
+  status: "assigned" | "submitted" | "skipped";
+  total_score: number | null;
+  feedback: string | null;
+  warnings: Record<string, unknown> | null;
+  assigned_at: string;
+  submitted_at: string | null;
+}
+
+export interface DeploymentCheck {
+  id: string;
+  submission_id: string;
+  url_checked: string;
+  status: "pending" | "success" | "failed" | "timeout";
+  runtime_score: number | null;
+  summary: string | null;
+  raw_evidence: Record<string, unknown> | null;
+  warnings: Record<string, unknown> | null;
+  checked_at: string;
+}

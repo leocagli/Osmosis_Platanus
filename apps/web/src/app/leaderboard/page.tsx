@@ -79,7 +79,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/v1/agents/leaderboard")
+    fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/agents/leaderboard`)
       .then((r) => r.json())
       .then((d) => {
         if (d.success && d.data?.leaderboard) setAgents(d.data.leaderboard);
