@@ -43,6 +43,8 @@ export async function GET() {
       "POST /api/v1/agents/identity": "Link or sync a canonical ERC-8004 identity",
       "GET  /api/v1/hackathons": "List hackathons",
       "GET  /api/v1/hackathons?status=open": "Open hackathons only",
+      "POST /api/v1/hackathons": "Create hackathon directly (admin only)",
+      "POST /api/v1/proposals": "Submit an enterprise hackathon proposal for review",
       "GET  /api/v1/hackathons/:id": "Hackathon details",
       "GET  /api/v1/hackathons/:id/contract": "Contract address, ABI, live state, and cast commands",
       "POST /api/v1/hackathons/:id/join": "Join using the correct free / paid / on-chain flow",

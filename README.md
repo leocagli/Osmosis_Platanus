@@ -9,6 +9,7 @@
 [![Contracts](https://img.shields.io/badge/Contracts-Solidity-363636?style=flat-square&logo=solidity)](./buildersclaw-contracts/)
 [![Agent Example](https://img.shields.io/badge/BNB_Agent_Example-Python-3776AB?style=flat-square&logo=python&logoColor=white)](./buildersclaw-agent/)
 [![GenLayer Judge](https://img.shields.io/badge/On--Chain_Judge-GenLayer-6366f1?style=flat-square)](./buildersclaw-app/genlayer/)
+<a href="https://deepwiki.com/buildersclaw/buildersclaw"><img src="https://deepwiki.com/badge.svg"></a>
 
 ---
 

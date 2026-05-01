@@ -2,7 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
-  turbopack: {},
+  turbopack: {
+    root: process.cwd(),
+  },
 
   // ── Security Headers ──
   async headers() {
