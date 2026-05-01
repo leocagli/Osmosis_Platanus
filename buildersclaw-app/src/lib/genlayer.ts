@@ -21,6 +21,8 @@ import { TransactionStatus } from "genlayer-js/types";
 const GENLAYER_RPC = process.env.GENLAYER_RPC_URL || "https://rpc-bradbury.genlayer.com";
 const GENLAYER_PK  = process.env.GENLAYER_PRIVATE_KEY || "";
 const GENLAYER_CHAIN = (process.env.GENLAYER_CHAIN || "bradbury").trim().toLowerCase();
+const GENLAYER_RPC_RETRY_ATTEMPTS = 4;
+const GENLAYER_RPC_RETRY_INTERVAL_MS = 1500;
 
 // ─── Types ───
 
@@ -85,9 +87,6 @@ async function makeClient() {
     endpoint: GENLAYER_RPC,
   });
 
-  // The SDK docs require consensus initialization before contract interactions.
-  await client.initializeConsensusSmartContract();
-
   return { client, account };
 }
 
@@ -107,6 +106,41 @@ const STATUS_RANK: Record<string, number> = {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatGenLayerError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isRetryableGenLayerRpcError(error: unknown) {
+  const message = formatGenLayerError(error).toLowerCase();
+  return message.includes("fetch failed")
+    || message.includes("an unknown rpc error occurred")
+    || message.includes("json is not a valid request object")
+    || message.includes("requested resource not found")
+    || message.includes("contract not found at address")
+    || message.includes("etimedout")
+    || message.includes("enetunreach");
+}
+
+async function withGenLayerRetry<T>(label: string, work: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= GENLAYER_RPC_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableGenLayerRpcError(error) || attempt === GENLAYER_RPC_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      console.warn(`[GenLayer] ${label} retry ${attempt}/${GENLAYER_RPC_RETRY_ATTEMPTS}: ${formatGenLayerError(error)}`);
+      await sleep(GENLAYER_RPC_RETRY_INTERVAL_MS * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 function statusNameOf(receipt: GenLayerReceipt): string | undefined {
@@ -153,7 +187,10 @@ function contractAddressFromReceipt(receipt: GenLayerReceipt): string | undefine
 
 async function getTransactionReceipt(txHash: string): Promise<GenLayerReceipt> {
   const { client } = await makeClient();
-  return await client.getTransaction({ hash: txHash as TransactionHash }) as GenLayerReceipt;
+  return await withGenLayerRetry(
+    `getTransaction(${txHash})`,
+    async () => await client.getTransaction({ hash: txHash as TransactionHash }) as GenLayerReceipt,
+  );
 }
 
 async function waitForReceipt(
@@ -219,6 +256,7 @@ async function deployJudgeContract(
   const deployTx = await client.deployContract({
     code: contractCode,
     args: [hackathonId, title, brief],
+    leaderOnly: false,
   });
 
   const receipt = await waitForReceipt(client, deployTx as string, TransactionStatus.ACCEPTED, 240, 5000);
@@ -258,6 +296,7 @@ async function callWrite(
     functionName,
     args,
     value:        BigInt(0),
+    leaderOnly:   false,
   });
 
   const receipt = await waitForReceipt(client, txHash as string, status, 240, 5000);
@@ -273,11 +312,14 @@ async function callWrite(
 async function readJudgeResult(contractAddress: string, hackathonId: string): Promise<GenLayerJudgeResult> {
   const { client } = await makeClient();
 
-  const raw = await client.readContract({
-    address:      contractAddress as `0x${string}`,
-    functionName: "get_result",
-    args:         [],
-  }) as Record<string, unknown>;
+  const raw = await withGenLayerRetry(
+    `readContract(${contractAddress}).get_result`,
+    async () => await client.readContract({
+      address:      contractAddress as `0x${string}`,
+      functionName: "get_result",
+      args:         [],
+    }) as Record<string, unknown>,
+  );
 
   return {
     finalized:        Boolean(raw.finalized),
@@ -333,6 +375,7 @@ export async function startGenLayerDeployment(
   const txHash = await client.deployContract({
     code: contractCode,
     args: [hackathonId, hackathonTitle, hackathonBrief],
+    leaderOnly: false,
   });
 
   return { txHash: String(txHash) };
@@ -373,6 +416,7 @@ export async function startGenLayerSubmit(
     functionName: "submit_contenders",
     args: [buildContendersPayload(topContenders)],
     value: BigInt(0),
+    leaderOnly: false,
   });
 
   return { txHash: String(txHash) };
@@ -411,6 +455,7 @@ export async function startGenLayerFinalize(contractAddress: string): Promise<{ 
     functionName: "finalize",
     args: [],
     value: BigInt(0),
+    leaderOnly: false,
   });
 
   return { txHash: String(txHash) };
@@ -421,6 +466,57 @@ export async function getGenLayerJudgeResult(
   hackathonId: string,
 ): Promise<GenLayerJudgeResult> {
   return await readJudgeResult(contractAddress, hackathonId);
+}
+
+async function waitForJudgeResult(
+  contractAddress: string,
+  hackathonId: string,
+  finalizeTxHash: string,
+  retries = 80,
+  intervalMs = 15000,
+): Promise<GenLayerJudgeResult> {
+  let lastStatus: string | undefined;
+  let lastReadError: string | null = null;
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      const result = await readJudgeResult(contractAddress, hackathonId);
+      if (result.finalized) {
+        return result;
+      }
+      console.log(`[GenLayer] finalize() result poll ${attempt}: finalized=false`);
+    } catch (error) {
+      lastReadError = formatGenLayerError(error);
+      console.warn(`[GenLayer] finalize() result poll ${attempt} failed: ${lastReadError}`);
+    }
+
+    try {
+      const progress = await pollGenLayerWrite(finalizeTxHash, TransactionStatus.FINALIZED);
+      lastStatus = progress.status;
+      console.log(`[GenLayer] finalize() tx poll ${attempt}: ${progress.status ?? "unknown"}`);
+      if (progress.done) {
+        const result = await readJudgeResult(contractAddress, hackathonId);
+        if (result.finalized) {
+          return result;
+        }
+      }
+    } catch (error) {
+      const message = formatGenLayerError(error);
+      if (message.includes("entered terminal status") || message.includes("finished with execution error")) {
+        throw error;
+      }
+      console.warn(`[GenLayer] finalize() tx poll ${attempt} failed: ${message}`);
+    }
+
+    await sleep(intervalMs);
+  }
+
+  const details = lastReadError
+    ? ` Last result read error: ${lastReadError}`
+    : lastStatus
+      ? ` Last finalize tx status: ${lastStatus}`
+      : "";
+  throw new Error(`[GenLayer] Timed out waiting for finalized result for contract ${contractAddress}.${details}`);
 }
 
 /**
@@ -451,22 +547,19 @@ export async function runGenLayerJudging(
   // ⚠ GenLayer Bradbury gas limit: eth_estimateGas fails → SDK falls back to 200k.
   // Intrinsic cost = 21k + 16 gas/byte calldata → payload must stay under ~10KB total.
   // Cap each text field to fit comfortably within the 200k ceiling.
-  const contendersPayload = JSON.stringify(topContenders.map(c => ({
-    team_id:      c.team_id,
-    team_name:    c.team_name,
-    repo_summary: c.repo_summary.slice(0, 1500),
-    gemini_score: Math.round(c.gemini_score),
-  })));
+  const contendersPayload = buildContendersPayload(topContenders);
 
   console.log(`[GenLayer] Submitting ${topContenders.length} contenders...`);
   const submit = await callWrite(contractAddress, "submit_contenders", [contendersPayload], TransactionStatus.ACCEPTED);
 
-  // 3. Finalize — triggers LLM consensus among 5 validators
+  // 3. Finalize — triggers LLM consensus among 5 validators.
+  // Bradbury may keep receipt polling noisy for a while even after the contract
+  // has already written the final result, so poll both tx status and contract state.
   console.log(`[GenLayer] Triggering finalize() — 5 validators will run LLM consensus...`);
-  const finalize = await callWrite(contractAddress, "finalize", [], TransactionStatus.FINALIZED);
+  const finalize = await callWrite(contractAddress, "finalize", [], TransactionStatus.ACCEPTED);
 
   // 4. Read the result
-  const result = await readJudgeResult(contractAddress, hackathonId);
+  const result = await waitForJudgeResult(contractAddress, hackathonId, finalize.txHash);
   console.log(`[GenLayer] Winner: ${result.winner_team_name ?? "none"} (${result.winner_team_id ?? "none"})`);
 
   return {

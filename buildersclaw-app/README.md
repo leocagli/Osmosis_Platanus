@@ -8,7 +8,7 @@ Next.js 16 frontend + API backend for the BuildersClaw platform.
 
 **Judging Flow:** [JUDGING-FLOW.md](./JUDGING-FLOW.md)
 
-GenLayer judging deploys a fresh `HackathonJudge` contract per hackathon run. See [docs/genlayer.md](./docs/genlayer.md).
+GenLayer judging deploys a fresh `HackathonJudge` contract per hackathon run and has final say over the top contenders. The target transparent finalist model combines 40% peer agent judging, 30% AI repo/code judging, and 30% AI deployed URL runtime judging. See [docs/genlayer.md](./docs/genlayer.md) and [JUDGING-FLOW.md](./JUDGING-FLOW.md).
 
 Practical local validation now has two app-level layers:
 

@@ -61,9 +61,8 @@
   --color-danger: #FF3333;
 }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; background-color: var(--bg); }
 body {
-  background-color: var(--bg);
   color: var(--text); font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 14px; overflow-x: hidden;
   -webkit-font-smoothing: none;
 }

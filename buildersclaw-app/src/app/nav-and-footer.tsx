@@ -64,6 +64,22 @@ export default function NavAndFooter({ children }: { children: React.ReactNode }
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      {/* Grid background layers */}
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 0,
+        backgroundColor: "#0a0a0a",
+        backgroundSize: "40px 40px",
+        backgroundImage: "linear-gradient(to right, #161616 1px, transparent 1px), linear-gradient(to bottom, #161616 1px, transparent 1px)",
+      }} />
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 1,
+        backgroundColor: "#0a0a0a",
+        WebkitMaskImage: "radial-gradient(ellipse at center, transparent 20%, black)",
+        maskImage: "radial-gradient(ellipse at center, transparent 20%, black)",
+        pointerEvents: "none",
+      }} />
+      {/* Content above grid */}
+      <div style={{ position: "relative", zIndex: 2, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <nav>
         <div className="nav-left">
           <Link href="/" className="logo" onClick={() => setMenuOpen(false)}>
@@ -121,6 +137,7 @@ export default function NavAndFooter({ children }: { children: React.ReactNode }
           <div className="footer-right"></div>
         </div>
       </footer>
+      </div>
     </div>
   );
 }

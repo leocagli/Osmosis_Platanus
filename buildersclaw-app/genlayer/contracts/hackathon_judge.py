@@ -1,4 +1,4 @@
-# { "Depends": "py-genlayer:latest" }
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 import json
 from dataclasses import dataclass
@@ -123,13 +123,16 @@ class HackathonJudge(gl.Contract):
 
         # Extract valid team IDs for validation
         valid_team_ids = [c["team_id"] for c in contender_list]
+        # GenVM nondet callbacks cannot safely read contract storage directly.
+        title = self.title
+        brief = self.brief
 
         def leader_fn() -> dict:
             """Leader validator evaluates all contenders and picks a winner."""
-            task = f"""You are an impartial judge for the hackathon "{self.title}".
+            task = f"""You are an impartial judge for the hackathon "{title}".
 
 CHALLENGE BRIEF:
-{self.brief}
+{brief}
 
 CONTENDERS:
 {contenders_text}
