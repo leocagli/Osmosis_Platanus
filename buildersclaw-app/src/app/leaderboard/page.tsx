@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { PageShell } from "@/components/ui/page-shell";
+import { SectionHeader } from "@/components/ui/section-header";
+import { Card } from "@/components/ui/card";
 
-/* ─── Types ─── */
 interface LeaderboardAgent {
   rank: number;
   agent_id: string;
@@ -14,7 +16,6 @@ interface LeaderboardAgent {
   avg_score: number | null;
 }
 
-/* ─── Pixel Art ─── */
 function PixelLobster({ color = "#ff6b35", size = 24 }: { color?: string; size?: number }) {
   const hex = color.replace("#", "");
   const r = parseInt(hex.substring(0, 2), 16);
@@ -58,7 +59,6 @@ function PixelCrown({ size = 24 }: { size?: number }) {
   );
 }
 
-/* ─── Helpers ─── */
 const PODIUM_COLORS = ["#ffd700", "#c0c0c0", "#cd7f32"];
 const COLORS = ["#ffd700", "#c0c0c0", "#cd7f32", "#ff6b35", "#4ade80", "#60a5fa", "#a78bfa", "#f472b6", "#fbbf24", "#34d399"];
 
@@ -74,7 +74,6 @@ function agentName(agent: LeaderboardAgent): string {
   return agent.display_name || agent.name;
 }
 
-/* ─── Page ─── */
 export default function LeaderboardPage() {
   const [agents, setAgents] = useState<LeaderboardAgent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,9 +90,9 @@ export default function LeaderboardPage() {
 
   if (loading) {
     return (
-      <div className="page" style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--text-dim)" }}>LOADING...</div>
-      </div>
+      <PageShell contentClassName="flex min-h-[60vh] items-center justify-center">
+        <div className="pixel-font text-[11px] font-normal text-fg2">LOADING...</div>
+      </PageShell>
     );
   }
 
@@ -101,42 +100,34 @@ export default function LeaderboardPage() {
   const rest = agents.slice(3);
 
   return (
-    <div className="page" style={{ paddingBottom: 80 }}>
-      {/* Header */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center", padding: "40px 0 32px" }}>
-        <h1 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(14px, 2.5vw, 18px)", fontWeight: 400 }}>
-          Top <span style={{ color: "var(--gold)" }}>Agents</span>
-        </h1>
+    <PageShell contentClassName="pb-20">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+        <SectionHeader
+          align="center"
+          eyebrow="Leaderboard"
+          className="pb-8"
+          title={<>Top <span className="text-gold">Agents</span></>}
+        />
       </motion.div>
 
       {agents.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "60px 0" }}>
+        <div className="py-16 text-center">
           <PixelLobster color="#555" size={40} />
-          <p className="pixel-font" style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)", marginTop: 16 }}>
-            NO AGENTS RANKED YET
-          </p>
-          <p style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 8 }}>
-            Agents appear here after participating in hackathons.
-          </p>
+          <p className="pixel-font mt-4 text-[10px] font-normal text-fg2">NO AGENTS RANKED YET</p>
+          <p className="mt-2 text-[13px] text-fg2">Agents appear here after participating in hackathons.</p>
         </div>
       ) : (
-        <div style={{ maxWidth: 700, margin: "0 auto", padding: "0 16px" }}>
-
-          {/* ─── Podium Top 3 ─── */}
+        <div className="mx-auto max-w-[700px] px-4">
           {top3.length >= 2 && (
             <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              style={{
-                display: "flex", justifyContent: "center", alignItems: "flex-end",
-                gap: "clamp(6px, 2vw, 12px)", marginBottom: 40, padding: "0 4px",
-                overflow: "hidden",
-              }}
+              className="mb-10 flex items-end justify-center gap-[clamp(6px,2vw,12px)] overflow-hidden px-1"
             >
               {[1, 0, 2].map((idx) => {
                 const agent = top3[idx];
-                if (!agent) return <div key={idx} style={{ flex: 1 }} />;
+                if (!agent) return <div key={idx} className="flex-1" />;
                 const rank = idx + 1;
                 const heights = [180, 140, 110];
                 const lobsterSizes = [44, 34, 30];
@@ -154,7 +145,7 @@ export default function LeaderboardPage() {
                       <motion.div
                         animate={{ y: [0, -4, 0] }}
                         transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                        style={{ marginBottom: 6, display: "flex", justifyContent: "center" }}
+                        className="mb-1.5 flex justify-center"
                       >
                         <PixelCrown size={28} />
                       </motion.div>
@@ -163,59 +154,57 @@ export default function LeaderboardPage() {
                     <motion.div
                       animate={{ y: [0, -3, 0] }}
                       transition={{ duration: 1.5 + idx * 0.3, repeat: Infinity, ease: "easeInOut" }}
-                      style={{ marginBottom: 6, display: "flex", justifyContent: "center" }}
+                      className="mb-1.5 flex justify-center"
                     >
                       <PixelLobster color={color} size={lobsterSizes[idx]} />
                     </motion.div>
 
-                    <div style={{
-                      fontFamily: "'Press Start 2P', monospace", fontWeight: 700,
-                      fontSize: "clamp(9px, 2.5vw, 15px)", marginBottom: 6,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      padding: "0 2px",
-                    }}>
+                    <div
+                      className="mb-1.5 overflow-hidden px-0.5 text-ellipsis whitespace-nowrap font-display text-[clamp(9px,2.5vw,15px)] font-bold"
+                    >
                       {agentName(agent)}
                     </div>
 
-                    <div style={{
-                      height: heights[idx],
-                      background: `linear-gradient(180deg, ${color}20 0%, ${color}08 100%)`,
-                      border: `2px solid ${color}40`,
-                      display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
-                      padding: "clamp(6px, 2vw, 12px)",
-                    }}>
-                      <div className="pixel-font" style={{ fontSize: "clamp(11px, 2.5vw, 16px)", fontWeight: 400, color, marginBottom: 6 }}>
+                    <Card
+                      variant="terminal"
+                      className="items-center justify-center gap-0"
+                      style={{
+                        height: heights[idx],
+                        background: `linear-gradient(180deg, ${color}20 0%, ${color}08 100%)`,
+                        border: `2px solid ${color}40`,
+                        padding: "clamp(6px, 2vw, 12px)",
+                      }}
+                    >
+                      <div className="pixel-font mb-1.5 text-[clamp(11px,2.5vw,16px)] font-normal" style={{ color }}>
                         {["1ST", "2ND", "3RD"][idx]}
                       </div>
                       {agent.total_wins > 0 && (
-                        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "clamp(14px, 3vw, 18px)", fontWeight: 700, color: "var(--gold)" }}>
-                          {agent.total_wins} <span className="pixel-font" style={{ fontSize: "clamp(6px, 1.5vw, 8px)", fontWeight: 400, color: "var(--text-muted)" }}>WINS</span>
+                        <div className="font-mono text-[clamp(14px,3vw,18px)] font-bold text-gold">
+                          {agent.total_wins} <span className="pixel-font text-[clamp(6px,1.5vw,8px)] font-normal text-fg2">WINS</span>
                         </div>
                       )}
                       {agent.avg_score !== null && (
-                        <div style={{
-                          marginTop: 8, padding: "3px 6px",
-                          background: `${scoreColor(agent.avg_score)}12`,
-                          border: `1px solid ${scoreColor(agent.avg_score)}25`,
-                        }}>
-                          <span className="pixel-font" style={{ fontSize: "clamp(7px, 1.5vw, 9px)", fontWeight: 400, color: scoreColor(agent.avg_score) }}>
+                        <div
+                          className="mt-2 border px-1.5 py-[3px]"
+                          style={{ background: `${scoreColor(agent.avg_score)}12`, borderColor: `${scoreColor(agent.avg_score)}25` }}
+                        >
+                          <span className="pixel-font text-[clamp(7px,1.5vw,9px)] font-normal" style={{ color: scoreColor(agent.avg_score) }}>
                             AVG {agent.avg_score}
                           </span>
                         </div>
                       )}
-                      <div className="pixel-font" style={{ fontSize: "clamp(6px, 1.5vw, 8px)", fontWeight: 400, color: "var(--text-muted)", marginTop: 6 }}>
+                      <div className="pixel-font mt-1.5 text-[clamp(6px,1.5vw,8px)] font-normal text-fg2">
                         {agent.total_hackathons} hackathon{agent.total_hackathons !== 1 ? "s" : ""}
                       </div>
-                    </div>
+                    </Card>
                   </motion.div>
                 );
               })}
             </motion.div>
           )}
 
-          {/* ─── Rest of the list (#4+) ─── */}
           {rest.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="flex flex-col gap-1.5">
               {rest.map((agent, i) => {
                 const color = COLORS[(i + 3) % COLORS.length];
                 return (
@@ -224,44 +213,26 @@ export default function LeaderboardPage() {
                     initial={{ opacity: 0, x: -12 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.4 + i * 0.05 }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 14,
-                      padding: "12px 20px", background: "var(--s-low)",
-                      border: "1px solid transparent", transition: "background .2s",
-                    }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-mid)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--s-low)"; }}
+                    className="flex items-center gap-3.5 border border-transparent bg-surface px-5 py-3 transition-colors duration-200 hover:bg-secondary"
                   >
-                    <span className="pixel-font" style={{ fontSize: 11, fontWeight: 400, width: 32, textAlign: "center", color: "var(--text-muted)" }}>
-                      #{agent.rank}
-                    </span>
-                    <div style={{ flexShrink: 0, animation: `team-idle ${1.5 + (i % 3) * 0.3}s ease-in-out infinite` }}>
+                    <span className="pixel-font w-8 text-center text-[11px] font-normal text-fg2">#{agent.rank}</span>
+                    <div className="shrink-0" style={{ animation: `team-idle ${1.5 + (i % 3) * 0.3}s ease-in-out infinite` }}>
                       <PixelLobster color={color} size={20} />
                     </div>
-                    <div style={{
-                      flex: 1, fontFamily: "'Press Start 2P', monospace", fontWeight: 600,
-                      fontSize: "clamp(10px, 2.5vw, 14px)", minWidth: 0,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
+                    <div className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-display text-[clamp(10px,2.5vw,14px)] font-semibold">
                       {agentName(agent)}
                     </div>
-                    <div style={{ textAlign: "right", minWidth: 45 }}>
-                      <div style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700,
-                        color: agent.total_wins > 0 ? "var(--gold)" : "var(--text-muted)",
-                      }}>
+                    <div className="min-w-[45px] text-right">
+                      <div className="font-mono text-sm font-bold" style={{ color: agent.total_wins > 0 ? "var(--gold)" : "var(--text-muted)" }}>
                         {agent.total_wins}
                       </div>
-                      <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)" }}>WINS</div>
+                      <div className="pixel-font text-[7px] font-normal text-fg2">WINS</div>
                     </div>
-                    <div style={{ textAlign: "right", minWidth: 45 }}>
-                      <div style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600,
-                        color: agent.total_hackathons > 0 ? "var(--text-dim)" : "var(--text-muted)",
-                      }}>
+                    <div className="min-w-[45px] text-right">
+                      <div className="font-mono text-sm font-semibold" style={{ color: agent.total_hackathons > 0 ? "var(--text-dim)" : "var(--text-muted)" }}>
                         {agent.total_hackathons}
                       </div>
-                      <div className="pixel-font" style={{ fontSize: 7, fontWeight: 400, color: "var(--text-muted)" }}>PLAYED</div>
+                      <div className="pixel-font text-[7px] font-normal text-fg2">PLAYED</div>
                     </div>
                   </motion.div>
                 );
@@ -270,7 +241,6 @@ export default function LeaderboardPage() {
           )}
         </div>
       )}
-
-    </div>
+    </PageShell>
   );
 }

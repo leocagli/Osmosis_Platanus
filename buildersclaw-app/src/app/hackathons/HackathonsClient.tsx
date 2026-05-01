@@ -1,9 +1,13 @@
 "use client";
 
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatDeadlineGMT3 } from "@/lib/date-utils";
+import { PageShell } from "@/components/ui/page-shell";
+import { SectionHeader } from "@/components/ui/section-header";
+import { SectionLabel } from "@/components/ui/section-label";
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 interface HackathonSummary {
   id: string;
@@ -42,7 +46,7 @@ function WanderingLobsters() {
     { color: "#ff9800", size: 18, anim: "lobster-wander-8" },
   ];
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ zIndex: 0 }}>
       {lobsters.map((l, i) => {
         const hex = l.color.replace("#", "");
         const r = parseInt(hex.substring(0, 2), 16);
@@ -50,11 +54,10 @@ function WanderingLobsters() {
         const b = parseInt(hex.substring(4, 6), 16);
         const dark = `rgb(${Math.max(0, r - 60)},${Math.max(0, g - 60)},${Math.max(0, b - 60)})`;
         return (
-          <div key={i} style={{
-            position: "absolute",
-            animation: `${l.anim} ${25 + i * 5}s ease-in-out infinite`,
-            opacity: 0.25,
-          }}>
+          <div
+            key={i}
+            style={{ position: "absolute", animation: `${l.anim} ${25 + i * 5}s ease-in-out infinite`, opacity: 0.25 }}
+          >
             <div style={{ animation: `team-idle ${1 + (i % 3) * 0.3}s ease-in-out infinite` }}>
               <svg viewBox="0 0 16 16" width={l.size} height={l.size} style={{ imageRendering: "pixelated" }}>
                 <rect x={1} y={2} width={2} height={2} fill={l.color} />
@@ -105,16 +108,17 @@ function MiniLobster({ color, size = 16 }: { color: string; size?: number }) {
   );
 }
 
-function TeamStrip({ teams, status }: { teams: TeamPreview[]; status?: string }) {
+function TeamStrip({ teams, status, totalTeams, totalAgents }: { teams: TeamPreview[]; status?: string; totalTeams: number; totalAgents: number }) {
   if (teams.length === 0) {
     const isFinished = status === "finalized" || status === "closed";
     return (
-      <div style={{
-        height: 36, display: "flex", alignItems: "center", justifyContent: "center",
-        background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px dashed rgba(89,65,57,0.15)",
-      }}>
-        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-          {isFinished ? "No teams participated" : "Waiting for teams..."}
+      <div className="flex h-9 items-center justify-center border border-dashed border-[rgba(89,65,57,0.15)] bg-white/[0.02] px-3">
+        <span className="font-mono text-[10px] text-fg2">
+          {totalTeams > 0
+            ? `${totalTeams} team${totalTeams === 1 ? "" : "s"} · ${totalAgents} agent${totalAgents === 1 ? "" : "s"}`
+            : isFinished
+              ? "No teams participated"
+              : "Waiting for teams..."}
         </span>
       </div>
     );
@@ -125,63 +129,44 @@ function TeamStrip({ teams, status }: { teams: TeamPreview[]; status?: string })
   const remaining = sorted.length - visible.length;
 
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+    <div className="flex flex-wrap items-center gap-1.5">
       {visible.map((team, i) => (
-        <div key={team.team_id} style={{
-          display: "flex", alignItems: "center", gap: 5,
-          padding: "5px 10px", borderRadius: 6,
-          background: `${team.team_color}18`, border: `1px solid ${team.team_color}30`,
-          animation: `team-idle ${1.5 + i * 0.3}s ease-in-out infinite`,
-          animationDelay: `${i * 0.2}s`,
-        }}>
+        <div
+          key={team.team_id}
+          className="flex items-center gap-1.5 px-2.5 py-[5px]"
+          style={{
+            background: `${team.team_color}18`,
+            border: `1px solid ${team.team_color}30`,
+            animation: `team-idle ${1.5 + i * 0.3}s ease-in-out infinite`,
+            animationDelay: `${i * 0.2}s`,
+          }}
+        >
           <div style={{ animation: `pixel-claw-left ${1 + i * 0.2}s ease-in-out infinite` }}>
             <MiniLobster color={team.team_color} size={12} />
           </div>
-          <span style={{
-            fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: team.team_color,
-            fontWeight: 600, whiteSpace: "nowrap", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis",
-          }}>
+          <span
+            className="max-w-[90px] truncate font-mono text-[10px] font-semibold"
+            style={{ color: team.team_color }}
+          >
             {team.team_name}
           </span>
-          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
-            {team.members.length}
-          </span>
+          <span className="text-[9px] text-fg2">{team.members.length}</span>
         </div>
       ))}
-      {remaining > 0 && (
-        <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-muted)", padding: "5px 8px" }}>
-          +{remaining} more
-        </span>
-      )}
+      {remaining > 0 && <span className="px-2 font-mono text-[11px] text-fg2">+{remaining} more</span>}
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const config: Record<string, { bg: string; color: string; label: string }> = {
-    open: { bg: "rgba(74,222,128,0.15)", color: "#4ade80", label: "OPEN" },
-    closed: { bg: "rgba(255,159,67,0.15)", color: "#ff9f43", label: "CLOSED" },
-    finalized: { bg: "rgba(255,215,0,0.15)", color: "#ffd700", label: "FINALIZED" },
-    draft: { bg: "rgba(136,136,160,0.15)", color: "#8888a0", label: "DRAFT" },
+  const config: Record<string, { variant: "live" | "gold" | "muted"; label: string }> = {
+    open: { variant: "live", label: "OPEN" },
+    closed: { variant: "gold", label: "CLOSED" },
+    finalized: { variant: "gold", label: "FINALIZED" },
+    draft: { variant: "muted", label: "DRAFT" },
   };
   const current = config[status] || config.draft;
-
-  return (
-    <span
-      style={{
-        background: current.bg,
-        color: current.color,
-        padding: "3px 8px",
-        borderRadius: 4,
-        fontSize: 10,
-        fontFamily: "'JetBrains Mono', monospace",
-        fontWeight: 600,
-        letterSpacing: "0.05em",
-      }}
-    >
-      {current.label}
-    </span>
-  );
+  return <Badge variant={current.variant}>{current.label}</Badge>;
 }
 
 function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
@@ -197,16 +182,12 @@ function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
   const diff = deadline - now;
 
   if (status === "finalized") {
-    return (
-      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 8 }}>
-        🏆 Ended {formatDeadlineGMT3(endsAt)}
-      </div>
-    );
+    return <div className="mb-2 font-mono text-[10px] text-fg2">🏆 Ended {formatDeadlineGMT3(endsAt)}</div>;
   }
 
   if (diff <= 0) {
     return (
-      <div style={{ fontSize: 10, color: "var(--red)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 8, animation: "pulse 1.5s ease-in-out infinite" }}>
+      <div className="mb-2 animate-pulse font-mono text-[10px] text-danger">
         ⏰ Deadline passed — judging...
       </div>
     );
@@ -215,18 +196,15 @@ function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
   const hrs = Math.floor(diff / 3600000);
   const mins = Math.floor((diff % 3600000) / 60000);
   const secs = Math.floor((diff % 60000) / 1000);
-
-  const isUrgent = diff <= 300000; // 5 min
+  const isUrgent = diff <= 300000;
   const color = isUrgent ? "var(--red)" : diff <= 3600000 ? "var(--gold)" : "var(--green)";
 
   return (
-    <div style={{ fontFamily: "'JetBrains Mono', monospace", marginBottom: 8, display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 10, color }}>
+    <div className="mb-2 flex flex-wrap items-baseline gap-1.5 font-mono">
+      <span className="text-[10px]" style={{ color }}>
         ⏱ {hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m ${secs}s`} left
       </span>
-      <span style={{ fontSize: 8, color: "var(--text-muted)" }}>
-        · {formatDeadlineGMT3(endsAt)}
-      </span>
+      <span className="text-[8px] text-fg2">· {formatDeadlineGMT3(endsAt)}</span>
     </div>
   );
 }
@@ -245,149 +223,94 @@ function HackathonSection({
   if (items.length === 0) return null;
 
   return (
-    <>
-      <div
-        style={{
-          fontFamily: "'Press Start 2P', monospace",
-          fontSize: "clamp(13px, 3.5vw, 18px)",
-          fontWeight: 700,
-          marginTop: 40,
-          marginBottom: 16,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
+    <section className="mt-10">
+      <SectionLabel className="mb-4 flex items-center gap-2 text-[clamp(13px,3.5vw,18px)] font-display font-bold normal-case tracking-normal text-foreground">
         <span>{icon}</span>
-        {title}
-      </div>
-      <div className="challenges-grid">
+        <span>{title}</span>
+      </SectionLabel>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         {items.map((hackathon) => {
           const teams = teamsMap[hackathon.id] || [];
           const hasTeams = teams.length > 0;
           return (
-            <Link key={hackathon.id} href={`/hackathons/${hackathon.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-              <div className="challenge-card" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <StatusBadge status={hackathon.status} />
-                  <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.08em" }}>
-                    {hackathon.challenge_type.replace(/_/g, " ").toUpperCase()}
-                  </span>
+            <Link key={hackathon.id} href={`/hackathons/${hackathon.id}`} className="block h-full text-inherit no-underline">
+              <Card variant="terminal" className="h-full flex-col">
+                <CardHeader>
+                  <div className="mb-3 flex items-center justify-between">
+                    <StatusBadge status={hackathon.status} />
+                    <span className="font-mono text-[9px] tracking-[0.08em] text-fg2">
+                      {hackathon.challenge_type.replace(/_/g, " ").toUpperCase()}
+                    </span>
+                  </div>
+
+                  {hackathon.ends_at && <DeadlineLabel endsAt={hackathon.ends_at} status={hackathon.status} />}
+
+                  <CardTitle className="mb-1 line-clamp-2 font-display text-[clamp(10px,2.8vw,11px)] font-normal leading-[1.4]">
+                    {hackathon.title}
+                  </CardTitle>
+                  <CardDescription className="line-clamp-2 text-[12px] leading-[1.5]">
+                    {hackathon.description || hackathon.brief || "No brief provided."}
+                  </CardDescription>
+                </CardHeader>
+
+                <div className="flex-1">
+                  <TeamStrip teams={teams} status={hackathon.status} totalTeams={hackathon.total_teams} totalAgents={hackathon.total_agents} />
                 </div>
 
-                {/* Deadline info */}
-                {hackathon.ends_at && (
-                  <DeadlineLabel endsAt={hackathon.ends_at} status={hackathon.status} />
-                )}
-
-                {/* Title + description */}
-                <h3 style={{
-                  fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(10px, 2.8vw, 11px)", fontWeight: 400,
-                  marginBottom: 4, lineHeight: 1.4, overflow: "hidden", display: "-webkit-box",
-                  WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const,
-                }}>
-                  {hackathon.title}
-                </h3>
-                <p style={{
-                  fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 14,
-                  overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const,
-                }}>
-                  {hackathon.description || hackathon.brief || "No brief provided."}
-                </p>
-
-                {/* Teams strip — fixed area */}
-                <div style={{ flex: 1, marginBottom: 0 }}>
-                  <TeamStrip teams={teams} status={hackathon.status} />
-                </div>
-
-                {/* Stats row */}
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  paddingTop: 14, marginTop: 14, borderTop: "1px solid rgba(89,65,57,0.1)",
-                }}>
-                  <div style={{ display: "flex", gap: 16 }}>
+                <CardFooter className="mt-3 justify-between border-t border-[rgba(89,65,57,0.1)] pt-3.5">
+                  <div className="flex gap-4">
                     {hackathon.prize_pool > 0 && (
                       <div>
-                        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: "var(--gold)" }}>
+                        <div className="font-mono text-sm font-bold text-gold">
                           {hackathon.prize_pool >= 1000 ? `$${(hackathon.prize_pool / 1000).toFixed(hackathon.prize_pool % 1000 === 0 ? 0 : 1)}k` : `$${hackathon.prize_pool}`}
                         </div>
-                        <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Prize</div>
+                        <div className="mt-px text-[9px] uppercase tracking-[0.08em] text-fg2">Prize</div>
                       </div>
                     )}
                     <div>
-                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: "var(--green)" }}>
-                        {hackathon.total_teams}
-                      </div>
-                      <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Teams</div>
+                      <div className="font-mono text-sm font-bold text-live">{hackathon.total_teams}</div>
+                      <div className="mt-px text-[9px] uppercase tracking-[0.08em] text-fg2">Teams</div>
                     </div>
                     <div>
-                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: hasTeams ? "var(--primary)" : "var(--text-muted)" }}>
+                      <div className="font-mono text-sm font-bold" style={{ color: hasTeams ? "var(--primary)" : "var(--text-muted)" }}>
                         {hackathon.total_agents}
                       </div>
-                      <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 1 }}>Agents</div>
+                      <div className="mt-px text-[9px] uppercase tracking-[0.08em] text-fg2">Agents</div>
                     </div>
                   </div>
-                </div>
-              </div>
+                </CardFooter>
+              </Card>
             </Link>
           );
         })}
       </div>
-    </>
+    </section>
   );
 }
 
 export default function HackathonsPage() {
   const [hackathons, setHackathons] = useState<HackathonSummary[]>([]);
-  const [teamsMap, setTeamsMap] = useState<Record<string, TeamPreview[]>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/v1/hackathons")
-      .then((response) => response.json())
-      .then(async (payload) => {
-        if (!payload.success) return;
+    let cancelled = false;
 
-        setHackathons(payload.data);
+    const loadHackathons = async () => {
+      try {
+        const response = await fetch("/api/v1/hackathons");
+        const payload = await response.json();
+        if (!payload.success || cancelled) return;
+        setHackathons(payload.data as HackathonSummary[]);
+        setLoading(false);
+      } catch {
+        if (!cancelled) setLoading(false);
+      }
+    };
 
-        const nextTeamsMap: Record<string, TeamPreview[]> = {};
-
-        await Promise.all(
-          payload.data.map(async (hackathon: HackathonSummary) => {
-            try {
-              const response = await fetch(`/api/v1/hackathons/${hackathon.id}/judge`);
-              const leaderboard = await response.json();
-
-              if (leaderboard.success && Array.isArray(leaderboard.data)) {
-                nextTeamsMap[hackathon.id] = leaderboard.data.map((entry: Record<string, unknown>) => ({
-                  team_id: String(entry.team_id || ""),
-                  team_name: String(entry.team_name || "Unnamed Team"),
-                  team_color: String(entry.team_color || "#5b8cff"),
-                  floor_number: typeof entry.floor_number === "number" ? entry.floor_number : null,
-                  members: Array.isArray(entry.members)
-                    ? entry.members.map((member) => ({
-                        agent_id: String((member as Record<string, unknown>).agent_id || ""),
-                        agent_name: String((member as Record<string, unknown>).agent_name || ""),
-                      }))
-                    : [],
-                }));
-              }
-            } catch {}
-          })
-        );
-
-        setTeamsMap(nextTeamsMap);
-
-        // Fire-and-forget: trigger check-deadline for any expired open hackathons
-        for (const h of payload.data as HackathonSummary[]) {
-          if ((h.status === "open" || h.status === "judging") && h.ends_at && new Date(h.ends_at).getTime() < Date.now()) {
-            fetch(`/api/v1/hackathons/${h.id}/check-deadline`, { method: "POST" }).catch(() => {});
-          }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    void loadHackathons();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const openHackathons = hackathons.filter((h) => h.status === "open" || h.status === "judging");
@@ -396,53 +319,50 @@ export default function HackathonsPage() {
 
   if (loading) {
     return (
-      <div className="page" style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: "var(--text-dim)" }}>
-          LOADING...
-        </div>
-      </div>
+      <PageShell contentClassName="flex min-h-[60vh] items-center justify-center">
+        <div className="pixel-font text-[11px] font-normal text-fg2">LOADING...</div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="page" style={{ position: "relative" }}>
+    <PageShell contentClassName="relative">
       <WanderingLobsters />
-      <div style={{ position: "relative", zIndex: 1 }}>
-      {/* Stats bar */}
-      <div style={{ display: "flex", justifyContent: "center", gap: 24, padding: "24px 0 16px", flexWrap: "wrap" }}>
-        {[
-          { icon: "●", iconColor: "var(--green)", value: openHackathons.length, label: "OPEN", anim: "pulse 1.5s ease-in-out infinite" },
-          { icon: "◐", iconColor: "var(--gold)", value: closedHackathons.length + finalizedHackathons.length, label: "FINISHED", anim: "" },
-          { icon: "⬡", iconColor: "var(--primary)", value: hackathons.reduce((sum, h) => sum + h.total_agents, 0), label: "AGENTS", anim: "" },
-        ].map((s) => (
-          <div key={s.label} style={{
-            display: "flex", alignItems: "center", gap: 10,
-            background: "var(--s-low)", border: "2px solid var(--outline)", padding: "10px 20px",
-            imageRendering: "pixelated" as never,
-          }}>
-            <span style={{ fontSize: 14, color: s.iconColor, animation: s.anim || undefined }}>{s.icon}</span>
-            <span className="pixel-font" style={{ fontSize: 11, fontWeight: 400, color: s.iconColor }}>{s.value}</span>
-            <span className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)" }}>{s.label}</span>
-          </div>
-        ))}
-      </div>
+      <div className="relative z-[1]">
+        <SectionHeader
+          eyebrow="Hackathons"
+          align="center"
+          className="pb-8"
+          title={<>Live <span className="text-primary">Competitions</span></>}
+          description="Browse active, closed, and finalized BuildersClaw hackathons with the same pixel-terminal card system used across the public site."
+        />
 
-      {hackathons.length === 0 && (
-        <div style={{ textAlign: "center", padding: "80px 0" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🦞</div>
-          <div style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, fontWeight: 400, marginBottom: 8 }}>
-            No hackathons yet
-          </div>
-          <div style={{ fontSize: 14, color: "var(--text-dim)" }}>
-            Hackathons will appear here when organizers create them.
-          </div>
+        <div className="flex flex-wrap justify-center gap-6 pb-4 pt-2">
+          {[
+            { icon: "●", iconColor: "var(--green)", value: openHackathons.length, label: "OPEN", anim: "pulse 1.5s ease-in-out infinite" },
+            { icon: "◐", iconColor: "var(--gold)", value: closedHackathons.length + finalizedHackathons.length, label: "FINISHED", anim: "" },
+            { icon: "⬡", iconColor: "var(--primary)", value: hackathons.reduce((sum, h) => sum + h.total_agents, 0), label: "AGENTS", anim: "" },
+          ].map((s) => (
+            <div key={s.label} className="flex items-center gap-2.5 border-2 border-border bg-surface px-5 py-2.5">
+              <span style={{ fontSize: 14, color: s.iconColor, animation: s.anim || undefined }}>{s.icon}</span>
+              <span className="pixel-font text-[11px] font-normal" style={{ color: s.iconColor }}>{s.value}</span>
+              <span className="pixel-font text-[9px] font-normal text-fg2">{s.label}</span>
+            </div>
+          ))}
         </div>
-      )}
 
-      <HackathonSection title="Open Hackathons" icon="●" items={openHackathons} teamsMap={teamsMap} />
-      <HackathonSection title="Closed To New Entries" icon="◐" items={closedHackathons} teamsMap={teamsMap} />
-      <HackathonSection title="Finalized Results" icon="🏆" items={finalizedHackathons} teamsMap={teamsMap} />
+        {hackathons.length === 0 && (
+          <div className="py-20 text-center">
+            <div className="mb-4 text-5xl">🦞</div>
+            <div className="mb-2 font-display text-sm font-normal">No hackathons yet</div>
+            <div className="text-sm text-fg2">Hackathons will appear here when organizers create them.</div>
+          </div>
+        )}
+
+        <HackathonSection title="Open Hackathons" icon="●" items={openHackathons} teamsMap={{}} />
+        <HackathonSection title="Closed To New Entries" icon="◐" items={closedHackathons} teamsMap={{}} />
+        <HackathonSection title="Finalized Results" icon="🏆" items={finalizedHackathons} teamsMap={{}} />
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import { useDeployEscrow } from "@/hooks/useDeployEscrow";
 import { publicChainId } from "@/lib/public-chain";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { SectionLabel } from "@/components/ui/section-label";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { useEnterpriseWallet } from "./enterprise-wallet-provider";
 
 
@@ -56,6 +63,38 @@ function PixelStar({ style: s }: { style?: React.CSSProperties }) {
   return <div style={{ position: "absolute", width: 3, height: 3, background: "var(--primary)", opacity: 0.3, ...s }} />;
 }
 
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label className="pixel-font mb-1.5 block text-[8px] font-normal text-fg2">
+      {children}
+    </label>
+  );
+}
+
+function StepIndicator({ step }: { step: number }) {
+  return (
+    <div className="mb-4 flex items-center gap-3 border-b border-border pb-4">
+      {[1, 2].map((current, index) => (
+        <div key={current} className="contents">
+          <div
+            className={cn(
+              "flex size-6 items-center justify-center rounded-full border font-mono text-xs font-bold",
+              step === current
+                ? "border-primary bg-primary text-primary-foreground"
+                : current === 1
+                  ? "border-primary text-primary"
+                  : "border-border text-fg2"
+            )}
+          >
+            {current}
+          </div>
+          {index === 0 ? <div className="h-px flex-1 bg-border" /> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ─── Data ─── */
 
 const STEPS = [
@@ -78,6 +117,7 @@ export default function EnterprisePage() {
     hackathon_title: "", hackathon_brief: "", hackathon_deadline: "", hackathon_min_participants: "5",
     hackathon_rules: "", challenge_type: "other",
   });
+  const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<"success" | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -124,6 +164,16 @@ export default function EnterprisePage() {
     setWalletCopied(true);
   };
 
+  const handleNext = (e: React.FormEvent) => {
+    e.preventDefault();
+    const formEl = e.currentTarget as HTMLFormElement;
+    if (formEl.checkValidity()) {
+      setStep(2);
+    } else {
+      formEl.reportValidity();
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -167,22 +217,17 @@ export default function EnterprisePage() {
     }
   };
 
-  const inp: React.CSSProperties = {
-    width: "100%", padding: "12px 14px", background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.2)",
-    borderRadius: 0, color: "var(--text)", fontSize: 13, fontFamily: "'JetBrains Mono', monospace",
-    outline: "none", transition: "border-color .2s",
-  };
-
   return (
-    <div style={{ paddingTop: 64 }}>
+    <div className="relative">
 
       {/* ═══ HERO ═══ */}
-      <section className="hero" style={{ position: "relative", overflow: "hidden", textAlign: "center" }}>
-        <div style={{ position: "absolute", top: 24, right: 24, zIndex: 2 }}>
-          <button
+      <section className="hero relative overflow-hidden px-6 py-24 text-center md:px-12 md:py-32 lg:py-40">
+        <div className="absolute right-6 top-6 z-[2] md:right-6 md:top-6">
+          <Button
             type="button"
             onClick={handleWalletButtonClick}
-            className="btn btn-primary"
+            variant="default"
+            size="sm"
             style={{
               fontSize: 12,
               padding: "10px 18px",
@@ -196,25 +241,22 @@ export default function EnterprisePage() {
             {connectedWallet
               ? `${connectedWallet.address.slice(0, 6)}...${connectedWallet.address.slice(-4)}`
               : "Connect Wallet"}
-          </button>
+          </Button>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 20, justifyContent: "center", marginBottom: 36 }}>
+        <div className="mb-9 flex items-center justify-center gap-5">
           <PixelBuilding size={64} />
           <PixelTrophy size={52} />
           <PixelGavel size={64} />
         </div>
 
-        <h1 style={{
-          fontFamily: "'Press Start 2P', monospace", fontSize: "clamp(18px, 3vw, 26px)", fontWeight: 400,
-          lineHeight: 1.6, marginBottom: 28, letterSpacing: "0.5px",
-        }}>
+        <h1 className="mb-7 font-display text-[clamp(18px,3vw,26px)] font-normal leading-[1.6] tracking-[0.5px]">
           Stop Hiring.<br />
           <span className="accent">Launch a Hackathon.</span><br />
           Get Code in Hours.
         </h1>
 
-        <p style={{ fontSize: 17, color: "var(--text-dim)", maxWidth: 540, margin: "0 auto 24px", lineHeight: 1.75, letterSpacing: "0.2px" }}>
+        <p className="mx-auto mb-6 max-w-[540px] text-[17px] leading-[1.75] tracking-[0.2px] text-fg2">
           Post your challenge, set the prize, and let AI agents compete in GitHub repos.
           You only pay the winner.
         </p>
@@ -278,483 +320,449 @@ export default function EnterprisePage() {
             <span style={{ gridColumn: 7, gridRow: 3 }} />
           </div>
 
-          <a href="#form" className="btn btn-primary" style={{ fontSize: 16, padding: "16px 44px" }}>
+          <a href="#form" className={cn(buttonVariants({ size: "xl" }), "px-11 text-base")}>
             Post Your Challenge
           </a>
         </div>
 
-        <div style={{ display: "flex", gap: 24, marginTop: 56, flexWrap: "wrap", justifyContent: "center" }}>
+        <div className="mt-14 flex flex-wrap justify-center gap-6">
           {[
             { value: "Hours", label: "NOT WEEKS", color: "var(--green)" },
             { value: "Real", label: "CODE", color: "var(--primary)" },
             { value: "$0", label: "UNTIL WIN", color: "var(--gold)" },
             { value: "AI", label: "JUDGED", color: "#a78bfa" },
           ].map((s) => (
-            <div key={s.label} style={{
-              background: "rgba(0,0,0,0.4)", border: "2px solid rgba(89,65,57,0.2)", padding: "18px 28px",
-              textAlign: "center", minWidth: 100,
-            }}>
-              <div className="pixel-font" style={{ fontSize: 13, fontWeight: 400, color: s.color, marginBottom: 4 }}>{s.value}</div>
-              <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)", letterSpacing: "1px" }}>{s.label}</div>
-            </div>
+            <Card key={s.label} className="min-w-[100px] gap-1 border-[rgba(89,65,57,0.2)] bg-black/40 px-7 py-[18px] text-center">
+              <div className="pixel-font mb-1 text-[13px] font-normal" style={{ color: s.color }}>{s.value}</div>
+              <div className="pixel-font text-[9px] font-normal tracking-[1px] text-fg2">{s.label}</div>
+            </Card>
           ))}
         </div>
       </section>
 
       {/* ═══ HOW IT WORKS ═══ */}
-      <section className="home-section" style={{ background: "var(--surface)" }}>
-        <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-          <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Process</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 56px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
+      <section className="py-24 md:py-32 lg:py-40 px-6 md:px-12">
+        <div className="mx-auto max-w-[1000px]">
+          <SectionLabel className="text-center font-normal">Process</SectionLabel>
+          <h2 className="section-title mx-auto mb-14 text-center text-[clamp(16px,2.8vw,24px)] font-normal tracking-[0.5px]">
             Three Steps. That&apos;s It.
           </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24 }}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-6">
             {STEPS.map((step) => (
-              <div key={step.icon} className="challenge-card" style={{
-                cursor: "default", transform: "none", position: "relative", overflow: "visible",
-                padding: "28px 24px 24px",
-              }}>
-                <div className="pixel-font" style={{
-                  position: "absolute", top: -14, left: 16,
-                  background: "var(--primary)", color: "#fff", padding: "5px 14px", fontSize: 11, fontWeight: 400, letterSpacing: "1px",
-                }}>
+              <Card key={step.icon} variant="terminal" className="relative overflow-visible px-6 pb-6 pt-7">
+                <div className="pixel-font absolute left-4 top-[-14px] bg-primary px-[14px] py-[5px] text-[11px] font-normal tracking-[1px] text-primary-foreground">
                   STEP {step.icon}
                 </div>
-                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 13, fontWeight: 400, marginBottom: 14, marginTop: 12, lineHeight: 1.5, letterSpacing: "0.3px" }}>
+                <h3 className="mb-3.5 mt-3 font-display text-[13px] font-normal leading-[1.5] tracking-[0.3px]">
                   {step.title}
                 </h3>
-                <p style={{ fontSize: 14, color: "var(--text-dim)", lineHeight: 1.75, margin: 0 }}>{step.desc}</p>
-              </div>
+                <p className="m-0 text-sm leading-[1.75] text-fg2">{step.desc}</p>
+              </Card>
             ))}
           </div>
         </div>
       </section>
 
       {/* ═══ USE CASES ═══ */}
-      <section className="home-section">
-        <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-          <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Use Cases</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 56px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
+      <section className="py-24 md:py-32 lg:py-40 px-6 md:px-12">
+        <div className="mx-auto max-w-[1000px]">
+          <SectionLabel className="text-center font-normal">Use Cases</SectionLabel>
+          <h2 className="section-title mx-auto mb-14 text-center text-[clamp(16px,2.8vw,24px)] font-normal tracking-[0.5px]">
             What Can Agents Solve?
           </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 20 }}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-5">
             {USE_CASES.map((uc) => (
-              <div key={uc.title} style={{
-                background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "28px 24px",
-              }}>
-                <div className="pixel-font" style={{ fontSize: 13, fontWeight: 400, color: "var(--green)", marginBottom: 16 }}>{uc.icon}</div>
-                <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 12, fontWeight: 400, marginBottom: 10, lineHeight: 1.5, letterSpacing: "0.3px" }}>{uc.title}</h3>
-                <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.75, margin: 0 }}>{uc.desc}</p>
-              </div>
+              <Card key={uc.title} className="border-[rgba(89,65,57,0.15)] bg-black/30 px-6 py-7">
+                <div className="pixel-font mb-4 text-[13px] font-normal text-live">{uc.icon}</div>
+                <h3 className="mb-2.5 font-display text-xs font-normal leading-[1.5] tracking-[0.3px]">{uc.title}</h3>
+                <p className="m-0 text-[13px] leading-[1.75] text-fg2">{uc.desc}</p>
+              </Card>
             ))}
           </div>
         </div>
       </section>
 
       {/* ═══ JUDGING ═══ */}
-      <section className="home-section" style={{ background: "var(--surface)" }}>
-        <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
-          <div className="section-label" style={{ fontWeight: 400 }}>Judging</div>
-          <h2 className="section-title" style={{ margin: "0 auto 48px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
+      <section className="py-24 md:py-32 lg:py-40 px-6 md:px-12">
+        <div className="mx-auto max-w-[800px] text-center">
+          <SectionLabel className="justify-center font-normal text-center">Judging</SectionLabel>
+          <h2 className="section-title mx-auto mb-12 text-[clamp(16px,2.8vw,24px)] font-normal tracking-[0.5px]">
             The Judge Reads <span className="accent">Every Line</span>
           </h2>
-          <div className="home-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, textAlign: "left" }}>
+          <div className="grid grid-cols-1 gap-5 text-left md:grid-cols-2">
             {[
               { t: "Repo-level analysis", d: "Fetches the full GitHub repo — source, configs, tests." },
               { t: "Your criteria", d: "Configured with your brief, requirements, and priorities." },
               { t: "10 scoring dimensions", d: "Code quality, architecture, tests, security, and more." },
               { t: "Transparent feedback", d: "Detailed scores referencing specific files and code." },
             ].map((item) => (
-              <div key={item.t} style={{
-                background: "rgba(0,0,0,0.3)", border: "2px solid rgba(89,65,57,0.15)", padding: "24px",
-              }}>
-                <div className="pixel-font" style={{ fontSize: 10, fontWeight: 400, color: "var(--primary)", marginBottom: 10, letterSpacing: "0.5px" }}>{`> ${item.t.toUpperCase()}`}</div>
-                <p style={{ fontSize: 14, color: "var(--text-dim)", lineHeight: 1.7, margin: 0 }}>{item.d}</p>
-              </div>
+              <Card key={item.t} className="border-[rgba(89,65,57,0.15)] bg-black/30 p-6">
+                <div className="pixel-font mb-2.5 text-[10px] font-normal tracking-[0.5px] text-primary">{`> ${item.t.toUpperCase()}`}</div>
+                <p className="m-0 text-sm leading-[1.7] text-fg2">{item.d}</p>
+              </Card>
             ))}
           </div>
         </div>
       </section>
 
       {/* ═══ FORM ═══ */}
-      <section id="form" className="home-section" style={{ scrollMarginTop: 80 }}>
-        <div style={{ maxWidth: 620, margin: "0 auto" }}>
-          <div className="section-label" style={{ textAlign: "center", fontWeight: 400 }}>Submit</div>
-          <h2 className="section-title" style={{ textAlign: "center", margin: "0 auto 14px", fontSize: "clamp(12px, 2.2vw, 16px)", fontWeight: 400, letterSpacing: "0.5px" }}>
+      <section id="form" className="scroll-mt-20 px-6 py-24 md:px-12 md:py-32 lg:py-40">
+        <div className="mx-auto max-w-[620px]">
+          <SectionLabel className="text-center font-normal">Submit</SectionLabel>
+          <h2 className="section-title mx-auto mb-3.5 text-center text-[clamp(16px,2.8vw,24px)] font-normal tracking-[0.5px]">
             Post Your Challenge
           </h2>
-          <p style={{ fontSize: 15, color: "var(--text-dim)", textAlign: "center", marginBottom: 40, lineHeight: 1.8 }}>
+          <p className="mb-10 text-center text-[15px] leading-[1.8] text-fg2">
             We review every submission. If approved, your hackathon launches automatically.
           </p>
 
           {result === "success" ? (
-            <div style={{
-              background: "rgba(74,222,128,0.06)", border: "2px solid rgba(74,222,128,0.2)",
-              padding: "40px 32px", textAlign: "center",
-            }}>
-              <div className="pixel-font" style={{ fontSize: 16, fontWeight: 400, color: "var(--green)", marginBottom: 16 }}>GG!</div>
-              <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, fontWeight: 400, marginBottom: 8 }}>
+            <Card className="border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] px-8 py-10 text-center">
+              <div className="pixel-font mb-4 text-base font-normal text-live">GG!</div>
+              <h3 className="mb-2 font-display text-sm font-normal">
                 Challenge Submitted
               </h3>
-              <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7, marginBottom: 24 }}>
+              <p className="mb-6 text-[13px] leading-[1.7] text-fg2">
                 We&apos;ll review and get back to you. If approved, the hackathon launches automatically.
               </p>
 
               {/* Show judge key if custom judge was selected */}
               {judgeKeyResult && (
-                <div style={{
-                  background: "rgba(255,215,0,0.06)", border: "1px solid rgba(255,215,0,0.2)", borderRadius: 10,
-                  padding: "24px 20px", textAlign: "left", marginBottom: 24,
-                }}>
-                  <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--gold)", marginBottom: 8 }}>⚖️ YOUR JUDGE API KEY</div>
-                  <p style={{ fontSize: 12, color: "var(--red)", fontWeight: 600, marginBottom: 12 }}>
+                <Card className="mb-6 rounded-[10px] border-[rgba(255,215,0,0.2)] bg-[rgba(255,215,0,0.06)] px-5 py-6 text-left">
+                  <div className="pixel-font mb-2 text-[9px] font-normal text-gold">⚖️ YOUR JUDGE API KEY</div>
+                  <p className="mb-3 text-xs font-semibold text-danger">
                     ⚠️ Save this key NOW — it will NOT be shown again.
                   </p>
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "12px 14px",
-                    background: "var(--s-mid)", borderRadius: 8, border: "1px solid rgba(255,215,0,0.15)", marginBottom: 16,
-                  }}>
-                    <code style={{ fontSize: 11, color: "var(--gold)", flex: 1, wordBreak: "break-all" }}>
+                  <div className="mb-4 flex items-center gap-2 rounded-[8px] border border-[rgba(255,215,0,0.15)] bg-surface px-[14px] py-3">
+                    <code className="flex-1 break-all text-[11px] text-gold">
                       {judgeKeyResult}
                     </code>
-                    <button type="button" onClick={() => navigator.clipboard.writeText(judgeKeyResult)}
-                      className="pixel-font" style={{
-                        fontSize: 7, fontWeight: 400, padding: "5px 12px", background: "var(--s-high)", border: "1px solid var(--outline)",
-                        color: "var(--gold)", cursor: "pointer", borderRadius: 4, whiteSpace: "nowrap",
-                      }}>COPY</button>
+                    <Button type="button" variant="panel" size="sm" className="px-3 text-[10px] text-gold" onClick={() => navigator.clipboard.writeText(judgeKeyResult)}>
+                      COPY
+                    </Button>
                   </div>
-                  <p style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.6, margin: "0 0 8px" }}>
+                  <p className="mb-2 text-xs leading-[1.6] text-fg2">
                     This key activates when your hackathon is approved. Tell your judge agent:
                   </p>
-                  <div style={{
-                    padding: "10px 14px", background: "var(--s-mid)", borderRadius: 6,
-                  }}>
-                    <code style={{ fontSize: 11, color: "var(--green)", lineHeight: 1.6 }}>
+                  <div className="rounded-[6px] bg-surface px-[14px] py-2.5">
+                    <code className="text-[11px] leading-[1.6] text-live">
                       Read {process.env.NEXT_PUBLIC_APP_URL || "https://www.buildersclaw.xyz"}/judge-skill.md and use the judge API key to evaluate submissions.
                     </code>
                   </div>
-                </div>
+                </Card>
               )}
 
-              <button onClick={() => { setResult(null); setErrorMsg(null); setJudgeKeyResult(null); }} className="btn btn-outline btn-sm">Submit Another</button>
-            </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => { setResult(null); setErrorMsg(null); setJudgeKeyResult(null); setStep(1); }}>
+                Submit Another
+              </Button>
+            </Card>
           ) : (
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <form onSubmit={step === 1 ? handleNext : handleSubmit} className="flex flex-col gap-[18px]">
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>COMPANY *</label>
-                  <input required value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })}
-                    placeholder="Acme Corp" style={inp} />
-                </div>
-                <div>
-                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>EMAIL *</label>
-                  <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    placeholder="contact@acme.com" style={inp} />
-                </div>
-              </div>
+              <StepIndicator step={step} />
 
-              <div>
-                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TRACK *</label>
-                <input required value={form.track} onChange={(e) => setForm({ ...form, track: e.target.value })}
-                  placeholder="e.g. Process Automation, Web App, Data Pipeline..." style={inp} />
-              </div>
+              {step === 1 && (
+                <>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <FieldLabel>COMPANY *</FieldLabel>
+                      <Input required value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })}
+                        placeholder="Acme Corp" />
+                    </div>
+                    <div>
+                      <FieldLabel>EMAIL *</FieldLabel>
+                      <Input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                        placeholder="contact@acme.com" />
+                    </div>
+                  </div>
 
-              <div>
-                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>DESCRIBE YOUR PROBLEM *</label>
-                <textarea required rows={4} value={form.problem} onChange={(e) => setForm({ ...form, problem: e.target.value })}
-                  placeholder="We need to automate our invoice processing pipeline..."
-                  style={{ ...inp, resize: "vertical", minHeight: 100 }} />
-              </div>
+                  <div>
+                    <FieldLabel>TRACK *</FieldLabel>
+                    <Input required value={form.track} onChange={(e) => setForm({ ...form, track: e.target.value })}
+                      placeholder="e.g. Process Automation, Web App, Data Pipeline..." />
+                  </div>
 
-              <div>
-                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8, display: "block" }}>JUDGE AGENT *</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  {[
-                    { value: "buildersclaw", label: "WE BUILD IT", desc: "Custom AI judge tailored to your criteria" },
-                    { value: "own", label: "YOU BRING IT", desc: "Deploy your own judge agent via our API" },
-                  ].map((opt) => (
-                    <label key={opt.value} style={{
-                      display: "flex", flexDirection: "column", gap: 4, padding: "14px 16px", cursor: "pointer",
-                      background: form.judge_agent === opt.value ? "rgba(255,107,53,0.08)" : "rgba(0,0,0,0.3)",
-                      border: `2px solid ${form.judge_agent === opt.value ? "var(--primary)" : "rgba(89,65,57,0.2)"}`,
-                      transition: "all .15s",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <input type="radio" name="judge_agent" value={opt.value} required
-                          checked={form.judge_agent === opt.value}
-                          onChange={(e) => setForm({ ...form, judge_agent: e.target.value })}
-                          style={{ accentColor: "var(--primary)" }} />
-                        <span className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: form.judge_agent === opt.value ? "var(--primary)" : "var(--text-dim)" }}>
-                          {opt.label}
-                        </span>
+                  <div>
+                    <FieldLabel>DESCRIBE YOUR PROBLEM *</FieldLabel>
+                    <Textarea required rows={4} value={form.problem} onChange={(e) => setForm({ ...form, problem: e.target.value })}
+                      placeholder="We need to automate our invoice processing pipeline..."
+                      className="min-h-[100px] resize-y" />
+                  </div>
+
+                  <div>
+                    <FieldLabel>TECH REQUIREMENTS</FieldLabel>
+                    <Input value={form.tech_requirements} onChange={(e) => setForm({ ...form, tech_requirements: e.target.value })}
+                      placeholder="e.g. Python, PostgreSQL, Docker..." />
+                  </div>
+
+                  <div className="ent-config-grid grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <FieldLabel>BUDGET</FieldLabel>
+                      <Select value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })}>
+                        <option value="">Select...</option>
+                        <option value="<500">&lt;$500</option>
+                        <option value="500-2k">$500-$2k</option>
+                        <option value="2k-5k">$2k-$5k</option>
+                        <option value="5k-15k">$5k-$15k</option>
+                        <option value="15k+">$15k+</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <FieldLabel>TIMELINE</FieldLabel>
+                      <Select value={form.timeline} onChange={(e) => setForm({ ...form, timeline: e.target.value })}>
+                        <option value="">Select...</option>
+                        <option value="asap">ASAP</option>
+                        <option value="1-2weeks">1-2 weeks</option>
+                        <option value="1month">1 month</option>
+                        <option value="flexible">Flexible</option>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <Button type="submit" className="w-full py-4 text-[15px]">
+                    Next Step
+                  </Button>
+                </>
+              )}
+
+              {step === 2 && (
+                <>
+                  <div className="mb-2 flex justify-start">
+                    <Button type="button" variant="outline" size="sm" className="px-4" onClick={() => setStep(1)}>
+                      &larr; Back
+                    </Button>
+                  </div>
+
+                  <div>
+                    <FieldLabel>JUDGE AGENT *</FieldLabel>
+                    <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+                      {[
+                        { value: "buildersclaw", label: "WE BUILD IT", desc: "Custom AI judge tailored to your criteria" },
+                        { value: "own", label: "YOU BRING IT", desc: "Deploy your own judge agent via our API" },
+                      ].map((opt) => (
+                        <label key={opt.value} style={{
+                          display: "flex", flexDirection: "column", gap: 4, padding: "14px 16px", cursor: "pointer",
+                          background: form.judge_agent === opt.value ? "rgba(255,107,53,0.08)" : "rgba(0,0,0,0.3)",
+                          border: `2px solid ${form.judge_agent === opt.value ? "var(--primary)" : "rgba(89,65,57,0.2)"}`,
+                          transition: "all .15s",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <input type="radio" name="judge_agent" value={opt.value} required
+                              checked={form.judge_agent === opt.value}
+                              onChange={(e) => setForm({ ...form, judge_agent: e.target.value })}
+                              style={{ accentColor: "var(--primary)" }} />
+                            <span className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: form.judge_agent === opt.value ? "var(--primary)" : "var(--text-dim)" }}>
+                              {opt.label}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", paddingLeft: 24 }}>{opt.desc}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <FieldLabel>JUDGING PRIORITIES</FieldLabel>
+                    <Input value={form.judging_priorities} onChange={(e) => setForm({ ...form, judging_priorities: e.target.value })}
+                      placeholder="e.g. Code quality > UI, must have tests..." />
+                  </div>
+
+                  <div>
+                    <FieldLabel>PRIZE USD *</FieldLabel>
+                    <Input required type="number" min={50} value={form.prize_amount}
+                      onChange={(e) => setForm({ ...form, prize_amount: e.target.value })}
+                      placeholder="500" />
+                  </div>
+
+                  {/* Hackathon Config */}
+                  <div className="mt-1 border-t-2 border-[rgba(89,65,57,0.15)] pt-6">
+                    <div className="pixel-font mb-4 text-[9px] font-normal text-primary">&gt; HACKATHON CONFIG</div>
+                    <div className="flex flex-col gap-3.5">
+                      <div>
+                        <FieldLabel>TITLE *</FieldLabel>
+                        <Input required value={form.hackathon_title} onChange={(e) => setForm({ ...form, hackathon_title: e.target.value })}
+                          placeholder="e.g. Invoice Parser Challenge" />
                       </div>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", paddingLeft: 24 }}>{opt.desc}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TECH REQUIREMENTS</label>
-                <input value={form.tech_requirements} onChange={(e) => setForm({ ...form, tech_requirements: e.target.value })}
-                  placeholder="e.g. Python, PostgreSQL, Docker..." style={inp} />
-              </div>
-
-              <div>
-                <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>JUDGING PRIORITIES</label>
-                <input value={form.judging_priorities} onChange={(e) => setForm({ ...form, judging_priorities: e.target.value })}
-                  placeholder="e.g. Code quality > UI, must have tests..." style={inp} />
-              </div>
-
-              <div className="ent-config-grid">
-                <div>
-                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>PRIZE USD *</label>
-                  <input required type="number" min={50} value={form.prize_amount}
-                    onChange={(e) => setForm({ ...form, prize_amount: e.target.value })}
-                    placeholder="500" style={inp} />
-                </div>
-                <div>
-                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>BUDGET</label>
-                  <select value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })}
-                    style={{ ...inp, cursor: "pointer" }}>
-                    <option value="">Select...</option>
-                    <option value="<500">&lt;$500</option>
-                    <option value="500-2k">$500-$2k</option>
-                    <option value="2k-5k">$2k-$5k</option>
-                    <option value="5k-15k">$5k-$15k</option>
-                    <option value="15k+">$15k+</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TIMELINE</label>
-                  <select value={form.timeline} onChange={(e) => setForm({ ...form, timeline: e.target.value })}
-                    style={{ ...inp, cursor: "pointer" }}>
-                    <option value="">Select...</option>
-                    <option value="asap">ASAP</option>
-                    <option value="1-2weeks">1-2 weeks</option>
-                    <option value="1month">1 month</option>
-                    <option value="flexible">Flexible</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Hackathon Config */}
-              <div style={{ borderTop: "2px solid rgba(89,65,57,0.15)", paddingTop: 24, marginTop: 4 }}>
-                <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--primary)", marginBottom: 16 }}>&gt; HACKATHON CONFIG</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div>
-                    <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TITLE *</label>
-                    <input required value={form.hackathon_title} onChange={(e) => setForm({ ...form, hackathon_title: e.target.value })}
-                      placeholder="e.g. Invoice Parser Challenge" style={inp} />
-                  </div>
-                  <div>
-                    <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>BRIEF *</label>
-                    <textarea required rows={3} value={form.hackathon_brief} onChange={(e) => setForm({ ...form, hackathon_brief: e.target.value })}
-                      placeholder="What to build, features, acceptance criteria..."
-                      style={{ ...inp, resize: "vertical", minHeight: 80 }} />
-                  </div>
-                  <div>
-                    <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>RULES</label>
-                    <input value={form.hackathon_rules} onChange={(e) => setForm({ ...form, hackathon_rules: e.target.value })}
-                      placeholder="e.g. Must use TypeScript, include tests..." style={inp} />
-                  </div>
-                  <div className="ent-config-grid">
-                    <div>
-                      <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>DEADLINE (GMT-3) *</label>
-                      <input required type="datetime-local" value={form.hackathon_deadline}
-                        onChange={(e) => setForm({ ...form, hackathon_deadline: e.target.value })} style={inp} />
-                    </div>
-                    <div>
-                      <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>MIN AGENTS</label>
-                      <input type="number" min={2} max={500} value={form.hackathon_min_participants}
-                        onChange={(e) => setForm({ ...form, hackathon_min_participants: e.target.value })} style={inp} />
-                    </div>
-                    <div>
-                      <label className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6, display: "block" }}>TYPE</label>
-                      <select value={form.challenge_type} onChange={(e) => setForm({ ...form, challenge_type: e.target.value })}
-                        style={{ ...inp, cursor: "pointer" }}>
-                        <option value="api">API</option>
-                        <option value="tool">Tool</option>
-                        <option value="landing_page">Web</option>
-                        <option value="data_pipeline">Data</option>
-                        <option value="ai_integration">AI</option>
-                        <option value="automation">Auto</option>
-                        <option value="game">Game</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ═══ SPONSOR FUNDING ═══ */}
-              <div style={{ borderTop: "2px solid rgba(89,65,57,0.15)", paddingTop: 24, marginTop: 4 }}>
-                <label style={{
-                  display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-                  padding: "14px 16px",
-                  background: sponsorFunded ? "rgba(255,215,0,0.06)" : "rgba(0,0,0,0.3)",
-                  border: `2px solid ${sponsorFunded ? "var(--gold)" : "rgba(89,65,57,0.2)"}`,
-                  transition: "all .15s",
-                }}>
-                  <input type="checkbox" checked={sponsorFunded} onChange={(e) => {
-                    setSponsorFunded(e.target.checked);
-                    if (!e.target.checked) setDeployedContract(null);
-                  }} style={{ accentColor: "var(--gold)", width: 16, height: 16 }} />
-                  <div>
-                    <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: sponsorFunded ? "var(--gold)" : "var(--text-dim)" }}>
-                      FUND ON-CHAIN
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                      Deploy an escrow contract and lock prize money on-chain
-                    </div>
-                  </div>
-                </label>
-
-                {sponsorFunded && (
-                  <div style={{
-                    marginTop: 14, padding: "20px 16px",
-                    background: "rgba(255,215,0,0.03)", border: "2px solid rgba(255,215,0,0.1)",
-                    display: "flex", flexDirection: "column", gap: 14,
-                  }}>
-                    {/* Step 1: Connect Wallet */}
-                    <div>
-                      <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8 }}>STEP 1 — CONNECT WALLET</div>
-                      {!connectedWallet ? (
-                        <button type="button" onClick={openWalletModal} className="btn btn-primary" style={{
-                          fontSize: 12, padding: "10px 20px",
-                        }}>
-                          {authenticated ? "Link Wallet" : "Connect Wallet"}
-                        </button>
-                      ) : (
-                        <div style={{
-                          display: "flex", alignItems: "center", gap: 8,
-                          padding: "10px 14px", background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.2)",
-                        }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--green)" }} />
-                          <code style={{ fontSize: 11, color: "var(--green)" }}>
-                            {connectedWallet.address.slice(0, 6)}...{connectedWallet.address.slice(-4)}
-                          </code>
+                      <div>
+                        <FieldLabel>BRIEF *</FieldLabel>
+                        <Textarea required rows={3} value={form.hackathon_brief} onChange={(e) => setForm({ ...form, hackathon_brief: e.target.value })}
+                          placeholder="What to build, features, acceptance criteria..."
+                          className="min-h-[80px] resize-y" />
+                      </div>
+                      <div>
+                        <FieldLabel>RULES</FieldLabel>
+                        <Input value={form.hackathon_rules} onChange={(e) => setForm({ ...form, hackathon_rules: e.target.value })}
+                          placeholder="e.g. Must use TypeScript, include tests..." />
+                      </div>
+                      <div className="ent-config-grid grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div>
+                          <FieldLabel>DEADLINE (GMT-3) *</FieldLabel>
+                          <Input required type="datetime-local" value={form.hackathon_deadline}
+                            onChange={(e) => setForm({ ...form, hackathon_deadline: e.target.value })} />
                         </div>
-                      )}
-                    </div>
-
-                    {/* Step 2: Prize Amount */}
-                    {authenticated && connectedWallet && (
-                      <div>
-                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 6 }}>STEP 2 — PRIZE AMOUNT (USDC)</div>
-                        <input
-                          type="number" step="0.001" min="0.001"
-                          value={prizeAmountUsdc}
-                          onChange={(e) => setPrizeAmountUsdc(e.target.value)}
-                          placeholder="e.g. 500"
-                          disabled={!!deployedContract}
-                          style={{ ...inp, maxWidth: 200 }}
-                        />
+                        <div>
+                          <FieldLabel>MIN AGENTS</FieldLabel>
+                          <Input type="number" min={2} max={500} value={form.hackathon_min_participants}
+                            onChange={(e) => setForm({ ...form, hackathon_min_participants: e.target.value })} />
+                        </div>
+                        <div className="md:col-span-2">
+                          <FieldLabel>TYPE</FieldLabel>
+                          <Select value={form.challenge_type} onChange={(e) => setForm({ ...form, challenge_type: e.target.value })}>
+                            <option value="api">API</option>
+                            <option value="tool">Tool</option>
+                            <option value="landing_page">Web</option>
+                            <option value="data_pipeline">Data</option>
+                            <option value="ai_integration">AI</option>
+                            <option value="automation">Auto</option>
+                            <option value="game">Game</option>
+                            <option value="other">Other</option>
+                          </Select>
+                        </div>
                       </div>
-                    )}
+                    </div>
+                  </div>
 
-                    {/* Step 3: Deploy */}
-                    {authenticated && connectedWallet && prizeAmountUsdc && !deployedContract && (
+                  {/* ═══ SPONSOR FUNDING ═══ */}
+                  <div className="mt-1 border-t-2 border-[rgba(89,65,57,0.15)] pt-6">
+                    <label className="flex cursor-pointer items-center gap-2.5 px-4 py-[14px] transition-all duration-150" style={{
+                      background: sponsorFunded ? "rgba(255,215,0,0.06)" : "rgba(0,0,0,0.3)",
+                      border: `2px solid ${sponsorFunded ? "var(--gold)" : "rgba(89,65,57,0.2)"}`,
+                    }}>
+                      <input type="checkbox" checked={sponsorFunded} onChange={(e) => {
+                        setSponsorFunded(e.target.checked);
+                        if (!e.target.checked) setDeployedContract(null);
+                      }} style={{ accentColor: "var(--gold)", width: 16, height: 16 }} />
                       <div>
-                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginBottom: 8 }}>STEP 3 — DEPLOY & FUND ESCROW</div>
-                        <button
-                          type="button"
-                          disabled={isDeploying || !form.hackathon_deadline}
-                          className="btn btn-gold"
-                          style={{
-                            fontSize: 12, padding: "10px 24px",
-                            opacity: isDeploying || !form.hackathon_deadline ? 0.5 : 1,
-                          }}
-                          onClick={async () => {
-                            if (!form.hackathon_deadline) {
-                              setErrorMsg("Set the hackathon deadline before deploying");
-                              return;
-                            }
-                            const deadlineDate = new Date(form.hackathon_deadline);
-                            if (isNaN(deadlineDate.getTime())) {
-                              setErrorMsg("Invalid deadline date");
-                              return;
-                            }
+                        <div className="pixel-font text-[9px] font-normal" style={{ color: sponsorFunded ? "var(--gold)" : "var(--text-dim)" }}>
+                          FUND ON-CHAIN
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-fg2">
+                          Deploy an escrow contract and lock prize money on-chain
+                        </div>
+                      </div>
+                    </label>
 
-                            const provider = await connectedWallet.getEthereumProvider();
-                            const deployResult = await deploy({
-                              provider,
-                              sponsorAddress: connectedWallet.address,
-                              prizeAmountUsdc,
-                              deadlineUnix: Math.floor(deadlineDate.getTime() / 1000),
-                            });
+                    {sponsorFunded && (
+                      <Card className="mt-3.5 flex flex-col gap-3.5 border-[rgba(255,215,0,0.1)] bg-[rgba(255,215,0,0.03)] px-4 py-5">
+                        {/* Step 1: Connect Wallet */}
+                        <div>
+                          <div className="pixel-font mb-2 text-[8px] font-normal text-fg2">STEP 1 — CONNECT WALLET</div>
+                          {!connectedWallet ? (
+                            <Button type="button" className="px-5 text-[12px]" onClick={openWalletModal}>
+                              {authenticated ? "Link Wallet" : "Connect Wallet"}
+                            </Button>
+                          ) : (
+                            <div className="flex items-center gap-2 border border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] px-[14px] py-2.5">
+                              <div className="size-2 rounded-full bg-live" />
+                              <code className="text-[11px] text-live">
+                                {connectedWallet.address.slice(0, 6)}...{connectedWallet.address.slice(-4)}
+                              </code>
+                            </div>
+                          )}
+                        </div>
 
-                            if (deployResult) {
-                              setDeployedContract(deployResult);
-                            }
-                          }}
-                        >
-                          {isDeploying ? "Deploying..." : `Deploy & Fund ${prizeAmountUsdc} USDC`}
-                        </button>
-                        {!form.hackathon_deadline && (
-                          <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", marginTop: 6 }}>
-                            Set the deadline above first
+                        {/* Step 2: Prize Amount */}
+                        {authenticated && connectedWallet && (
+                          <div>
+                            <div className="pixel-font mb-1.5 text-[8px] font-normal text-fg2">STEP 2 — PRIZE AMOUNT (USDC)</div>
+                            <Input
+                              type="number" step="0.001" min="0.001"
+                              value={prizeAmountUsdc}
+                              onChange={(e) => setPrizeAmountUsdc(e.target.value)}
+                              placeholder="e.g. 500"
+                              disabled={!!deployedContract}
+                              className="max-w-[200px]"
+                            />
                           </div>
                         )}
-                      </div>
-                    )}
 
-                    {/* Deploy Error */}
-                    {deployError && (
-                      <div className="pixel-font" style={{
-                        fontSize: 9, fontWeight: 400, color: "var(--red)", background: "rgba(255,113,108,0.06)",
-                        padding: "10px 14px", border: "1px solid rgba(255,113,108,0.2)",
-                      }}>
-                        DEPLOY ERROR: {deployError.toUpperCase()}
-                      </div>
-                    )}
+                        {/* Step 3: Deploy */}
+                        {authenticated && connectedWallet && prizeAmountUsdc && !deployedContract && (
+                          <div>
+                            <div className="pixel-font mb-2 text-[8px] font-normal text-fg2">STEP 3 — DEPLOY & FUND ESCROW</div>
+                            <Button
+                              type="button"
+                              disabled={isDeploying || !form.hackathon_deadline}
+                              variant="gold"
+                              style={{
+                                fontSize: 12, padding: "10px 24px",
+                                opacity: isDeploying || !form.hackathon_deadline ? 0.5 : 1,
+                              }}
+                              onClick={async () => {
+                                if (!form.hackathon_deadline) {
+                                  setErrorMsg("Set the hackathon deadline before deploying");
+                                  return;
+                                }
+                                const deadlineDate = new Date(form.hackathon_deadline);
+                                if (isNaN(deadlineDate.getTime())) {
+                                  setErrorMsg("Invalid deadline date");
+                                  return;
+                                }
 
-                    {/* Deploy Success */}
-                    {deployedContract && (
-                      <div style={{
-                        padding: "16px", background: "rgba(74,222,128,0.06)", border: "2px solid rgba(74,222,128,0.2)",
-                      }}>
-                        <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--green)", marginBottom: 10 }}>
-                          ESCROW DEPLOYED
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
-                          <span style={{ color: "var(--text-muted)" }}>Contract: </span>
-                          <code style={{ color: "var(--green)", wordBreak: "break-all" }}>{deployedContract.contractAddress}</code>
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                          <span style={{ color: "var(--text-muted)" }}>Tx: </span>
-                          <code style={{ color: "var(--text-dim)", wordBreak: "break-all" }}>{deployedContract.txHash}</code>
-                        </div>
-                        <div className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--gold)", marginTop: 10 }}>
-                          {prizeAmountUsdc} USDC LOCKED. SUBMIT THE FORM TO COMPLETE.
-                        </div>
-                      </div>
+                                const provider = await connectedWallet.getEthereumProvider();
+                                const deployResult = await deploy({
+                                  provider,
+                                  sponsorAddress: connectedWallet.address,
+                                  prizeAmountUsdc,
+                                  deadlineUnix: Math.floor(deadlineDate.getTime() / 1000),
+                                });
+
+                                if (deployResult) {
+                                  setDeployedContract(deployResult);
+                                }
+                              }}
+                            >
+                              {isDeploying ? "Deploying..." : `Deploy & Fund ${prizeAmountUsdc} USDC`}
+                            </Button>
+                            {!form.hackathon_deadline && (
+                              <div className="pixel-font mt-1.5 text-[8px] font-normal text-fg2">
+                                Set the deadline above first
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Deploy Error */}
+                        {deployError && (
+                          <div className="pixel-font border border-[rgba(255,113,108,0.2)] bg-[rgba(255,113,108,0.06)] px-[14px] py-2.5 text-[9px] font-normal text-danger">
+                            DEPLOY ERROR: {deployError.toUpperCase()}
+                          </div>
+                        )}
+
+                        {/* Deploy Success */}
+                        {deployedContract && (
+                          <Card className="border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] p-4">
+                            <div className="pixel-font mb-2.5 text-[9px] font-normal text-live">
+                              ESCROW DEPLOYED
+                            </div>
+                            <div className="mb-1.5 text-[11px] text-fg2">
+                              <span className="text-fg2">Contract: </span>
+                              <code className="break-all text-live">{deployedContract.contractAddress}</code>
+                            </div>
+                            <div className="text-[11px] text-fg2">
+                              <span className="text-fg2">Tx: </span>
+                              <code className="break-all text-fg2">{deployedContract.txHash}</code>
+                            </div>
+                            <div className="pixel-font mt-2.5 text-[8px] font-normal text-gold">
+                              {prizeAmountUsdc} USDC LOCKED. SUBMIT THE FORM TO COMPLETE.
+                            </div>
+                          </Card>
+                        )}
+                      </Card>
                     )}
                   </div>
-                )}
-              </div>
 
-              {errorMsg && (
-                <div className="pixel-font" style={{
-                  fontSize: 9, fontWeight: 400, color: "var(--red)", background: "rgba(255,113,108,0.06)",
-                  padding: "12px 16px", border: "2px solid rgba(255,113,108,0.2)",
-                }}>
-                  ERROR: {errorMsg.toUpperCase()}
-                </div>
+                  {errorMsg && (
+                    <div className="pixel-font border-2 border-[rgba(255,113,108,0.2)] bg-[rgba(255,113,108,0.06)] px-4 py-3 text-[9px] font-normal text-danger">
+                      ERROR: {errorMsg.toUpperCase()}
+                    </div>
+                  )}
+
+                  <Button type="submit" disabled={submitting || (sponsorFunded && !deployedContract)} className="w-full py-4 text-[15px]">
+                    {submitting ? "Submitting..." : sponsorFunded && !deployedContract ? "Deploy Escrow First" : "Submit Challenge"}
+                  </Button>
+                </>
               )}
-
-              <button type="submit" disabled={submitting || (sponsorFunded && !deployedContract)} className="btn btn-primary" style={{
-                width: "100%", padding: "16px", fontSize: 15,
-                opacity: submitting || (sponsorFunded && !deployedContract) ? 0.6 : 1,
-                cursor: submitting || (sponsorFunded && !deployedContract) ? "not-allowed" : "pointer",
-              }}>
-                {submitting ? "Submitting..." : sponsorFunded && !deployedContract ? "Deploy Escrow First" : "Submit Challenge"}
-              </button>
-
-              <p className="pixel-font" style={{ fontSize: 8, fontWeight: 400, color: "var(--text-muted)", textAlign: "center" }}>
-                WE RESPOND WITHIN 48 HOURS. YOUR DATA IS NEVER SHARED.
-              </p>
             </form>
           )}
         </div>
@@ -762,14 +770,15 @@ export default function EnterprisePage() {
 
       {showWalletModal && connectedWallet && (
         <div className="pixel-modal-overlay" onClick={() => setShowWalletModal(false)}>
-          <div className="pixel-modal" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              onClick={() => setShowWalletModal(false)}
-              className="pixel-font"
-              style={{
-                position: "absolute",
-                top: 12,
+          <div className="pixel-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <Button
+                type="button"
+                onClick={() => setShowWalletModal(false)}
+                variant="ghost"
+                size="sm"
+                style={{
+                  position: "absolute",
+                  top: 12,
                 right: 12,
                 fontSize: 9,
                 fontWeight: 400,
@@ -779,35 +788,28 @@ export default function EnterprisePage() {
                 cursor: "pointer",
               }}
             >
-              [X]
-            </button>
+                [X]
+              </Button>
 
-            <div className="pixel-font" style={{ fontSize: 9, fontWeight: 400, color: "var(--green)", marginBottom: 12 }}>
+            <div className="pixel-font mb-3 text-[9px] font-normal text-live">
               WALLET CONNECTED
             </div>
-            <h3 style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, fontWeight: 400, margin: "0 0 10px" }}>
+            <h3 className="mb-2.5 font-display text-sm font-normal">
               Sponsor wallet
             </h3>
-            <p style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7, margin: "0 0 18px" }}>
+            <p className="mb-[18px] text-[13px] leading-[1.7] text-fg2">
               Use this wallet when funding an on-chain hackathon escrow.
             </p>
 
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "12px 14px",
-              background: "rgba(0,0,0,0.35)",
-              border: "1px solid rgba(74,222,128,0.18)",
-              marginBottom: 14,
-            }}>
-              <code style={{ fontSize: 11, color: "var(--green)", flex: 1, wordBreak: "break-all" }}>
+            <div className="mb-3.5 flex items-center gap-2 border border-[rgba(74,222,128,0.18)] bg-black/35 px-[14px] py-3">
+              <code className="flex-1 break-all text-[11px] text-live">
                 {connectedWallet.address}
               </code>
-              <button
+              <Button
                 type="button"
                 onClick={copyWalletAddress}
-                className="pixel-font"
+                variant="panel"
+                size="sm"
                 style={{
                   fontSize: 7,
                   fontWeight: 400,
@@ -820,12 +822,12 @@ export default function EnterprisePage() {
                 }}
               >
                 {walletCopied ? "COPIED" : "COPY"}
-              </button>
+              </Button>
             </div>
 
-            <button type="button" onClick={() => setShowWalletModal(false)} className="btn btn-primary" style={{ width: "100%" }}>
+            <Button type="button" onClick={() => setShowWalletModal(false)} className="w-full">
               Done
-            </button>
+            </Button>
           </div>
         </div>
       )}

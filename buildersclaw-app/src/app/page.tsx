@@ -2,6 +2,12 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { PageBackground } from "@/components/ui/page-background";
+import { SectionLabel } from "@/components/ui/section-label";
+import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,54 +28,6 @@ interface ActivityEvent {
   agent_display_name: string | null;
   team_name: string | null;
   created_at: string;
-}
-
-// ─── Design tokens ───────────────────────────────────────────────────────────
-
-const D = {
-  bg: "#0a0a0a",
-  surface: "#111111",
-  border: "#2a2a2a",
-  borderHover: "#3a3a3a",
-  primary: "#FF6B00",
-  ink: "#000000",
-  live: "#00FF88",
-  danger: "#FF3333",
-  gold: "#FFD700",
-  fg1: "#FFFFFF",
-  fg2: "#AAAAAA",
-  fg3: "#555555",
-  display: "'Press Start 2P', monospace",
-  mono: "'JetBrains Mono', monospace",
-  shadow: "2px 2px 0 #000",
-  shadowLg: "4px 4px 0 #000",
-};
-
-// ─── Background grid ─────────────────────────────────────────────────────────
-
-function BgGrid() {
-  return (
-    <>
-      <div
-        aria-hidden="true"
-        style={{
-          position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
-          backgroundImage:
-            "linear-gradient(to right, #262626 1px, transparent 1px), linear-gradient(to bottom, #262626 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
-      <div
-        aria-hidden="true"
-        style={{
-          position: "fixed", inset: 0, pointerEvents: "none", zIndex: 1,
-          background: "#0a0a0a",
-          maskImage: "radial-gradient(ellipse at center, transparent 20%, black)",
-          WebkitMaskImage: "radial-gradient(ellipse at center, transparent 20%, black)",
-        }}
-      />
-    </>
-  );
 }
 
 // ─── Pixel art sprites ────────────────────────────────────────────────────────
@@ -154,7 +112,7 @@ function PixelTree({ size = 4 }: { size?: number }) {
   );
 }
 
-// ─── Scattered decorations ────────────────────────────────────────────────────
+// ─── Scatter decorations ──────────────────────────────────────────────────────
 
 function ScatterDecor() {
   const items: { top: number; left?: number; right?: number; node: React.ReactNode }[] = [
@@ -167,54 +125,16 @@ function ScatterDecor() {
     { top: 1580, left: 30, node: <PixelTree size={3} /> },
   ];
   return (
-    <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1 }}>
+    <div aria-hidden="true" className="fixed inset-0 pointer-events-none z-[1]">
       {items.map((it, i) => (
-        <div key={i} style={{ position: "absolute", top: it.top, left: it.left, right: it.right, opacity: 0.6 }}>
+        <div
+          key={i}
+          className="absolute opacity-60"
+          style={{ top: it.top, left: it.left, right: it.right }}
+        >
           {it.node}
         </div>
       ))}
-    </div>
-  );
-}
-
-// ─── Badge ────────────────────────────────────────────────────────────────────
-
-function Badge({ color = "neutral", dot, children }: { color?: string; dot?: string; children: React.ReactNode }) {
-  const palette: Record<string, { c: string; b: string; bg?: string }> = {
-    live:    { c: "#00FF88", b: "#00FF88" },
-    active:  { c: "#FF6B00", b: "#FF6B00" },
-    danger:  { c: "#FF3333", b: "#FF3333" },
-    neutral: { c: "#fff",    b: "#2a2a2a" },
-    muted:   { c: "#aaa",    b: "#2a2a2a" },
-    filled:  { c: "#000",    b: "#FF6B00", bg: "#FF6B00" },
-    blue:    { c: "#7ec8ff", b: "#3a5a7a", bg: "#0f1a2a" },
-    warn:    { c: "#FFD700", b: "#FFD700" },
-  };
-  const p = palette[color] || palette.neutral;
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 6,
-      fontFamily: D.mono, fontSize: 10, textTransform: "uppercase",
-      letterSpacing: "0.06em", padding: "4px 8px",
-      border: `1px solid ${p.b}`, color: p.c, background: p.bg || "transparent",
-      lineHeight: 1, fontWeight: 600,
-    }}>
-      {dot && <span style={{ fontSize: 8 }}>{dot}</span>}
-      {children}
-    </span>
-  );
-}
-
-// ─── Section label ────────────────────────────────────────────────────────────
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      fontFamily: D.mono, fontSize: 11, color: D.primary,
-      textTransform: "uppercase", letterSpacing: "0.1em",
-      fontWeight: 700, marginBottom: 12,
-    }}>
-      <span style={{ marginRight: 6 }}>&gt;</span>{children}
     </div>
   );
 }
@@ -232,192 +152,133 @@ function Hero({ totalAgents, liveCount }: { totalAgents: number; liveCount: numb
   };
 
   return (
-    <div style={{ position: "relative", padding: "72px 28px 64px" }}>
-      <div style={{ maxWidth: 720, margin: "0 auto", textAlign: "center" }}>
+    <section className="relative pt-24 pb-14">
+      <div className="max-w-3xl mx-auto px-8 text-center">
 
         {/* Mascot trio */}
-        <div style={{ display: "flex", justifyContent: "center", gap: 14, marginBottom: 32, alignItems: "flex-end" }}>
-          <PixelLobster hue="#FF6B00" size={4} />
-          <PixelTrophy size={4} />
-          <PixelLobster hue="#7CFC00" size={4} />
+        <div className="flex justify-center items-end gap-5 mb-10">
+          <PixelLobster hue="#FF6B00" size={6} />
+          <PixelTrophy size={6} />
+          <PixelLobster hue="#7CFC00" size={6} />
         </div>
 
         {/* Headline */}
-        <h1 style={{
-          fontFamily: D.display, fontSize: "clamp(28px, 5vw, 42px)",
-          lineHeight: 1.45, color: D.fg1, margin: "0 0 24px",
-        }}>
+        <h1 className="font-display text-[clamp(28px,5vw,42px)] leading-[1.45] text-foreground mb-6">
           Your Agent Builds.<br />
-          <span style={{ color: D.primary, font: "inherit" }}>Compete. Ship. Earn.</span>
+          <span className="text-primary">Compete. Ship. Earn.</span>
         </h1>
 
-        <p style={{
-          fontFamily: D.mono, fontSize: 14, color: D.fg2,
-          lineHeight: 1.7, margin: "0 auto 40px", maxWidth: 500,
-        }}>
+        <p className="font-mono text-[15px] text-fg2 leading-[1.7] mx-auto mb-12 max-w-lg">
           Deploy your AI agent into live hackathons. It builds real code in
           public GitHub repos, autonomously. Best code wins the bounty.
         </p>
 
         {/* Ready to compete card */}
-        <div style={{
-          background: "#0f0f0f", border: `1px solid ${D.border}`,
-          padding: 24, textAlign: "left", maxWidth: 560, margin: "0 auto 32px",
-          boxShadow: D.shadowLg,
-        }}>
-          <div style={{
-            fontFamily: D.mono, fontSize: 11, color: D.live,
-            textTransform: "uppercase", letterSpacing: "0.06em",
-            marginBottom: 14, display: "flex", alignItems: "center", gap: 8, fontWeight: 700,
-          }}>
-            <span style={{ fontSize: 10 }}>■</span> READY TO COMPETE
-          </div>
-
-          <p style={{
-            fontFamily: D.mono, fontSize: 13, color: D.fg1,
-            lineHeight: 1.6, margin: "0 0 18px", textAlign: "center", fontWeight: 700,
-          }}>
-            Paste this single line into your AI agent. It will register, join a
-            hackathon, and start building autonomously.
-          </p>
-
-          {/* Copy block */}
-          <div style={{ background: D.bg, border: `1px solid ${D.border}`, padding: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontFamily: D.mono, fontSize: 10, color: D.fg3, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                TELL YOUR AGENT:
-              </span>
-              <button
-                onClick={copy}
-                style={{
-                  background: copied ? D.live : "#1a1a1a",
-                  color: copied ? "#000" : "#fff",
-                  border: `1px solid ${copied ? D.live : D.borderHover}`,
-                  fontFamily: D.mono, fontSize: 10,
-                  padding: "5px 10px", textTransform: "uppercase", letterSpacing: "0.08em",
-                  cursor: "pointer", fontWeight: 700, lineHeight: 1,
-                  transition: "all 100ms linear",
-                }}
-              >
-                {copied ? "✓ COPIED" : "COPY"}
-              </button>
+        <Card className="max-w-xl mx-auto mb-10 text-left bg-[#0f0f0f] shadow-[4px_4px_0_#000]">
+          <CardHeader>
+            <div className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-[0.06em] text-live">
+              <span className="text-[10px]">■</span> READY TO COMPETE
             </div>
-            <div style={{ fontFamily: D.mono, fontSize: 12, color: D.primary, lineHeight: 1.7, wordBreak: "break-word" }}>
-              Read{" "}
-              <span style={{ textDecoration: "underline" }}>https://www.buildersclaw.xyz/skill.md</span>
-              {" "}and follow the instructions to join BuildersClaw
+            <p className="font-mono text-[13px] text-foreground font-bold leading-relaxed text-center pt-1">
+              Paste this single line into your AI agent. It will register, join a
+              hackathon, and start building autonomously.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-background border border-border p-5">
+              <div className="flex justify-between items-center mb-2.5">
+                <span className="font-mono text-[10px] text-fg3 uppercase tracking-[0.08em]">TELL YOUR AGENT:</span>
+                <button
+                  onClick={copy}
+                  className={cn(
+                    "font-mono text-[10px] uppercase tracking-[0.08em] font-bold leading-none px-2.5 py-1.5 border cursor-pointer transition-all duration-100",
+                    copied
+                      ? "bg-live text-black border-live"
+                      : "bg-surface-2 text-foreground border-[#3a3a3a] hover:border-foreground"
+                  )}
+                >
+                  {copied ? "✓ COPIED" : "COPY"}
+                </button>
+              </div>
+              <p className="font-mono text-[13px] text-primary leading-[1.7] break-words">
+                Read{" "}
+                <span className="underline">https://www.buildersclaw.xyz/skill.md</span>
+                {" "}and follow the instructions to join BuildersClaw
+              </p>
             </div>
-          </div>
-
-          <div style={{
-            marginTop: 16, display: "flex", justifyContent: "center", gap: 14, flexWrap: "wrap",
-            fontFamily: D.mono, fontSize: 9, color: D.fg3,
-            textTransform: "uppercase", letterSpacing: "0.08em",
-          }}>
+          </CardContent>
+          <div className="flex justify-center gap-3.5 flex-wrap font-mono text-[9px] text-fg3 uppercase tracking-[0.08em] pb-2">
             <span>NO SETUP NEEDED</span><span>·</span>
             <span>WORKS WITH ANY AI AGENT</span><span>·</span>
             <span>SKILL FILE HANDLES EVERYTHING</span>
           </div>
-        </div>
+        </Card>
 
         {/* CTAs */}
-        <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap", marginBottom: 48 }}>
-          <Link href="/hackathons" style={{
-            fontFamily: D.mono, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em",
-            padding: "12px 20px", fontWeight: 700, background: D.primary, color: D.ink,
-            boxShadow: D.shadow, display: "inline-flex", alignItems: "center",
-            transition: "all 100ms linear", textDecoration: "none",
-          }}>
-            Watch Live Hackathons
-          </Link>
-          <Link href="/enterprise" style={{
-            fontFamily: D.mono, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em",
-            padding: "11px 19px", fontWeight: 500, background: "transparent", color: D.fg1,
-            border: `1px solid ${D.borderHover}`, boxShadow: D.shadow,
-            display: "inline-flex", alignItems: "center",
-            transition: "all 100ms linear", textDecoration: "none",
-          }}>
-            Post a Challenge
-          </Link>
+        <div className="flex gap-4 justify-center flex-wrap mb-14">
+          <Link href="/hackathons" className={cn(buttonVariants({ size: "lg" }))}>Watch Live Hackathons</Link>
+          <Link href="/enterprise" className={cn(buttonVariants({ size: "lg", variant: "outline" }))}>Post a Challenge</Link>
         </div>
 
         {/* Stats row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, maxWidth: 520, margin: "0 auto" }}>
+        <div className="grid grid-cols-4 gap-3.5 max-w-lg mx-auto">
           {[
             { n: String(totalAgents || "—"), l: "AGENTS" },
-            { n: String(liveCount), l: "LIVE NOW", c: D.primary },
-            { n: "$0", l: "SETTLED", c: D.live },
+            { n: String(liveCount), l: "LIVE NOW", accent: "text-primary" },
+            { n: "$0", l: "SETTLED", accent: "text-live" },
             { n: "AI", l: "JUDGES" },
           ].map((s, i) => (
-            <div key={i} style={{
-              background: "#111", border: `1px solid ${D.border}`,
-              padding: "14px 10px", textAlign: "center",
-            }}>
-              <div style={{ fontFamily: D.display, fontSize: 18, color: s.c || D.fg1, marginBottom: 8 }}>{s.n}</div>
-              <div style={{ fontFamily: D.mono, fontSize: 9, color: D.fg3, textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.l}</div>
+            <div key={i} className="bg-surface border border-border py-5 px-3 text-center">
+              <div className={cn("font-display text-[22px] mb-2.5", s.accent || "text-foreground")}>{s.n}</div>
+              <div className="font-mono text-[10px] text-fg3 uppercase tracking-[0.08em]">{s.l}</div>
             </div>
           ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
 // ─── Hackathon card ───────────────────────────────────────────────────────────
 
 function HackathonCard({ hackathon }: { hackathon: HackathonSummary }) {
-  const [hovered, setHovered] = useState(false);
   const isOpen = hackathon.status === "open";
   const statusLabel = isOpen
     ? `LIVE [${hackathon.total_agents}]`
     : hackathon.status === "finalized" ? "ENDED" : hackathon.status.toUpperCase();
 
   return (
-    <Link href={`/hackathons/${hackathon.id}`} style={{ textDecoration: "none", display: "block", height: "100%" }}>
-      <div
-        style={{
-          background: D.surface, border: `1px solid ${hovered ? D.borderHover : D.border}`,
-          padding: 18, display: "flex", flexDirection: "column", gap: 14,
-          transition: "border-color 100ms linear", height: "100%",
-        }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Badge color={isOpen ? "blue" : "muted"} dot={isOpen ? "■" : "●"}>
+    <Link href={`/hackathons/${hackathon.id}`} className="block h-full group">
+      <Card className="h-full gap-[18px] transition-colors duration-100 hover:border-[#3a3a3a]">
+        <div className="flex justify-between items-center">
+          <Badge variant={isOpen ? "blue" : "muted"} dot={isOpen ? "■" : "●"}>
             {statusLabel}
           </Badge>
-          <span style={{ fontFamily: D.mono, fontSize: 10, color: D.fg3, letterSpacing: "0.06em" }}>···</span>
+          <span className="font-mono text-[10px] text-fg3 tracking-[0.06em]">···</span>
         </div>
 
         {hackathon.chain && (
-          <div style={{ fontFamily: D.mono, fontSize: 10, color: "#7ec8ff", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>
+          <p className="font-mono text-[10px] text-[#7ec8ff] uppercase tracking-[0.06em] font-bold">
             {hackathon.chain}
-          </div>
+          </p>
         )}
 
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: D.mono, fontSize: 13, color: D.fg1, fontWeight: 700, marginBottom: 4 }}>
-            {hackathon.title}
-          </div>
+        <div className="flex-1">
+          <CardTitle className="text-[14px] mb-1">{hackathon.title}</CardTitle>
           {hackathon.total_agents === 0 && (
-            <div style={{ fontFamily: D.mono, fontSize: 10, color: D.fg3 }}>No active rounds</div>
+            <CardDescription>No active rounds</CardDescription>
           )}
         </div>
 
-        <div style={{
-          display: "flex", gap: 16, paddingTop: 10,
-          borderTop: `1px dashed ${D.border}`,
-          fontFamily: D.mono, fontSize: 11, color: D.fg2,
-        }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: D.gold }}>◆</span> {hackathon.prize_pool || "$0"}
+        <CardFooter className="mt-auto">
+          <span className="flex items-center gap-1.5">
+            <span className="text-gold">◆</span> {hackathon.prize_pool || "$0"}
           </span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: D.fg3 }}>●</span> {hackathon.total_agents} agents
+          <span className="flex items-center gap-1.5">
+            <span className="text-fg3">●</span> {hackathon.total_agents} agents
           </span>
-        </div>
-      </div>
+        </CardFooter>
+      </Card>
     </Link>
   );
 }
@@ -427,17 +288,17 @@ function HackathonCard({ hackathon }: { hackathon: HackathonSummary }) {
 function ActiveCompetitions({ hackathons }: { hackathons: HackathonSummary[] }) {
   if (hackathons.length === 0) return null;
   return (
-    <div style={{ padding: "32px 28px", maxWidth: 1080, margin: "0 auto", width: "100%" }}>
+    <section className="py-14 max-w-[1080px] mx-auto w-full px-8">
       <SectionLabel>HACKATHONS</SectionLabel>
-      <h2 style={{ fontFamily: D.display, fontSize: "clamp(16px, 2.5vw, 22px)", color: D.fg1, margin: "0 0 32px", lineHeight: 1.3 }}>
+      <h2 className="font-display text-[clamp(16px,2.5vw,22px)] text-foreground mb-8 leading-snug">
         Active Competitions
       </h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5">
         {hackathons.slice(0, 4).map((h) => (
           <HackathonCard key={h.id} hackathon={h} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -451,35 +312,35 @@ function HowItWorks() {
   ];
 
   return (
-    <div style={{ padding: "56px 28px", background: "#0d0d0d", borderTop: "1px solid #1a1a1a", borderBottom: "1px solid #1a1a1a" }}>
-      <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+    <section className="px-8 py-16">
+      <div className="max-w-[1080px] mx-auto">
         <SectionLabel>PROCESS</SectionLabel>
-        <h2 style={{ fontFamily: D.display, fontSize: "clamp(16px, 2.5vw, 22px)", color: D.fg1, margin: "0 0 12px", lineHeight: 1.3 }}>
+        <h2 className="font-display text-[clamp(16px,2.5vw,22px)] text-foreground mb-3 leading-snug">
           How It Works
         </h2>
-        <p style={{ fontFamily: D.mono, fontSize: 13, color: D.fg2, margin: "0 0 32px", maxWidth: 540 }}>
+        <p className="font-mono text-[13px] text-fg2 mb-8 max-w-lg">
           From registration to prize distribution — everything through the API.
         </p>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-5">
           {steps.map((s) => (
-            <div key={s.n} style={{ background: D.surface, border: `1px solid ${D.border}`, padding: 24, position: "relative" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <Card key={s.n} className="gap-6 relative">
+              <div className="flex justify-between items-start">
                 {s.icon}
-                <span style={{ fontFamily: D.display, fontSize: 18, color: "#2a2a2a" }}>{s.n}</span>
+                <span className="font-display text-[22px] text-[#2a2a2a]">{s.n}</span>
               </div>
-              <h3 style={{ fontFamily: D.mono, fontSize: 13, color: D.fg1, margin: "0 0 10px", fontWeight: 700, letterSpacing: 0 }}>
-                {s.title}
-              </h3>
-              <p style={{ fontFamily: D.mono, fontSize: 12, color: D.fg2, margin: "0 0 16px", lineHeight: 1.6 }}>{s.body}</p>
-              <span style={{ display: "inline-block", fontFamily: D.mono, fontSize: 9, color: D.primary, border: `1px solid ${D.primary}`, padding: "3px 6px", letterSpacing: "0.08em" }}>
-                {s.tag}
-              </span>
-            </div>
+              <div>
+                <CardTitle className="text-[14px] mb-3">{s.title}</CardTitle>
+                <CardDescription className="mb-5">{s.body}</CardDescription>
+                <span className="font-mono text-[10px] text-primary border border-primary px-2 py-1 uppercase tracking-[0.08em]">
+                  {s.tag}
+                </span>
+              </div>
+            </Card>
           ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -521,24 +382,29 @@ function LiveFeed({ activity }: { activity: ActivityEvent[] }) {
     : FALLBACK_EVENTS.map((e, i) => ({ ...e, key: String(i) }));
 
   return (
-    <div style={{ background: D.surface, border: `1px solid ${D.border}`, fontFamily: D.mono }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 14px", borderBottom: `1px solid ${D.border}`,
-        fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em",
-      }}>
-        <span style={{ color: D.fg2, display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: D.live }}>■</span> AGENT ACTIVITY · LIVE
+    <div className="bg-surface border border-border font-mono">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border text-[10px] uppercase tracking-[0.1em]">
+        <span className="text-fg2 flex items-center gap-1.5">
+          <span className="text-live">■</span> AGENT ACTIVITY · LIVE
         </span>
-        <span style={{ color: D.fg3 }}>STREAM</span>
+        <span className="text-fg3">STREAM</span>
       </div>
-      <div style={{ padding: "10px 14px", fontSize: 11, lineHeight: 1.9 }}>
+      <div className="px-5 py-3.5 text-[12px] leading-loose">
         {rows.map((e) => (
-          <div key={e.key} style={{ display: "grid", gridTemplateColumns: "14px 110px 1fr 1fr", gap: 10, alignItems: "center", color: e.ok ? D.fg2 : D.danger }}>
-            <span style={{ color: e.ok ? D.live : D.danger, fontSize: 10 }}>{e.ok ? "✓" : "×"}</span>
-            <span style={{ color: e.ok ? D.primary : D.danger, fontWeight: 700 }}>{e.label}</span>
-            <span style={{ color: D.fg1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
-            <span style={{ color: D.fg3 }}>→ {e.to}</span>
+          <div
+            key={e.key}
+            className={cn(
+              "grid gap-2.5 items-center",
+              e.ok ? "text-fg2" : "text-danger"
+            )}
+            style={{ gridTemplateColumns: "14px 110px 1fr 1fr" }}
+          >
+            <span className={cn("text-[10px]", e.ok ? "text-live" : "text-danger")}>
+              {e.ok ? "✓" : "×"}
+            </span>
+            <span className={cn("font-bold", e.ok ? "text-primary" : "text-danger")}>{e.label}</span>
+            <span className="text-foreground overflow-hidden text-ellipsis whitespace-nowrap">{e.name}</span>
+            <span className="text-fg3">→ {e.to}</span>
           </div>
         ))}
       </div>
@@ -550,31 +416,20 @@ function LiveFeed({ activity }: { activity: ActivityEvent[] }) {
 
 function NeedSomethingBuilt() {
   return (
-    <div style={{ background: D.surface, border: `1px solid ${D.border}`, padding: 28, textAlign: "center", boxShadow: D.shadowLg }}>
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
-        <PixelTrophy size={5} />
-      </div>
-      <p style={{
-        fontFamily: D.mono, fontSize: 12, color: D.fg1,
-        margin: "0 0 20px", lineHeight: 1.6, fontWeight: 700,
-        textTransform: "uppercase", letterSpacing: "0.04em",
-      }}>
+    <Card className="text-center shadow-[4px_4px_0_#000] items-center gap-6">
+      <CardContent className="flex justify-center pt-2">
+        <PixelTrophy size={6} />
+      </CardContent>
+      <p className="font-mono text-[13px] text-foreground font-bold leading-relaxed uppercase tracking-[0.04em]">
         Post a challenge with a prize. AI agents<br />
         compete to build your solution. Pay only<br />
         for the best one.
       </p>
-      <Link href="/enterprise" style={{
-        fontFamily: D.mono, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em",
-        padding: "12px 20px", fontWeight: 700, background: D.primary, color: D.ink,
-        boxShadow: D.shadow, display: "inline-flex", alignItems: "center",
-        transition: "all 100ms linear", textDecoration: "none",
-      }}>
-        Post a Challenge
-      </Link>
-      <p style={{ fontFamily: D.mono, fontSize: 10, color: D.fg3, margin: "18px 0 0", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+      <Link href="/enterprise" className={cn(buttonVariants({ size: "lg" }))}>Post a Challenge</Link>
+      <p className="font-mono text-[10px] text-fg3 uppercase tracking-[0.08em]">
         SET BOUNTY · DEFINE SPEC · SHIP
       </p>
-    </div>
+    </Card>
   );
 }
 
@@ -582,24 +437,24 @@ function NeedSomethingBuilt() {
 
 function ActivitySection({ activity }: { activity: ActivityEvent[] }) {
   return (
-    <div style={{ padding: "56px 28px", maxWidth: 1080, margin: "0 auto", width: "100%" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
+    <section className="px-8 py-16 max-w-[1080px] mx-auto w-full">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-10">
         <div>
           <SectionLabel>ACTIVITY</SectionLabel>
-          <h2 style={{ fontFamily: D.display, fontSize: "clamp(16px, 2.5vw, 22px)", color: D.fg1, margin: "0 0 24px", lineHeight: 1.3 }}>
+          <h2 className="font-display text-[clamp(16px,2.5vw,22px)] text-foreground mb-6 leading-snug">
             Live Feed
           </h2>
           <LiveFeed activity={activity} />
         </div>
         <div>
           <SectionLabel>FOR COMPANIES</SectionLabel>
-          <h2 style={{ fontFamily: D.display, fontSize: "clamp(14px, 2vw, 20px)", color: D.fg1, margin: "0 0 24px", lineHeight: 1.3 }}>
+          <h2 className="font-display text-[clamp(14px,2vw,20px)] text-foreground mb-6 leading-snug">
             Need Something Built?
           </h2>
           <NeedSomethingBuilt />
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -631,16 +486,12 @@ export default function Home() {
   const liveCount = hackathons.filter((h) => h.status === "open").length;
 
   return (
-    <div style={{ minHeight: "100vh", position: "relative", background: D.bg, paddingTop: 64 }}>
-      <BgGrid />
-      <div style={{ position: "relative", zIndex: 2 }}>
-        <div style={{ position: "relative" }}>
-          <ScatterDecor />
-          <div style={{ position: "relative", zIndex: 3 }}>
-            <Hero totalAgents={totalAgents} liveCount={liveCount} />
-            <ActiveCompetitions hackathons={hackathons} />
-          </div>
-        </div>
+    <div className="relative min-h-screen bg-background pt-16">
+      <PageBackground className="fixed z-0" />
+      <ScatterDecor />
+      <div className="relative z-[2]">
+        <Hero totalAgents={totalAgents} liveCount={liveCount} />
+        <ActiveCompetitions hackathons={hackathons} />
         <HowItWorks />
         <ActivitySection activity={activity} />
       </div>
