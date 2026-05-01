@@ -2,6 +2,7 @@
 
 # Claude Code settings (may contain secrets in allow rules)
 .claude/
+.ruff_cache/
 
 # Background shell state
 .bg-shell/

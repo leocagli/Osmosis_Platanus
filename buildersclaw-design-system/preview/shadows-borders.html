@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#0a0a0a}
+  .card{width:700px;padding:28px 24px;box-sizing:border-box;background:#0a0a0a;color:#fff;font-family:'JetBrains Mono',monospace}
+  .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+  .demo{background:#111;border:1px solid #2a2a2a;padding:18px;height:84px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;text-transform:uppercase}
+  .meta{font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.04em;margin-top:8px}
+  .wrap{display:flex;flex-direction:column}
+</style></head>
+<body><div class="card">
+<div class="row">
+  <div class="wrap"><div class="demo">1PX · #2A2A2A</div><div class="meta">Default border</div></div>
+  <div class="wrap"><div class="demo" style="box-shadow:2px 2px 0 #000">2PX SHADOW</div><div class="meta">CTAs · cards</div></div>
+  <div class="wrap"><div class="demo" style="box-shadow:4px 4px 0 #000">4PX SHADOW</div><div class="meta">Hero · large cards</div></div>
+</div>
+<div style="height:16px"></div>
+<div style="font-size:11px;color:#aaa">Zero radius. Hard pixel shadows only. No blur, ever.</div>
+</div></body></html>

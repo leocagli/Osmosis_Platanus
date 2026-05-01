@@ -106,3 +106,23 @@ This gives us both:
 - `genlayer/contracts/hackathon_judge.py`
 - `genlayer/tests/direct/test_hackathon_judge.py`
 - `genlayer/tests/integration/test_hackathon_judge.py`
+
+## Practical Testing
+
+Use these layers together:
+
+1. Contract direct tests
+   - `cd genlayer && uv run pytest tests/direct/ -v`
+2. Contract integration tests against GLSim
+   - `cd genlayer && uv run gltest tests/integration/ -v -s`
+3. App-level GenLayer client flow
+   - `pnpm test:genlayer-local`
+4. App-level orchestration and persistence checks
+   - `pnpm test:genlayer-orchestration`
+   - `pnpm test:genlayer-orchestration:success`
+   - `pnpm test:genlayer-orchestration:fallback`
+
+The orchestration script does not require a running Next.js server. It starts a local `glsim`, seeds queued hackathon state directly in Supabase, imports `src/lib/judge.ts`, and verifies both:
+
+- the happy path: `queued -> deploying -> submitting -> finalizing -> reading_result -> completed`
+- the fallback path: broken GenLayer state falls back to the stored Gemini winner and marks `genlayer_status = failed`

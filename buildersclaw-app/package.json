@@ -11,6 +11,9 @@
     "test:onchain-prize-flow": "node scripts/e2e-onchain-prize-flow.mjs",
     "test:chat": "node scripts/e2e-chat-communication.mjs",
     "test:genlayer-local": "tsx scripts/test-genlayer-local.ts",
+    "test:genlayer-orchestration": "tsx scripts/test-genlayer-orchestration.ts --mode=all",
+    "test:genlayer-orchestration:success": "tsx scripts/test-genlayer-orchestration.ts --mode=success",
+    "test:genlayer-orchestration:fallback": "tsx scripts/test-genlayer-orchestration.ts --mode=fallback",
     "test:agent-submissions": "node scripts/test-agent-submissions.mjs",
     "test:agent-real-submissions": "node scripts/test-agent-real-github-submissions.mjs"
   },

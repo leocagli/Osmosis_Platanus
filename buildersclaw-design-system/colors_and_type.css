@@ -1,0 +1,170 @@
+/* ============================================================
+   BUILDERSCLAW — Colors & Type
+   Clean 8-Bit design system. Pixel precision, no decoration.
+   ============================================================ */
+
+/* --- Fonts (Google Fonts) --------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  /* --- Color: Surfaces --------------------------------- */
+  --bg:          #0a0a0a;  /* page background */
+  --surface:     #111111;  /* cards, panels */
+  --surface-2:   #1a1a1a;  /* input backgrounds, hovers on surface */
+
+  /* --- Color: Borders --------------------------------- */
+  --border:       #2a2a2a; /* default */
+  --border-hover: #3a3a3a; /* hover state */
+
+  /* --- Color: Brand + Semantic ------------------------ */
+  --primary:     #FF6B00;  /* orange — brand, primary CTA */
+  --primary-ink: #000000;  /* text that sits on --primary */
+  --live:        #00FF88;  /* status / live indicator */
+  --danger:      #FF3333;  /* destructive */
+
+  /* --- Color: Text ------------------------------------ */
+  --fg1: #FFFFFF;   /* primary text */
+  --fg2: #AAAAAA;   /* secondary text */
+  --fg3: #555555;   /* muted / disabled */
+
+  /* --- Type: Families --------------------------------- */
+  --font-display: 'Press Start 2P', ui-monospace, monospace;
+  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+  /* --- Type: Sizes ------------------------------------ */
+  --fs-display: 40px;
+  --fs-h1:      24px;
+  --fs-h2:      16px;
+  --fs-h3:      12px;
+  --fs-body:    13px;
+  --fs-small:   11px;
+
+  /* --- Type: Line heights (tighter for display) ------- */
+  --lh-display: 1.4;
+  --lh-body:    1.6;
+  --lh-tight:   1.2;
+
+  /* --- Spacing: 4px base ------------------------------ */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;   /* card padding */
+  --s-8:  32px;   /* section min */
+  --s-12: 48px;
+  --s-16: 64px;   /* section max */
+
+  --content-max: 1080px;
+
+  /* --- Border / Shape --------------------------------- */
+  --radius: 0;                          /* ALWAYS zero */
+  --border-width: 1px;
+  --shadow-hard: 2px 2px 0 #000000;     /* the only shadow */
+  --shadow-hard-lg: 4px 4px 0 #000000;
+
+  /* --- Motion ----------------------------------------- */
+  --motion: 100ms linear;
+  --press: translate(1px, 1px);
+}
+
+/* ============================================================
+   Base + Semantic element styles
+   ============================================================ */
+
+html, body {
+  background: var(--bg);
+  color: var(--fg1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: none;          /* respect pixel crispness */
+  font-smooth: never;
+}
+
+*, *::before, *::after { box-sizing: border-box; border-radius: 0; }
+
+/* Display headline — reserved for hero / marquee moments */
+.display,
+h1.display {
+  font-family: var(--font-display);
+  font-size: var(--fs-display);
+  line-height: var(--lh-display);
+  color: var(--fg1);
+  letter-spacing: 0;
+  margin: 0;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  line-height: var(--lh-display);
+  color: var(--fg1);
+  margin: 0;
+}
+
+h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  line-height: var(--lh-display);
+  color: var(--fg1);
+  margin: 0;
+}
+
+h3 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  line-height: var(--lh-display);
+  color: var(--fg1);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+p, li, dd, dt, span, a, label, input, textarea, button, td, th {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+}
+
+small, .small {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+
+code, pre, kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  color: var(--fg1);
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--motion);
+}
+a:hover { border-bottom-color: var(--primary); }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--s-6) 0;
+}
+
+::selection { background: var(--primary); color: var(--primary-ink); }
+
+/* ============================================================
+   Text roles (semantic classes)
+   ============================================================ */
+
+.t-mono   { font-family: var(--font-mono); }
+.t-pixel  { font-family: var(--font-display); }
+.t-upper  { text-transform: uppercase; letter-spacing: 0.04em; }
+.t-fg1    { color: var(--fg1); }
+.t-fg2    { color: var(--fg2); }
+.t-fg3    { color: var(--fg3); }
+.t-primary{ color: var(--primary); }
+.t-live   { color: var(--live); }
+.t-danger { color: var(--danger); }

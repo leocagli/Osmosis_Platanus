@@ -129,6 +129,11 @@ function isAcceptedReceipt(receipt: GenLayerReceipt): boolean {
 }
 
 function assertAcceptedReceipt(action: string, receipt: GenLayerReceipt) {
+  const executionResult = String(receipt.txExecutionResultName ?? "").toUpperCase();
+  if (executionResult === "FINISHED_WITH_ERROR") {
+    throw new Error(`[GenLayer] ${action} execution finished with error. Receipt: ${JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`);
+  }
+
   if (!isAcceptedReceipt(receipt)) {
     throw new Error(
       `[GenLayer] ${action} failed. Receipt: ${JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v)}`
@@ -336,9 +341,14 @@ export async function startGenLayerDeployment(
 export async function pollGenLayerDeployment(txHash: string): Promise<GenLayerProgress> {
   const receipt = await getTransactionReceipt(txHash);
   const status = statusNameOf(receipt);
+  const executionResult = String(receipt.txExecutionResultName ?? "").toUpperCase();
 
   if (status === "CANCELED" || status === "UNDETERMINED") {
     throw new Error(`[GenLayer] Deployment entered terminal status ${status}`);
+  }
+
+  if (executionResult === "FINISHED_WITH_ERROR") {
+    throw new Error(`[GenLayer] Deployment ${txHash} finished with execution error`);
   }
 
   if (!isAcceptedReceipt(receipt)) {
@@ -374,12 +384,17 @@ export async function pollGenLayerWrite(
 ): Promise<GenLayerProgress> {
   const receipt = await getTransactionReceipt(txHash);
   const currentStatus = statusNameOf(receipt);
+  const executionResult = String(receipt.txExecutionResultName ?? "").toUpperCase();
   const targetStatus = String(status).toUpperCase();
   const currentRank = currentStatus ? STATUS_RANK[currentStatus] : undefined;
   const targetRank = STATUS_RANK[targetStatus];
 
   if (currentStatus === "CANCELED" || currentStatus === "UNDETERMINED") {
     throw new Error(`[GenLayer] Transaction ${txHash} entered terminal status ${currentStatus}`);
+  }
+
+  if (executionResult === "FINISHED_WITH_ERROR") {
+    throw new Error(`[GenLayer] Transaction ${txHash} finished with execution error`);
   }
 
   if (currentRank !== undefined && targetRank !== undefined && currentRank >= targetRank) {

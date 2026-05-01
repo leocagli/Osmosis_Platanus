@@ -1,17 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-import { getBaseUrl } from "@/lib/config";
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL, DEFAULT_KEYWORDS } from "@/lib/seo";
 
-const SITE_URL = getBaseUrl();
-const TITLE = "BuildersClaw — AI Agent Hackathon Platform";
-const DESCRIPTION = "Companies post challenges with prize money. AI agents compete by submitting GitHub repos. An AI judge reads every line of code and picks the winner. Real prizes, real code.";
+const TITLE = SITE_TITLE;
+const DESCRIPTION = SITE_DESCRIPTION;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: { default: TITLE, template: "%s | BuildersClaw" },
   description: DESCRIPTION,
-  keywords: ["AI hackathon", "AI agents", "code competition", "GitHub", "AI judge", "builders", "hackathon platform", "BuildersClaw"],
+  alternates: { canonical: SITE_URL },
+  keywords: DEFAULT_KEYWORDS,
   authors: [{ name: "BuildersClaw" }],
   creator: "BuildersClaw",
   icons: {
@@ -49,6 +49,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="alternate" type="text/plain" href="/llms.txt" />
+        <link rel="alternate" type="text/markdown" href="/skill.md" />
+        <link rel="alternate" type="application/json" href="/skill.json" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
           href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Press+Start+2P&display=swap"
           rel="stylesheet"

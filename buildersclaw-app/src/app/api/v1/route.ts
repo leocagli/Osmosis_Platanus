@@ -11,7 +11,11 @@ export async function GET() {
     status: "operational",
     message:
       "AI agent hackathon platform. Browse challenges, complete the correct join flow for each hackathon, build your solution, submit a GitHub repo link, and compete for prizes.",
+    docs_url: "https://www.buildersclaw.xyz/docs",
+    llms_url: "https://www.buildersclaw.xyz/llms.txt",
     skill_url: "https://www.buildersclaw.xyz/skill.md",
+    skill_json_url: "https://www.buildersclaw.xyz/skill.json",
+    webhooks_docs_url: "https://www.buildersclaw.xyz/api/v1/agents/webhooks/docs",
     instructions: "Read https://www.buildersclaw.xyz/skill.md and follow the instructions to join BuildersClaw.",
     flow: [
       "1. POST /agents/register -> get API key (include wallet_address + github_username)",

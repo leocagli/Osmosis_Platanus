@@ -10,6 +10,11 @@ Next.js 16 frontend + API backend for the BuildersClaw platform.
 
 GenLayer judging deploys a fresh `HackathonJudge` contract per hackathon run. See [docs/genlayer.md](./docs/genlayer.md).
 
+Practical local validation now has two app-level layers:
+
+- `pnpm test:genlayer-local` validates `src/lib/genlayer.ts` end-to-end against local `glsim`
+- `pnpm test:genlayer-orchestration` seeds queued judging state in Supabase and exercises `src/lib/judge.ts` GenLayer continuation success + fallback paths
+
 ---
 
 ## Quick Start
@@ -28,6 +33,8 @@ pnpm dev                            # http://localhost:3000
 | `pnpm build` | Production build |
 | `pnpm lint` | ESLint |
 | `npm run test:onchain-prize-flow` | E2E on-chain prize test |
+| `pnpm test:genlayer-local` | Local GenLayer TS pipeline check |
+| `pnpm test:genlayer-orchestration` | DB-backed queued/fallback orchestration check |
 
 ---
 

@@ -1,29 +1,33 @@
 @import "tailwindcss";
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0; }
 
 :root {
-  --bg: #0a0a0a; --surface: #131313; --s-low: #1c1b1b; --s-mid: #201f1f;
-  --s-high: #2a2a2a; --s-top: #353534;
-  --primary: #FF6B35; --p-light: #FF8C5A; --p-dim: #ffb59d; --p-dark: #812e01;
-  --gold: #FFD700; --gold-dim: #c9a900; --green: #4ade80; --red: #ff716c;
-  --text: #e5e2e1; --text-dim: #e1bfb5; --text-muted: #a98a80; --outline: #594139;
-  --accent-primary: #FF6B35; --accent-secondary: #FFD700;
-  --text-secondary: #e1bfb5; --border-glow: rgba(255,107,53,0.4);
+  /* Surfaces */
+  --bg: #0a0a0a; --surface: #111111; --s-low: #111111; --s-mid: #1a1a1a;
+  --s-high: #2a2a2a; --s-top: #3a3a3a;
+  /* Brand */
+  --primary: #FF6B00; --primary-ink: #000000; --p-light: #FF8C3A; --p-dim: #ffb57a; --p-dark: #7a3000;
+  /* Semantic */
+  --live: #00FF88; --gold: #FFD700; --gold-dim: #c9a900; --green: #00FF88; --red: #FF3333;
+  /* Borders */
+  --border: #2a2a2a; --border-hover: #3a3a3a; --outline: #2a2a2a;
+  /* Text */
+  --text: #FFFFFF; --text-dim: #AAAAAA; --text-muted: #555555; --fg1: #FFFFFF; --fg2: #AAAAAA; --fg3: #555555;
+  /* Compat aliases */
+  --accent-primary: #FF6B00; --accent-secondary: #FFD700;
+  --text-secondary: #AAAAAA; --border-glow: rgba(255,107,0,0.4);
+  /* Shadows */
+  --shadow-hard: 2px 2px 0 #000; --shadow-hard-lg: 4px 4px 0 #000;
+  /* Motion */
+  --motion: 100ms linear;
 }
 
 html { scroll-behavior: smooth; }
 body {
   background-color: var(--bg);
-  background-image:
-    /* tile highlight — top-left inner edge */
-    linear-gradient(180deg, rgba(255,255,255,0.035) 0px, transparent 6px),
-    linear-gradient(90deg, rgba(255,255,255,0.035) 0px, transparent 6px),
-    /* grout — darker gap lines between tiles */
-    linear-gradient(90deg, rgba(0,0,0,0.4) 0px, rgba(0,0,0,0.15) 2px, transparent 2px),
-    linear-gradient(180deg, rgba(0,0,0,0.4) 0px, rgba(0,0,0,0.15) 2px, transparent 2px);
-  background-size: 72px 72px;
   color: var(--text); font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 14px; overflow-x: hidden;
+  -webkit-font-smoothing: none;
 }
 a { color: inherit; text-decoration: none; }
 
@@ -38,7 +42,7 @@ a { color: inherit; text-decoration: none; }
 .glass-card-glow { background: rgba(19,19,19,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,107,53,0.2); border-radius: 16px; box-shadow: 0 0 40px rgba(255,107,53,0.06); }
 
 /* ═══════════════════════ NAV ═══════════════════════ */
-nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10,10,10,0.88); backdrop-filter: blur(24px); border-bottom: 1px solid rgba(89,65,57,0.12); padding: 0 48px; height: 64px; display: flex; align-items: center; justify-content: space-between; }
+nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; padding: 0 28px; height: 64px; display: flex; align-items: center; justify-content: space-between; }
 .nav-left { display: flex; align-items: center; gap: 32px; }
 .logo { font-family: 'Press Start 2P', monospace; font-size: 14px; font-weight: 400; display: inline-flex; align-items: center; gap: 6px; }
 .logo span { color: var(--primary); }
@@ -51,7 +55,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba
 .mobile-menu { display: none; }
 
 /* Footer */
-footer { border-top: 1px solid var(--outline); padding: 32px 48px; background: var(--surface); }
+footer { border-top: 1px solid var(--border); padding: 24px 28px; background: var(--bg); }
 .footer-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
 .footer-left { display: flex; align-items: center; gap: 12px; }
 .footer-links { display: flex; gap: 20px; }
@@ -60,16 +64,16 @@ footer { border-top: 1px solid var(--outline); padding: 32px 48px; background: v
 .footer-right { font-size: 12px; color: var(--text-muted); }
 
 /* ═══════════════════════ BUTTONS ═══════════════════════ */
-.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: all .2s; font-family: 'Space Grotesk', sans-serif; }
-.btn-primary { background: var(--primary); color: #fff; }
-.btn-primary:hover { background: var(--p-light); box-shadow: 0 0 20px rgba(255,107,53,0.3); }
-.btn-outline { background: transparent; color: var(--text); border: 1px solid var(--outline); }
-.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
-.btn-ghost { background: transparent; color: var(--text-muted); padding: 10px 12px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: all var(--motion); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.06em; }
+.btn-primary { background: var(--primary); color: var(--primary-ink); box-shadow: var(--shadow-hard); }
+.btn-primary:hover { transform: translate(1px, 1px); box-shadow: none; }
+.btn-primary:active { transform: translate(2px, 2px); box-shadow: none; }
+.btn-outline, .btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border-hover); box-shadow: var(--shadow-hard); }
+.btn-outline:hover, .btn-secondary:hover { border-color: var(--border-hover); }
+.btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
 .btn-ghost:hover { color: var(--primary); }
-.btn-gold { background: var(--gold); color: #1a1a00; font-weight: 700; }
-.btn-gold:hover { box-shadow: 0 0 20px rgba(255,215,0,0.3); }
-.btn-sm { padding: 8px 14px; font-size: 12px; }
+.btn-gold { background: var(--gold); color: #000; font-weight: 700; box-shadow: var(--shadow-hard); }
+.btn-sm { padding: 8px 14px; font-size: 11px; }
 
 /* ═══════════════════════ HERO ═══════════════════════ */
 .hero { min-height: 85vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px 48px 60px; position: relative; overflow: hidden; }

@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { createPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = createPageMetadata({
   title: "Pitch Deck",
-  description: "View the BuildersClaw pitch deck.",
-};
+  description: "View the BuildersClaw pitch deck and product overview.",
+  path: "/deck",
+  keywords: ["pitch deck", "startup deck", "product overview"],
+});
 
 const DECK_SRC = "/deck/deck.pdf";
 
