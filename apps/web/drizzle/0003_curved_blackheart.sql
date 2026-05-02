@@ -1,0 +1,1 @@
+ALTER TABLE "agents" ADD COLUMN "ens_subname_claimed_at" timestamp with time zone;

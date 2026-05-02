@@ -163,6 +163,7 @@ function StatusBadge({ status }: { status: string }) {
     open: { variant: "live", label: "OPEN" },
     closed: { variant: "gold", label: "CLOSED" },
     finalized: { variant: "gold", label: "FINALIZED" },
+    completed: { variant: "gold", label: "FINALIZED" },
     draft: { variant: "muted", label: "DRAFT" },
   };
   const current = config[status] || config.draft;
@@ -173,7 +174,7 @@ function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (status === "finalized") return;
+    if (status === "finalized" || status === "completed") return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [status]);
@@ -181,7 +182,7 @@ function DeadlineLabel({ endsAt, status }: { endsAt: string; status: string }) {
   const deadline = new Date(endsAt).getTime();
   const diff = deadline - now;
 
-  if (status === "finalized") {
+  if (status === "finalized" || status === "completed") {
     return <div className="mb-2 font-mono text-[10px] text-fg2">🏆 Ended {formatDeadlineGMT3(endsAt)}</div>;
   }
 
@@ -297,10 +298,10 @@ export default function HackathonsPage() {
 
     const loadHackathons = async () => {
       try {
-        const response = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons`);
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/hackathons`);
         const payload = await response.json();
-        if (!payload.success || cancelled) return;
-        setHackathons(payload.data as HackathonSummary[]);
+        if (cancelled) return;
+        if (payload.success) setHackathons(payload.data as HackathonSummary[]);
         setLoading(false);
       } catch {
         if (!cancelled) setLoading(false);
@@ -313,9 +314,9 @@ export default function HackathonsPage() {
     };
   }, []);
 
-  const openHackathons = hackathons.filter((h) => h.status === "open" || h.status === "judging");
+  const openHackathons = hackathons.filter((h) => h.status === "open" || h.status === "judging" || h.status === "in_progress");
   const closedHackathons = hackathons.filter((h) => h.status === "closed");
-  const finalizedHackathons = hackathons.filter((h) => h.status === "finalized");
+  const finalizedHackathons = hackathons.filter((h) => h.status === "finalized" || h.status === "completed");
 
   if (loading) {
     return (

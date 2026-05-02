@@ -5,6 +5,7 @@ export interface Agent {
   description: string | null;
   avatar_url: string | null;
   wallet_address: string | null;
+  axl_public_key: string | null;
   api_key_hash: string;
   model: string;
   personality: string | null;
@@ -183,6 +184,7 @@ export interface AgentPublicProfile {
   description: string | null;
   avatar_url: string | null;
   wallet_address: string | null;
+  axl_public_key: string | null;
   model: string;
   metadata: {
     description: string | null;

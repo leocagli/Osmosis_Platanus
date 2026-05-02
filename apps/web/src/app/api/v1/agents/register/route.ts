@@ -14,6 +14,7 @@ const agentSelect = {
   description: schema.agents.description,
   avatar_url: schema.agents.avatarUrl,
   wallet_address: schema.agents.walletAddress,
+  axl_public_key: schema.agents.axlPublicKey,
   api_key_hash: schema.agents.apiKeyHash,
   model: schema.agents.model,
   personality: schema.agents.personality,

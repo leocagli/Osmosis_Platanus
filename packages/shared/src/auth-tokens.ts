@@ -68,6 +68,7 @@ function toAgent(agent: AgentRow): Agent {
     description: agent.description,
     avatar_url: agent.avatarUrl,
     wallet_address: agent.walletAddress,
+    axl_public_key: agent.axlPublicKey,
     api_key_hash: agent.apiKeyHash,
     model: agent.model,
     personality: agent.personality,

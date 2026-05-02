@@ -10,6 +10,7 @@ High-performance Fastify service providing the REST API for BuildersClaw.
 
 ```bash
 # From the root
+cp apps/api/.env.example apps/api/.env
 pnpm api
 ```
 

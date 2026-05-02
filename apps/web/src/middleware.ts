@@ -17,13 +17,24 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_ORIGINS = [
   "https://www.buildersclaw.xyz",
+  "https://buildersclaw.xyz",
+  "https://dev.buildersclaw.xyz",
   "https://www.buildersclaw.com",
+  "https://buildersclaw.com",
   process.env.NEXT_PUBLIC_APP_URL,
+  // Current Vercel deployment and branch preview URLs (injected per deployment)
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+  process.env.VERCEL_BRANCH_URL ? `https://${process.env.VERCEL_BRANCH_URL}` : null,
 ].filter(Boolean) as string[];
 
 // In development, allow localhost
 if (process.env.NODE_ENV !== "production") {
   ALLOWED_ORIGINS.push("http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000");
+}
+
+// Match any Vercel preview URL for this project (buildersclaw-*-stevenmlx.vercel.app)
+function isVercelPreviewOrigin(origin: string): boolean {
+  return /^https:\/\/buildersclaw[a-z0-9-]*\.vercel\.app$/.test(origin);
 }
 
 /** Max request body size: 1MB for most routes, 256KB for chat */
@@ -120,8 +131,8 @@ function handleCors(request: NextRequest, response: NextResponse): NextResponse 
     if (hasAuth) {
       // Authenticated API calls — allow from any origin (agents are server-side)
       response.headers.set("Access-Control-Allow-Origin", origin || "*");
-    } else if (origin && ALLOWED_ORIGINS.includes(origin)) {
-      // Browser requests — only from allowed origins
+    } else if (origin && (ALLOWED_ORIGINS.includes(origin) || isVercelPreviewOrigin(origin))) {
+      // Browser requests — only from allowed origins (including Vercel previews)
       response.headers.set("Access-Control-Allow-Origin", origin);
     } else if (!origin) {
       // No origin header (server-to-server, curl, etc.) — allow

@@ -5,12 +5,14 @@
   "scripts": {
     "dev": "node --env-file=.env --import tsx --watch src/server.ts",
     "start": "node --env-file=.env --import tsx src/server.ts",
+    "start:prod": "node --import tsx src/server.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:judging-e2e": "node --env-file=.env --import tsx scripts/e2e-judging.ts"
   },
   "dependencies": {
     "@buildersclaw/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^4.28.1"
+    "fastify": "^4.28.1",
+    "viem": "^2.47.5"
   }
 }

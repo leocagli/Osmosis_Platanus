@@ -1,0 +1,12 @@
+{
+  "name": "buildersclaw-gensyn-axl-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node axl-agent.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

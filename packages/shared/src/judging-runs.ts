@@ -52,7 +52,7 @@ export async function createOrReuseJudgingRun(hackathonId: string) {
   if (!insertedRun) throw new Error("Failed to create judging run after retries");
 
   const job = await enqueueJob({
-    type: "judge_hackathon",
+    type: "judging.freeze_submissions",
     payload: { hackathon_id: hackathonId, judging_run_id: insertedRun.id },
     maxAttempts: 3,
   });

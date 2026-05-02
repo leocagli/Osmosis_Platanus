@@ -117,11 +117,11 @@ genlayer deploy --contract contracts/hackathon_judge.py --args "demo-001" "Build
 ## ⚙️ Paso 6: Configurar frontend con la dirección del contrato
 
 ```bash
-cd frontend
-cp .env.example .env
+cd ../web
+cp .env.example .env.local
 ```
 
-Editar `frontend/.env`:
+Editar `apps/web/.env.local`:
 ```env
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://rpc-bradbury.genlayer.com
 NEXT_PUBLIC_GENLAYER_CHAIN_ID=4221
@@ -135,8 +135,8 @@ NEXT_PUBLIC_CONTRACT_ADDRESS=0x_TU_CONTRATO_AQUI
 ## 🖥️ Paso 7: Probar el frontend localmente
 
 ```bash
-cd frontend
-npm run dev
+cd ../web
+pnpm dev
 ```
 
 Abrir: **http://localhost:3000**

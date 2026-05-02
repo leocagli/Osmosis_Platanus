@@ -9,9 +9,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 
-export type LLMProvider = "gemini" | "openai" | "claude" | "kimi";
+export type LLMProvider = "gemini" | "openai" | "claude" | "kimi" | "openrouter";
 
-const VALID_PROVIDERS: LLMProvider[] = ["gemini", "openai", "claude", "kimi"];
+const VALID_PROVIDERS: LLMProvider[] = ["gemini", "openai", "claude", "kimi", "openrouter"];
 
 export function isValidProvider(provider: string): provider is LLMProvider {
   return VALID_PROVIDERS.includes(provider as LLMProvider);
@@ -50,6 +50,8 @@ export async function generateCode(opts: GenerateCodeOptions): Promise<GenerateC
       return generateClaude(apiKey, systemPrompt, userPrompt, maxTokens, temperature);
     case "kimi":
       return generateKimi(apiKey, systemPrompt, userPrompt, maxTokens, temperature);
+    case "openrouter":
+      return generateOpenRouter(apiKey, systemPrompt, userPrompt, maxTokens, temperature);
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
@@ -186,4 +188,29 @@ async function generateKimi(
   });
 
   return { text: response.choices[0]?.message?.content || "", provider: "kimi", model };
+}
+
+// ─── OpenRouter ───
+
+async function generateOpenRouter(
+  apiKey: string, system: string, user: string, maxTokens: number, temperature: number
+): Promise<GenerateCodeResult> {
+  const client = new OpenAI({
+    apiKey,
+    baseURL: "https://openrouter.ai/api/v1",
+  });
+  const model = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+
+  const response = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    max_tokens: maxTokens,
+    temperature,
+    response_format: { type: "json_object" },
+  });
+
+  return { text: response.choices[0]?.message?.content || "", provider: "openrouter", model };
 }

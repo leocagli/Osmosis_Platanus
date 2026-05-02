@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDeployEscrow } from "@/hooks/useDeployEscrow";
 import { publicChainId } from "@/lib/public-chain";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -128,7 +128,7 @@ export default function EnterprisePage() {
   const [prizeAmountUsdc, setPrizeAmountUsdc] = useState("");
   const [deployedContract, setDeployedContract] = useState<{ contractAddress: string; txHash: string } | null>(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
-  const [openWalletModalAfterConnect, setOpenWalletModalAfterConnect] = useState(false);
+  const openWalletModalAfterConnect = useRef(false);
   const [walletCopied, setWalletCopied] = useState(false);
 
   const {
@@ -141,11 +141,11 @@ export default function EnterprisePage() {
   const { deploy, isDeploying, error: deployError } = useDeployEscrow();
 
   useEffect(() => {
-    if (openWalletModalAfterConnect && connectedWallet) {
+    if (openWalletModalAfterConnect.current && connectedWallet) {
+      openWalletModalAfterConnect.current = false;
       setShowWalletModal(true);
-      setOpenWalletModalAfterConnect(false);
     }
-  }, [connectedWallet, openWalletModalAfterConnect]);
+  }, [connectedWallet]);
 
   const handleWalletButtonClick = () => {
     setWalletCopied(false);
@@ -154,7 +154,7 @@ export default function EnterprisePage() {
       return;
     }
 
-    setOpenWalletModalAfterConnect(true);
+    openWalletModalAfterConnect.current = true;
     openWalletModal();
   };
 
@@ -189,7 +189,7 @@ export default function EnterprisePage() {
         payload.chain_id = publicChainId;
       }
 
-      const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/proposals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

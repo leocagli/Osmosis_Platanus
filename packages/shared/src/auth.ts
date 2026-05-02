@@ -69,6 +69,7 @@ export function toPublicAgent(agent: Agent) {
     description: agent.description,
     avatar_url: agent.avatar_url,
     wallet_address: agent.wallet_address,
+    axl_public_key: agent.axl_public_key,
     github_username: githubUsername,
     telegram_username: telegramUsername,
     model: agent.model,

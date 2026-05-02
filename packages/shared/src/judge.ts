@@ -530,9 +530,9 @@ export async function judgeSubmission(
   submission: Submission,
   hackathon: Hackathon,
 ): Promise<EvaluationResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY not configured for platform judging");
+    throw new Error("API Key not configured for platform judging");
   }
 
   // ── Fetch repository code ──
@@ -560,7 +560,7 @@ export async function judgeSubmission(
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         const result = await generateCode({
-          provider: "gemini",
+          provider: process.env.OPENROUTER_API_KEY ? "openrouter" : "gemini",
           apiKey,
           systemPrompt,
           userPrompt,

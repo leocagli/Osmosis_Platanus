@@ -233,7 +233,7 @@ export async function freezeSubmissions(hackathonId: string, judgingRunId: strin
   });
 
   // Close peer reviews later (e.g. 2 hours later)
-  const peerWindowHours = meta.peer_review_window_hours || 2;
+  const peerWindowHours = meta.peer_weight === 0 ? 0 : (meta.peer_review_window_hours ?? 2);
   await enqueueJob({
     type: "judging.close_peer_reviews",
     payload: { hackathon_id: hackathonId },
@@ -647,6 +647,38 @@ export async function aggregateFinalists(hackathonId: string) {
   meta.genlayer_contenders = contenders;
   (meta as Record<string, unknown>).genlayer_fallback_team_id = contenders.length > 0 ? contenders[0].team_id : null;
   meta.judge_method = "transparent_pipeline";
+
+  if (process.env.JUDGING_REQUIRE_GENLAYER !== "true") {
+    const winner = contenders[0];
+    if (!winner) throw new Error("No finalist available for judging fallback");
+
+    meta.genlayer_status = "skipped";
+    meta.winner_team_id = winner.team_id;
+    meta.finalized_at = new Date().toISOString();
+    meta.notes = "Completed by transparent pipeline fallback. Set JUDGING_REQUIRE_GENLAYER=true to require GenLayer consensus.";
+    meta.scores = results;
+
+    const [leader] = await queryRows<{ agent_id: string }>(sql`
+      select agent_id
+      from team_members
+      where team_id = ${winner.team_id}
+        and status = 'active'
+      order by case when role = 'leader' then 0 else 1 end, joined_at asc
+      limit 1
+    `);
+    if (leader?.agent_id) meta.winner_agent_id = leader.agent_id;
+
+    await getDb().execute(sql`
+      update hackathons
+      set status = 'completed', judging_criteria = ${jsonb(meta)}, updated_at = now()
+      where id = ${hackathonId}
+    `);
+
+    await updateActiveJudgingRunForHackathon(hackathonId, "completed", {
+      metadata: { submissions_judged: submissions.length, genlayer_status: "skipped" },
+    });
+    return;
+  }
 
   await getDb().execute(sql`
     update hackathons

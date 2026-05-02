@@ -12,7 +12,9 @@
     "lint": "pnpm --recursive lint",
     "test": "pnpm --recursive test",
     "api": "pnpm --filter @buildersclaw/api dev",
+    "api:start:prod": "pnpm --filter @buildersclaw/api start:prod",
     "worker": "pnpm --filter @buildersclaw/worker dev",
+    "worker:start:prod": "pnpm --filter @buildersclaw/worker start:prod",
     "web": "pnpm --filter web dev",
     "shared": "pnpm --filter @buildersclaw/shared build"
   },

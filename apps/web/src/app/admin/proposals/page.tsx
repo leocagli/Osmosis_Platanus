@@ -21,29 +21,17 @@ interface Proposal {
 
 export default function AdminProposalsPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [adminKey, setAdminKey] = useState("");
+  const [adminKey] = useState(() =>
+    typeof window !== "undefined" ? (sessionStorage.getItem("admin_key") ?? "") : ""
+  );
   const [authenticated, setAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("pending");
   const [acting, setActing] = useState<string | null>(null);
 
-  // Auto-login from sessionStorage (set by /admin/login)
-  useEffect(() => {
-    const stored = typeof window !== "undefined" ? sessionStorage.getItem("admin_key") : null;
-    if (stored) {
-      setAdminKey(stored);
-      fetchProposals(stored, "pending");
-    } else {
-      // Redirect to login
-      window.location.href = "/admin/login";
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const fetchProposals = async (key: string, status?: string) => {
-    setLoading(true);
     const qs = status ? `?status=${status}` : "";
-    const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals${qs}`, {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/proposals${qs}`, {
       headers: { Authorization: `Bearer ${key}` },
     });
     const data = await res.json();
@@ -54,11 +42,25 @@ export default function AdminProposalsPage() {
     setLoading(false);
   };
 
+  useEffect(() => {
+    if (!adminKey) { window.location.href = "/admin/login"; return; }
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/proposals?status=pending`, {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) { setProposals(data.data); setAuthenticated(true); }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [judgeKeyResult, setJudgeKeyResult] = useState<{ key: string; url: string; skillUrl: string } | null>(null);
 
   const handleAction = async (id: string, status: "approved" | "rejected") => {
     setActing(id);
-    const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals`, {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/proposals`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminKey}` },
       body: JSON.stringify({ id, status }),
@@ -74,12 +76,23 @@ export default function AdminProposalsPage() {
     } else if (data.success && data.data?.hackathon_url) {
       alert(`✅ Hackathon created!\n${window.location.origin}${data.data.hackathon_url}`);
     }
+    setLoading(true);
     await fetchProposals(adminKey, filter);
     setActing(null);
   };
 
   useEffect(() => {
-    if (authenticated) fetchProposals(adminKey, filter);
+    if (!authenticated) return;
+    const qs = filter ? `?status=${filter}` : "";
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/proposals${qs}`, {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) setProposals(data.data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
@@ -104,7 +117,7 @@ export default function AdminProposalsPage() {
       {/* Filter tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 32 }}>
         {["pending", "approved", "rejected", ""].map((s) => (
-          <button key={s || "all"} onClick={() => setFilter(s)}
+          <button key={s || "all"} onClick={() => { setLoading(true); setFilter(s); }}
             style={{
               padding: "8px 20px", borderRadius: 6, border: "1px solid var(--outline)", cursor: "pointer",
               background: filter === s ? "var(--primary)" : "var(--s-low)", color: filter === s ? "#fff" : "var(--text-muted)",

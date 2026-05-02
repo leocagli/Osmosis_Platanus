@@ -12,7 +12,7 @@ export function getDb() {
   }
 
   if (!client) {
-    client = postgres(url, { prepare: false });
+    client = postgres(url, { prepare: false, ssl: "require" });
   }
 
   if (!database) {

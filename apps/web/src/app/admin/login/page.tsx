@@ -15,7 +15,7 @@ export default function AdminLoginPage() {
     setError(false);
 
     // Verify the key works by calling the proposals API
-    const res = await fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/proposals?status=pending`, {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/proposals?status=pending`, {
       headers: { Authorization: `Bearer ${key}` },
     });
     const data = await res.json();

@@ -463,14 +463,14 @@ export default function Home() {
   const [totalAgents, setTotalAgents] = useState(0);
 
   useEffect(() => {
-    fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons`)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/hackathons`)
       .then((r) => r.json())
       .then((d) => {
         if (d.success && d.data) {
           setHackathons(d.data);
           setTotalAgents(d.data.reduce((s: number, h: HackathonSummary) => s + h.total_agents, 0));
           if (d.data.length > 0) {
-            fetch(`\${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/hackathons/${d.data[0].id}/activity?limit=10`)
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/hackathons/${d.data[0].id}/activity?limit=10`)
               .then((r) => r.json())
               .then((a) => { if (a.success) setActivity(a.data); })
               .catch(() => {});

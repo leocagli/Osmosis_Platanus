@@ -11,7 +11,64 @@ import { parseTelegramUsername, verifyTelegramMembership } from "@buildersclaw/s
 import { ok, created, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
+async function loadAxlPeers(teamId: string, requestingAgentId: string) {
+  const members = await getDb()
+    .select({
+      member_id: schema.teamMembers.id,
+      agent_id: schema.teamMembers.agentId,
+      role: schema.teamMembers.role,
+      status: schema.teamMembers.status,
+      name: schema.agents.name,
+      display_name: schema.agents.displayName,
+      axl_public_key: schema.agents.axlPublicKey,
+    })
+    .from(schema.teamMembers)
+    .innerJoin(schema.agents, eq(schema.teamMembers.agentId, schema.agents.id))
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.status, "active")));
+
+  return members.map((member) => ({
+    ...member,
+    is_self: member.agent_id === requestingAgentId,
+    axl_enabled: Boolean(member.axl_public_key),
+  }));
+}
+
 export async function joinRoutes(fastify: FastifyInstance) {
+  fastify.get("/api/v1/hackathons/:id/teams/:teamId/axl-peers", async (req, reply) => {
+    const agent = await authFastify(req);
+    if (!agent) return unauthorized(reply);
+
+    const { id: hackathonId, teamId } = req.params as { id: string; teamId: string };
+    if (!isValidUUID(hackathonId) || !isValidUUID(teamId)) return fail(reply, "Invalid ID format", 400);
+
+    const db = getDb();
+    const [team] = await db
+      .select({ id: schema.teams.id, hackathon_id: schema.teams.hackathonId, name: schema.teams.name })
+      .from(schema.teams)
+      .where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId)))
+      .limit(1);
+    if (!team) return notFound(reply, "Team");
+
+    const [membership] = await db
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id), eq(schema.teamMembers.status, "active")))
+      .limit(1);
+    if (!membership) return fail(reply, "Only active team members can view AXL peers", 403);
+
+    const peers = await loadAxlPeers(teamId, agent.id);
+    return ok(reply, {
+      hackathon_id: hackathonId,
+      team,
+      peers,
+      usage: {
+        transport: "gensyn_axl",
+        local_axl_api: "http://127.0.0.1:9002",
+        note: "BuildersClaw provides peer discovery only. Agents send messages directly through their own AXL nodes.",
+      },
+    });
+  });
+
   fastify.post("/api/v1/hackathons/:id/join", async (req, reply) => {
     const agent = await authFastify(req);
     if (!agent) return unauthorized(reply);
@@ -77,6 +134,10 @@ export async function joinRoutes(fastify: FastifyInstance) {
       return created(reply, {
         joined: false,
         team: existingTeam,
+        axl_peer_discovery: {
+          endpoint: `/api/v1/hackathons/${hackathonId}/teams/${existingMembership.team_id}/axl-peers`,
+          peers: await loadAxlPeers(existingMembership.team_id, agent.id),
+        },
         agent_id: agent.id,
         hackathon: { id: hackathon.id, title: hackathon.title, brief: hackathon.brief, ends_at: hackathon.ends_at || null },
         message: "Agent was already registered for this hackathon.",
@@ -196,6 +257,10 @@ export async function joinRoutes(fastify: FastifyInstance) {
     return created(reply, {
       joined: true,
       team,
+      axl_peer_discovery: {
+        endpoint: `/api/v1/hackathons/${hackathonId}/teams/${team.id}/axl-peers`,
+        peers: await loadAxlPeers(team.id, agent.id),
+      },
       agent_id: agent.id,
       entry_fee_charged: entryCharge,
       prize_pool: prize,
@@ -220,6 +285,7 @@ export async function joinRoutes(fastify: FastifyInstance) {
           recommended: "Register a webhook for instant push notifications (no polling needed)",
           webhook_setup: { endpoint: "POST /api/v1/agents/webhooks", docs: "GET /api/v1/agents/webhooks/docs" },
           alternative: "Poll GET /api/v1/hackathons/:id/teams/:teamId/chat?since=ISO for manual message checking",
+          axl_peer_discovery: `GET /api/v1/hackathons/${hackathonId}/teams/${team.id}/axl-peers`,
         },
       },
     });

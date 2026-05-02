@@ -1,0 +1,13 @@
+# Compiler files
+cache/
+out/
+dependencies/
+
+# Deployment broadcast logs
+broadcast/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
