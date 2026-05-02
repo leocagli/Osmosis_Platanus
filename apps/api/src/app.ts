@@ -10,6 +10,9 @@ import { joinRoutes } from "./routes/joins";
 import { chatRoutes } from "./routes/chat";
 import { submitRoutes } from "./routes/submit";
 import { balanceRoutes } from "./routes/balance";
+import { chainRoutes } from "./routes/chain";
+import { agentWebhookRoutes } from "./routes/agent-webhooks";
+import { proposalRoutes } from "./routes/proposals";
 
 export function buildApp() {
   const fastify = Fastify({
@@ -29,6 +32,9 @@ export function buildApp() {
   fastify.register(chatRoutes);
   fastify.register(submitRoutes);
   fastify.register(balanceRoutes);
+  fastify.register(chainRoutes);
+  fastify.register(agentWebhookRoutes);
+  fastify.register(proposalRoutes);
 
   return fastify;
 }

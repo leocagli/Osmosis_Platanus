@@ -1,9 +1,12 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import { randomUUID } from "crypto";
+import type { FastifyInstance } from "fastify";
 import { and, asc, count, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@buildersclaw/shared/db";
-import { formatHackathon, loadHackathonLeaderboard, calculatePrizePool, parseHackathonMeta, sanitizeString, serializeHackathonMeta, toInternalHackathonStatus } from "@buildersclaw/shared/hackathons";
-import { ok, fail, notFound, unauthorized } from "../respond";
-import { authFastify } from "../auth";
+import { getUsdcDecimals, getUsdcSymbol } from "@buildersclaw/shared/chain";
+import { telegramHackathonCreated } from "@buildersclaw/shared/telegram";
+import { formatHackathon, loadHackathonLeaderboard, calculatePrizePool, parseHackathonMeta, sanitizeString, sanitizeUrl, serializeHackathonMeta, toInternalHackathonStatus } from "@buildersclaw/shared/hackathons";
+import { ok, created, fail, notFound, unauthorized } from "../respond";
+import { adminAuthFastify, authFastify } from "../auth";
 
 function hasDbConfig() {
   return Boolean(process.env.DATABASE_URL);
@@ -41,7 +44,104 @@ function getConfiguredChainId(): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseNumber(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function parseInteger(value: unknown, fallback: number, min: number, max: number) {
+  return Math.round(parseNumber(value, fallback, min, max));
+}
+
+function parseDate(value: unknown, fallback: Date): Date | null {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getConfiguredUsdcDecimals() {
+  try {
+    return getUsdcDecimals();
+  } catch {
+    return Number.parseInt(process.env.USDC_DECIMALS || "18", 10);
+  }
+}
+
 export async function hackathonRoutes(fastify: FastifyInstance) {
+  // POST /api/v1/hackathons
+  fastify.post("/api/v1/hackathons", async (req, reply) => {
+    const isAdmin = adminAuthFastify(req);
+    const agent = isAdmin ? null : await authFastify(req);
+    if (!isAdmin && !agent) return unauthorized(reply, "Admin or agent authentication required");
+
+    const body = req.body as Record<string, unknown> || {};
+    const title = sanitizeString(body.title, 200);
+    const brief = sanitizeString(body.brief, 5000);
+    if (!title || !brief) return fail(reply, "title and brief are required", 400);
+
+    const now = new Date();
+    const startsAt = parseDate(body.starts_at, now);
+    const endsAt = parseDate(body.ends_at, new Date(now.getTime() + 24 * 60 * 60 * 1000));
+    if (!startsAt) return fail(reply, "starts_at must be a valid date string", 400);
+    if (!endsAt) return fail(reply, "ends_at must be a valid date string", 400);
+    if (endsAt.getTime() <= startsAt.getTime()) return fail(reply, "ends_at must be after starts_at", 400);
+
+    const rawStatus = sanitizeString(body.status, 32) || "open";
+    const status = ["draft", "scheduled", "open", "in_progress", "judging", "completed"].includes(rawStatus) ? rawStatus : "open";
+    const contractAddress = sanitizeString(body.contract_address, 128);
+    const teamSizeMin = parseInteger(body.team_size_min, 1, 1, 20);
+    const teamSizeMax = Math.max(teamSizeMin, parseInteger(body.team_size_max, 5, 1, 20));
+    const platformFeePct = parseNumber(body.platform_fee_pct, Number.parseFloat(process.env.PLATFORM_FEE_PCT || "0.1"), 0, 1);
+    const chainId = Number.isInteger(Number(body.chain_id)) ? Number(body.chain_id) : getConfiguredChainId();
+    const id = randomUUID();
+
+    try {
+      const [hackathon] = await getDb().insert(schema.hackathons).values({
+        id,
+        title,
+        description: sanitizeString(body.description, 2000) || null,
+        brief,
+        rules: sanitizeString(body.rules, 4000),
+        entryType: contractAddress ? "on_chain" : "off_chain",
+        entryFee: parseInteger(body.entry_fee, 0, 0, 1_000_000),
+        prizePool: parseNumber(body.prize_pool, 0, 0, 100_000_000),
+        platformFeePct,
+        maxParticipants: parseInteger(body.max_participants, 100, 1, 10_000),
+        teamSizeMin,
+        teamSizeMax,
+        buildTimeSeconds: parseInteger(body.build_time_seconds, 180, 30, 86_400),
+        challengeType: sanitizeString(body.challenge_type, 50) || "other",
+        status,
+        createdBy: agent?.id ?? null,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        judgingCriteria: serializeHackathonMeta({
+          chain_id: chainId,
+          contract_address: contractAddress,
+          sponsor_address: sanitizeString(body.sponsor_address, 128),
+          token_address: sanitizeString(body.token_address, 128) || process.env.USDC_ADDRESS || null,
+          token_symbol: sanitizeString(body.token_symbol, 32) || getUsdcSymbol(),
+          token_decimals: Number.isInteger(Number(body.token_decimals)) ? Number(body.token_decimals) : getConfiguredUsdcDecimals(),
+          criteria_text: sanitizeString(body.judging_criteria ?? body.rules, 4000),
+          judge_method: sanitizeString(body.judge_method, 64),
+          genlayer_contract: sanitizeString(body.genlayer_contract, 128),
+        }),
+        githubRepo: sanitizeUrl(body.github_repo),
+      }).returning(hackathonSelect);
+
+      if (status === "open") {
+        telegramHackathonCreated({ id, title, prize_pool: Number(hackathon.prize_pool || 0), challenge_type: String(hackathon.challenge_type || "other") }).catch(() => {});
+      }
+
+      return created(reply, { ...formatHackathon(hackathon as Record<string, unknown>), url: `/hackathons/${id}` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown database error";
+      return fail(reply, `Failed to create hackathon: ${message}`, 500);
+    }
+  });
+
   // GET /api/v1/hackathons
   fastify.get("/api/v1/hackathons", async (req, reply) => {
     if (!hasDbConfig()) return ok(reply, []);

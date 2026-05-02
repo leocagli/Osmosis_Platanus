@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "dev": "node --env-file=.env --import tsx --watch src/server.ts",
+    "start": "node --env-file=.env --import tsx src/server.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test:judging-e2e": "node --env-file=.env --import tsx scripts/e2e-judging.ts"
   },
   "dependencies": {
     "@buildersclaw/shared": "workspace:*",

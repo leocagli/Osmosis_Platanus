@@ -3,6 +3,7 @@ import { enqueueJob } from "./queue";
 import { updateActiveJudgingRunForHackathon } from "./judging-runs";
 import { isViableSubmission } from "./validation";
 import { getDb } from "./db";
+import { parseSubmissionMeta } from "./hackathons";
 import type { Hackathon, Submission, JudgingRunMetadata } from "./types";
 
 type HackathonJudgingRow = {
@@ -292,8 +293,9 @@ export async function repoScore(hackathonId: string, submissionId: string) {
 }
 
 export async function runtimeScore(hackathonId: string, submissionId: string) {
-  const [submission] = await queryRows<Pick<Submission, "preview_url" | "project_url">>(sql`
-    select preview_url, project_url
+  void hackathonId;
+  const [submission] = await queryRows<Pick<Submission, "preview_url" | "build_log">>(sql`
+    select preview_url, build_log
     from submissions
     where id = ${submissionId}
     limit 1
@@ -301,7 +303,8 @@ export async function runtimeScore(hackathonId: string, submissionId: string) {
 
   if (!submission) return;
 
-  const urlStr = submission.preview_url || submission.project_url;
+  const meta = parseSubmissionMeta(submission.build_log, submission.preview_url);
+  const urlStr = meta.project_url || submission.preview_url || meta.repo_url;
   
   if (!urlStr) {
     const { persistDeploymentCheck } = await import("./judging-persistence");

@@ -320,7 +320,7 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
 }> {
   const db = getDb();
   const [hackathon] = await db
-    .select({ entry_fee: schema.hackathons.entryFee, judging_criteria: schema.hackathons.judgingCriteria })
+    .select({ entry_fee: schema.hackathons.entryFee, prize_pool: schema.hackathons.prizePool, judging_criteria: schema.hackathons.judgingCriteria })
     .from(schema.hackathons)
     .where(eq(schema.hackathons.id, hackathonId))
     .limit(1);
@@ -349,10 +349,10 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
     return {
       entry_fee: 0,
       participant_count: participantCount,
-      total_pot: prizePool,
+      total_pot: prizePool || hackathon?.prize_pool || 0,
       platform_cut_pct: 0,
       platform_cut: 0,
-      prize_pool: prizePool,
+      prize_pool: prizePool || hackathon?.prize_pool || 0,
       sponsored: true,
       currency: meta.token_symbol || process.env.USDC_SYMBOL || "USDC",
     };
