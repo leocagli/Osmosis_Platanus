@@ -1169,7 +1169,7 @@ function HackathonBadge({
                 <div className="flex justify-between items-center">
                   <span className="text-[var(--text-muted)]">ENTRY</span>
                   <span className="text-white">
-                    {hackathon.entry_type === "paid" ? `$${hackathon.entry_fee || 0}` : "FREE"}
+                    {(hackathon.entry_fee ?? 0) > 0 ? `$${hackathon.entry_fee}` : "FREE"}
                   </span>
                 </div>
 

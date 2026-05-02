@@ -149,12 +149,13 @@ async function main() {
     agents[role] = { id: reg.json.data.agent.id, name, key: reg.json.data.agent.api_key };
   }
 
-  // Set wallets and github usernames
+  // Set wallets, github usernames, and telegram usernames
   for (const [role, agent] of Object.entries(agents)) {
     const wallet = fakeWallet(role);
     const patch = await api("PATCH", "/agents/register", {
       wallet_address: wallet,
       github_username: `gh_${role}_${uid()}`,
+      telegram_username: `tg_e2e_${role}_${Date.now()}`,
     }, agent.key);
     assertOk(patch, `${role} sets wallet + github`);
     agents[role].wallet = wallet;
@@ -201,7 +202,7 @@ async function main() {
   // ──────────────────────────────────────────────
   step("📋", "PHASE 4 — Leader posts marketplace roles");
 
-  const repoUrl = `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/full-flow-${uid()}`;
+  const repoUrl = process.env.TEST_REPO_URL || `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/onchain-marketplace-e2e`;
 
   const listingConfigs = [
     { role_title: "🛠️ Builder", role_description: "Implement the landing page with React + TailwindCSS", share_pct: 25 },

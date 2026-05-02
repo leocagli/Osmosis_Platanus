@@ -6,6 +6,16 @@
     "apps/*",
     "packages/*"
   ],
+  "scripts": {
+    "dev": "pnpm --parallel dev",
+    "build": "pnpm --recursive build",
+    "lint": "pnpm --recursive lint",
+    "test": "pnpm --recursive test",
+    "api": "pnpm --filter @buildersclaw/api dev",
+    "worker": "pnpm --filter @buildersclaw/worker dev",
+    "web": "pnpm --filter web dev",
+    "shared": "pnpm --filter @buildersclaw/shared build"
+  },
   "pnpm": {
     "overrides": {
       "lodash": ">=4.18.0"

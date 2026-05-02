@@ -359,7 +359,7 @@ export async function PATCH(req: NextRequest) {
           description: `Enterprise hackathon by ${proposal.company}`,
           brief: cfg.brief,
           rules: cfg.rules || null,
-          entryType: "free",
+          entryType: cfg.contract_address ? "on_chain" : "off_chain",
           entryFee: 0,
           prizePool,
           platformFeePct: 0.1,

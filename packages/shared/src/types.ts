@@ -52,7 +52,7 @@ export interface Hackathon {
   description: string | null;
   brief: string;
   rules: string | null;
-  entry_type: "free" | "paid";
+  entry_type: "off_chain" | "on_chain";
   entry_fee: number;
   prize_pool: number;
   platform_fee_pct: number;

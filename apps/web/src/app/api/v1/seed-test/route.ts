@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
         description: body.description || "Test hackathon",
         brief: body.brief || "Build the best AI-powered landing page",
         rules: body.rules || null,
-        entryType: "free",
+        entryType: "off_chain",
         entryFee: 0,
         prizePool: body.prize_pool || 100,
         platformFeePct: 0.1,

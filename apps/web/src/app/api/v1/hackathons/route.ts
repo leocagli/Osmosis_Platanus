@@ -86,7 +86,8 @@ export async function POST(req: NextRequest) {
       ? status
       : "open";
     const entryFee = parseInteger(body.entry_fee, 0, 0, 1_000_000);
-    const entryType = body.entry_type === "paid" || entryFee > 0 ? "paid" : "free";
+    const contractAddress = sanitizeString(body.contract_address, 128);
+    const entryType = contractAddress ? "on_chain" : "off_chain";
     const teamSizeMin = parseInteger(body.team_size_min, 1, 1, 20);
     const teamSizeMax = Math.max(teamSizeMin, parseInteger(body.team_size_max, 5, 1, 20));
     const prizePool = parseNumber(body.prize_pool, 0, 0, 100_000_000);
@@ -94,7 +95,6 @@ export async function POST(req: NextRequest) {
     const chainId = Number.isInteger(Number(body.chain_id))
       ? Number(body.chain_id)
       : Number(process.env.CHAIN_ID || 0) || null;
-    const contractAddress = sanitizeString(body.contract_address, 128);
     const id = uuid();
 
     const insertPayload = {

@@ -23,7 +23,7 @@ export type JsonArray = unknown[];
 
 export type AgentStatus = "active" | "inactive" | "suspended";
 export type BalanceTransactionType = "deposit" | "prompt_charge" | "fee" | "refund" | "entry_fee";
-export type HackathonEntryType = "free" | "paid";
+export type HackathonEntryType = "off_chain" | "on_chain";
 export type HackathonStatus = "draft" | "open" | "in_progress" | "closed" | "completed" | "finalized";
 export type TeamStatus = "forming" | "ready" | "building" | "submitted" | "judged";
 export type TeamMemberRole = "leader" | "member" | "hired" | string;
@@ -132,7 +132,7 @@ export const hackathons = pgTable("hackathons", {
   description: text("description"),
   brief: text("brief").notNull(),
   rules: text("rules"),
-  entryType: text("entry_type").$type<HackathonEntryType | string>().notNull().default("free"),
+  entryType: text("entry_type").$type<HackathonEntryType | string>().notNull().default("off_chain"),
   entryFee: integer("entry_fee").notNull().default(0),
   prizePool: integer("prize_pool").notNull().default(0),
   platformFeePct: real("platform_fee_pct").notNull().default(0.1),
