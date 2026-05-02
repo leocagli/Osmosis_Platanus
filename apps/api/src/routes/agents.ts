@@ -1,11 +1,12 @@
 import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
-import { supabaseAdmin } from "../../../web/src/lib/supabase";
-import { generateApiKey, hashToken, toPublicAgent, authenticateToken } from "../../../web/src/lib/auth";
-import { sanitizeString } from "../../../web/src/lib/hackathons";
-import { validateWalletAddress, checkRateLimit } from "../../../web/src/lib/validation";
-import { getBalance } from "../../../web/src/lib/balance";
-import { getAgentIdentity, getMarketplaceReputationScore } from "../../../web/src/lib/erc8004";
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { generateApiKey, hashToken, toPublicAgent, authenticateToken } from "@buildersclaw/shared/auth";
+import { sanitizeString } from "@buildersclaw/shared/hackathons";
+import { validateWalletAddress, checkRateLimit } from "@buildersclaw/shared/validation";
+import { getBalance } from "@buildersclaw/shared/balance";
+import { getAgentIdentity, getMarketplaceReputationScore } from "@buildersclaw/shared/erc8004";
 import { ok, created, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
@@ -21,9 +22,45 @@ const LIMITS = {
   avatar_url: 512,
 } as const;
 
+const agentSelect = {
+  id: schema.agents.id,
+  name: schema.agents.name,
+  display_name: schema.agents.displayName,
+  description: schema.agents.description,
+  avatar_url: schema.agents.avatarUrl,
+  wallet_address: schema.agents.walletAddress,
+  api_key_hash: schema.agents.apiKeyHash,
+  model: schema.agents.model,
+  personality: schema.agents.personality,
+  strategy: schema.agents.strategy,
+  total_earnings: schema.agents.totalEarnings,
+  total_hackathons: schema.agents.totalHackathons,
+  total_wins: schema.agents.totalWins,
+  reputation_score: schema.agents.reputationScore,
+  status: schema.agents.status,
+  identity_registry: schema.agents.identityRegistry,
+  identity_agent_id: schema.agents.identityAgentId,
+  identity_chain_id: schema.agents.identityChainId,
+  identity_agent_uri: schema.agents.identityAgentUri,
+  identity_wallet: schema.agents.identityWallet,
+  identity_owner_wallet: schema.agents.identityOwnerWallet,
+  identity_source: schema.agents.identitySource,
+  identity_link_status: schema.agents.identityLinkStatus,
+  identity_verified_at: schema.agents.identityVerifiedAt,
+  marketplace_reputation_score: schema.agents.marketplaceReputationScore,
+  marketplace_completed_roles: schema.agents.marketplaceCompletedRoles,
+  marketplace_successful_roles: schema.agents.marketplaceSuccessfulRoles,
+  marketplace_failed_roles: schema.agents.marketplaceFailedRoles,
+  marketplace_review_approvals: schema.agents.marketplaceReviewApprovals,
+  marketplace_no_show_count: schema.agents.marketplaceNoShowCount,
+  created_at: schema.agents.createdAt,
+  last_active: schema.agents.lastActive,
+};
+
 export async function agentRoutes(fastify: FastifyInstance) {
   // POST /api/v1/agents/register
   fastify.post("/api/v1/agents/register", async (req, reply) => {
+    const db = getDb();
     const clientIp = ((req.headers as Record<string, string>)["x-forwarded-for"] || "").split(",")[0].trim() || "unknown";
     const rateCheck = checkRateLimit(`register:${clientIp}`, 5, 3600_000);
     if (!rateCheck.allowed) {
@@ -44,7 +81,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
     const reserved = ["admin", "hackaclaw", "buildersclaw", "system", "api", "root", "null", "undefined", "test"];
     if (reserved.includes(normalized)) return fail(reply, "This name is reserved", 409);
 
-    const { data: existing } = await supabaseAdmin.from("agents").select("id").eq("name", normalized).single();
+    const [existing] = await db.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.name, normalized)).limit(1);
     if (existing) return fail(reply, "Name already taken", 409, "Try a different name");
 
     const apiKey = generateApiKey();
@@ -70,20 +107,22 @@ export async function agentRoutes(fastify: FastifyInstance) {
       strategyValue = JSON.stringify(strategyObj);
     }
 
-    const { error: insertErr } = await supabaseAdmin.from("agents").insert({
-      id,
-      name: normalized,
-      display_name: sanitizeString(body.display_name as string, LIMITS.display_name) || name,
-      description: sanitizeString((metadata.description ?? body.description) as string, LIMITS.description),
-      avatar_url: sanitizeString(body.avatar_url as string, LIMITS.avatar_url),
-      wallet_address: walletAddr,
-      api_key_hash: keyHash,
-      model: sanitizeString((metadata.model ?? body.model) as string, LIMITS.model) || "unknown",
-      personality: null,
-      strategy: strategyValue,
-    });
-
-    if (insertErr) return fail(reply, "Registration failed", 500);
+    try {
+      await db.insert(schema.agents).values({
+        id,
+        name: normalized,
+        displayName: sanitizeString(body.display_name as string, LIMITS.display_name) || name,
+        description: sanitizeString((metadata.description ?? body.description) as string, LIMITS.description),
+        avatarUrl: sanitizeString(body.avatar_url as string, LIMITS.avatar_url),
+        walletAddress: walletAddr,
+        apiKeyHash: keyHash,
+        model: sanitizeString((metadata.model ?? body.model) as string, LIMITS.model) || "unknown",
+        personality: null,
+        strategy: strategyValue,
+      });
+    } catch {
+      return fail(reply, "Registration failed", 500);
+    }
 
     const missing: string[] = [];
     if (!walletAddr) missing.push("wallet_address");
@@ -109,9 +148,10 @@ export async function agentRoutes(fastify: FastifyInstance) {
   fastify.get("/api/v1/agents/register", async (req, reply) => {
     const query = req.query as { name?: string };
     if (query.name) {
+      const db = getDb();
       const clean = query.name.toLowerCase().trim().slice(0, 32);
       if (!/^[a-z0-9_]+$/.test(clean)) return fail(reply, "Invalid agent name", 400);
-      const { data: agent } = await supabaseAdmin.from("agents").select("*").eq("name", clean).eq("status", "active").single();
+      const [agent] = await db.select(agentSelect).from(schema.agents).where(and(eq(schema.agents.name, clean), eq(schema.agents.status, "active"))).limit(1);
       if (!agent) return fail(reply, "Agent not found", 404);
       return ok(reply, toPublicAgent(agent));
     }
@@ -123,6 +163,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
 
   // PATCH /api/v1/agents/register — update own profile
   fastify.patch("/api/v1/agents/register", async (req, reply) => {
+    const db = getDb();
     const agent = await authFastify(req);
     if (!agent) return unauthorized(reply);
 
@@ -130,7 +171,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
     if (!body) return fail(reply, "Invalid request body", 400);
 
     const metadata: Record<string, unknown> = body.metadata && typeof body.metadata === "object" ? body.metadata as Record<string, unknown> : {};
-    const updates: Record<string, unknown> = { last_active: new Date().toISOString() };
+    const updates: Record<string, unknown> = { lastActive: new Date().toISOString() };
 
     const fieldLimits: Record<string, number> = {
       description: LIMITS.description,
@@ -147,10 +188,14 @@ export async function agentRoutes(fastify: FastifyInstance) {
           if (rawAddr) {
             const valid = validateWalletAddress(rawAddr);
             if (!valid) return fail(reply, "Invalid wallet_address format. Must be a valid Ethereum address.", 400);
-            updates[field] = valid;
+            updates.walletAddress = valid;
           }
         } else {
-          updates[field] = sanitizeString(body[field] as string, maxLen);
+          const value = sanitizeString(body[field] as string, maxLen);
+          if (field === "display_name") updates.displayName = value;
+          if (field === "avatar_url") updates.avatarUrl = value;
+          if (field === "description") updates.description = value;
+          if (field === "model") updates.model = value;
         }
       }
     }
@@ -175,8 +220,8 @@ export async function agentRoutes(fastify: FastifyInstance) {
 
     if (Object.keys(updates).length <= 1) return fail(reply, "No valid fields to update");
 
-    const { data: updated, error: updateErr } = await supabaseAdmin.from("agents").update(updates).eq("id", agent.id).select("*").single();
-    if (updateErr) return fail(reply, "Update failed", 500);
+    const [updated] = await db.update(schema.agents).set(updates).where(eq(schema.agents.id, agent.id)).returning(agentSelect);
+    if (!updated) return fail(reply, "Update failed", 500);
     return ok(reply, toPublicAgent(updated));
   });
 
@@ -203,10 +248,19 @@ export async function agentRoutes(fastify: FastifyInstance) {
     if (!agent.wallet_address) missingPrereqs.push("wallet_address");
     if (!githubUsername) missingPrereqs.push("github_username");
 
-    const { data: memberships } = await supabaseAdmin
-      .from("team_members")
-      .select("team_id, role, revenue_share_pct, teams(id, name, hackathon_id, status, color)")
-      .eq("agent_id", agent.id);
+    const memberships = await getDb()
+      .select({
+        team: {
+          id: schema.teams.id,
+          name: schema.teams.name,
+          hackathon_id: schema.teams.hackathonId,
+          status: schema.teams.status,
+          color: schema.teams.color,
+        },
+      })
+      .from(schema.teamMembers)
+      .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+      .where(eq(schema.teamMembers.agentId, agent.id));
 
     return ok(reply, {
       ...toPublicAgent(agent),
@@ -220,7 +274,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
           ? "All prerequisites met. You're ready to join hackathons."
           : `Missing: ${missingPrereqs.join(", ")}. Set these up before joining hackathons.`,
       },
-      teams: (memberships || []).map((m: Record<string, unknown>) => m.teams),
+      teams: memberships.map((m) => m.team),
       identity: getAgentIdentity(agent),
       marketplace_reputation_score: getMarketplaceReputationScore(agent),
     });

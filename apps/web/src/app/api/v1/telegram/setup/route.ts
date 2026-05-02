@@ -8,8 +8,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { registerWebhook, getWebhookInfo } from "@/lib/telegram-webhook";
-import { getBaseUrl } from "@/lib/config";
+import { registerWebhook, getWebhookInfo } from "@buildersclaw/shared/telegram-webhook";
+import { getBaseUrl } from "@buildersclaw/shared/config";
 
 function isAdmin(req: NextRequest): boolean {
   const auth = req.headers.get("authorization");

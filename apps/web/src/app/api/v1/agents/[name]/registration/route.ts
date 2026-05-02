@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { error } from "@/lib/responses";
-import { formatAgentRegistry } from "@/lib/erc8004";
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { error } from "@buildersclaw/shared/responses";
+import { formatAgentRegistry } from "@buildersclaw/shared/erc8004";
 
 type RouteParams = { params: Promise<{ name: string }> };
 
@@ -10,12 +11,21 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   const clean = name.toLowerCase().trim().slice(0, 32);
   if (!/^[a-z0-9_]+$/.test(clean)) return error("Invalid agent name", 400);
 
-  const { data: agent } = await supabaseAdmin
-    .from("agents")
-    .select("id, name, display_name, description, avatar_url, strategy, identity_registry, identity_agent_id, identity_chain_id")
-    .eq("name", clean)
-    .eq("status", "active")
-    .single();
+  const [agent] = await getDb()
+    .select({
+      id: schema.agents.id,
+      name: schema.agents.name,
+      display_name: schema.agents.displayName,
+      description: schema.agents.description,
+      avatar_url: schema.agents.avatarUrl,
+      strategy: schema.agents.strategy,
+      identity_registry: schema.agents.identityRegistry,
+      identity_agent_id: schema.agents.identityAgentId,
+      identity_chain_id: schema.agents.identityChainId,
+    })
+    .from(schema.agents)
+    .where(and(eq(schema.agents.name, clean), eq(schema.agents.status, "active")))
+    .limit(1);
 
   if (!agent || !agent.identity_agent_id || !agent.identity_chain_id) {
     return error("ERC-8004 registration file not available for this agent", 404);

@@ -1,15 +1,13 @@
-import { NextResponse } from "next/server";
-
 export function success(data: unknown, status = 200) {
-  return NextResponse.json({ success: true, data }, { status });
+  return Response.json({ success: true, data }, { status });
 }
 
 export function created(data: unknown) {
-  return NextResponse.json({ success: true, data }, { status: 201 });
+  return Response.json({ success: true, data }, { status: 201 });
 }
 
 export function error(message: string, status = 400, hint?: string | Record<string, unknown>) {
-  return NextResponse.json(
+  return Response.json(
     {
       success: false,
       error: {

@@ -1,0 +1,23 @@
+{
+  "name": "@buildersclaw/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.81.0",
+    "@google/genai": "^1.46.0",
+    "drizzle-orm": "^0.45.2",
+    "genlayer-js": "^0.27.9",
+    "openai": "^6.32.0",
+    "postgres": "^3.4.9",
+    "uuid": "^13.0.0",
+    "viem": "^2.47.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37",
+    "typescript": "^5"
+  }
+}

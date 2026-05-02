@@ -1,12 +1,13 @@
 import crypto from "crypto";
 import type { FastifyInstance } from "fastify";
-import { supabaseAdmin } from "../../../web/src/lib/supabase";
-import { parseHackathonMeta, sanitizeString } from "../../../web/src/lib/hackathons";
-import { normalizeAddress } from "../../../web/src/lib/chain";
-import { createOrReuseJudgingRun } from "../../../web/src/lib/judging-runs";
-import { createOrReuseFinalizationRun } from "../../../web/src/lib/finalization";
-import { validateWinnerShares, isValidUUID, WINNER_MIN_BPS } from "../../../web/src/lib/validation";
-import { extractToken, authenticateAdminToken } from "../../../web/src/lib/auth";
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { parseHackathonMeta, sanitizeString } from "@buildersclaw/shared/hackathons";
+import { normalizeAddress } from "@buildersclaw/shared/chain";
+import { createOrReuseJudgingRun } from "@buildersclaw/shared/judging-runs";
+import { createOrReuseFinalizationRun } from "@buildersclaw/shared/finalization";
+import { validateWinnerShares, isValidUUID, WINNER_MIN_BPS } from "@buildersclaw/shared/validation";
+import { extractToken, authenticateAdminToken } from "@buildersclaw/shared/auth";
 import { ok, fail, notFound } from "../respond";
 
 async function resolveAuth(req: { headers: { authorization?: string } }): Promise<{ isAdmin: boolean; agentId: string | null }> {
@@ -18,9 +19,17 @@ async function resolveAuth(req: { headers: { authorization?: string } }): Promis
     return { isAdmin: false, agentId: null };
   }
   const hash = crypto.createHash("sha256").update(token).digest("hex");
-  const { data: agent } = await supabaseAdmin.from("agents").select("id").eq("api_key_hash", hash).single();
+  const [agent] = await getDb().select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.apiKeyHash, hash)).limit(1);
   return { isAdmin: false, agentId: agent?.id ?? null };
 }
+
+const hackathonSelect = {
+  id: schema.hackathons.id,
+  title: schema.hackathons.title,
+  status: schema.hackathons.status,
+  created_by: schema.hackathons.createdBy,
+  judging_criteria: schema.hackathons.judgingCriteria,
+};
 
 export async function adminRoutes(fastify: FastifyInstance) {
   // POST /api/v1/admin/hackathons/:id/judge
@@ -30,28 +39,27 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (!isValidUUID(hackathonId)) return fail(reply, "Invalid hackathon ID format", 400);
 
     const { isAdmin, agentId } = await resolveAuth(req);
+    const db = getDb();
 
     if (!isAdmin) {
       if (!agentId) return fail(reply, "Admin or hackathon creator authentication required", 401);
 
-      const { data: hackathonAuth } = await supabaseAdmin
-        .from("hackathons").select("created_by").eq("id", hackathonId).single();
+      const [hackathonAuth] = await db.select({ created_by: schema.hackathons.createdBy }).from(schema.hackathons).where(eq(schema.hackathons.id, hackathonId)).limit(1);
       if (!hackathonAuth) return notFound(reply, "Hackathon");
       if (hackathonAuth.created_by !== agentId) {
         return fail(reply, "Only the hackathon creator or admin can trigger judging", 403);
       }
     }
 
-    const { data: hackathon } = await supabaseAdmin
-      .from("hackathons").select("*").eq("id", hackathonId).single();
+    const [hackathon] = await db.select(hackathonSelect).from(schema.hackathons).where(eq(schema.hackathons.id, hackathonId)).limit(1);
     if (!hackathon) return notFound(reply, "Hackathon");
 
-    const { data: allSubs } = await supabaseAdmin
-      .from("submissions")
-      .select("id, status, preview_url, build_log")
-      .eq("hackathon_id", hackathonId);
+    const allSubs = await db
+      .select({ id: schema.submissions.id, status: schema.submissions.status, preview_url: schema.submissions.previewUrl, build_log: schema.submissions.buildLog })
+      .from(schema.submissions)
+      .where(eq(schema.submissions.hackathonId, hackathonId));
 
-    if (!allSubs || allSubs.length === 0) {
+    if (allSubs.length === 0) {
       return fail(reply, "No submissions to judge. Wait for builders to submit their repos.", 400);
     }
 
@@ -98,7 +106,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const { id: hackathonId } = req.params as { id: string };
     if (!isValidUUID(hackathonId)) return fail(reply, "Invalid hackathon ID format", 400);
 
-    const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
+    const db = getDb();
+    const [hackathon] = await db.select(hackathonSelect).from(schema.hackathons).where(eq(schema.hackathons.id, hackathonId)).limit(1);
     if (!hackathon) return notFound(reply, "Hackathon");
 
     if (hackathon.status === "completed") {
@@ -124,29 +133,33 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
 
     if (!winnerTeamId && winnerAgentId) {
-      const { data: membership } = await supabaseAdmin
-        .from("team_members")
-        .select("team_id, teams!inner(hackathon_id)")
-        .eq("agent_id", winnerAgentId)
-        .eq("teams.hackathon_id", hackathonId)
-        .single();
+      const [membership] = await db
+        .select({ team_id: schema.teamMembers.teamId })
+        .from(schema.teamMembers)
+        .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+        .where(and(eq(schema.teamMembers.agentId, winnerAgentId), eq(schema.teams.hackathonId, hackathonId)))
+        .limit(1);
       if (!membership) return fail(reply, "winner_agent_id is not registered in this hackathon", 400);
-      winnerTeamId = (membership as { team_id: string }).team_id;
+      winnerTeamId = membership.team_id;
     }
 
-    const { data: members } = await supabaseAdmin
-      .from("team_members")
-      .select("agent_id, revenue_share_pct, role, agents!inner(wallet_address)")
-      .eq("team_id", winnerTeamId!)
-      .eq("status", "active");
+    const members = await db
+      .select({
+        agent_id: schema.teamMembers.agentId,
+        revenue_share_pct: schema.teamMembers.revenueSharePct,
+        role: schema.teamMembers.role,
+        wallet_address: schema.agents.walletAddress,
+      })
+      .from(schema.teamMembers)
+      .innerJoin(schema.agents, eq(schema.teamMembers.agentId, schema.agents.id))
+      .where(and(eq(schema.teamMembers.teamId, winnerTeamId!), eq(schema.teamMembers.status, "active")));
 
-    if (!members || members.length === 0) {
+    if (members.length === 0) {
       return fail(reply, "Winning team has no active members", 400);
     }
 
     const missingWallets = members.filter((m) => {
-      const agent = m.agents as unknown as { wallet_address?: string | null } | null;
-      return !agent?.wallet_address;
+      return !m.wallet_address;
     });
     if (missingWallets.length > 0) {
       const ids = missingWallets.map((m) => m.agent_id).join(", ");
@@ -158,9 +171,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (totalRaw !== 10000) rawBps[rawBps.length - 1] += 10000 - totalRaw;
 
     const winners = members.map((m, i) => {
-      const agent = m.agents as unknown as { wallet_address: string };
       let wallet: string;
-      try { wallet = normalizeAddress(agent.wallet_address); }
+      try { wallet = normalizeAddress(m.wallet_address!); }
       catch { throw new Error(`Invalid wallet address for agent ${m.agent_id}`); }
       return { wallet, shareBps: rawBps[i], agent_id: m.agent_id };
     });

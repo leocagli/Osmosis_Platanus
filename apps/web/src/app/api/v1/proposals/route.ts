@@ -1,13 +1,41 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { desc, eq } from "drizzle-orm";
 import { formatUnits } from "viem";
-import { supabaseAdmin } from "@/lib/supabase";
-import { authenticateAdminRequest, hashToken } from "@/lib/auth";
-import { serializeHackathonMeta } from "@/lib/hackathons";
-import { getContractPrizePool, getUsdcDecimals, getUsdcSymbol, verifySponsorFunding } from "@/lib/chain";
-import { telegramHackathonCreated } from "@/lib/telegram";
+import { authenticateAdminRequest, hashToken } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { serializeHackathonMeta } from "@buildersclaw/shared/hackathons";
+import { getContractPrizePool, getUsdcDecimals, getUsdcSymbol, verifySponsorFunding } from "@buildersclaw/shared/chain";
+import { telegramHackathonCreated } from "@buildersclaw/shared/telegram";
 import { v4 as uuid } from "uuid";
-import { checkRateLimit } from "@/lib/validation";
+import { checkRateLimit } from "@buildersclaw/shared/validation";
+
+const proposalSelect = {
+  id: schema.enterpriseProposals.id,
+  company: schema.enterpriseProposals.company,
+  contact_email: schema.enterpriseProposals.contactEmail,
+  track: schema.enterpriseProposals.track,
+  problem_description: schema.enterpriseProposals.problemDescription,
+  budget: schema.enterpriseProposals.budget,
+  timeline: schema.enterpriseProposals.timeline,
+  status: schema.enterpriseProposals.status,
+  admin_notes: schema.enterpriseProposals.adminNotes,
+  judge_agent: schema.enterpriseProposals.judgeAgent,
+  approval_token: schema.enterpriseProposals.approvalToken,
+  hackathon_config: schema.enterpriseProposals.hackathonConfig,
+  prize_amount: schema.enterpriseProposals.prizeAmount,
+  judging_priorities: schema.enterpriseProposals.judgingPriorities,
+  tech_requirements: schema.enterpriseProposals.techRequirements,
+  created_at: schema.enterpriseProposals.createdAt,
+  reviewed_at: schema.enterpriseProposals.reviewedAt,
+};
+
+function formatProposal<T extends { prize_amount: string | null }>(proposal: T) {
+  return {
+    ...proposal,
+    prize_amount: proposal.prize_amount === null ? null : Number(proposal.prize_amount),
+  };
+}
 
 function sanitize(val: unknown, max: number): string | null {
   if (typeof val !== "string") return null;
@@ -129,29 +157,27 @@ export async function POST(req: NextRequest) {
     }
 
     const id = uuid();
-    const { error: insertErr } = await supabaseAdmin
-      .from("enterprise_proposals")
-      .insert({
+    try {
+      await getDb().insert(schema.enterpriseProposals).values({
         id,
         company,
-        contact_email: email,
+        contactEmail: email,
         track,
-        problem_description: problem,
-        judge_agent: judgeAgent,
+        problemDescription: problem,
+        judgeAgent,
         budget,
         timeline,
-        prize_amount: prizeAmount ? Number(prizeAmount) : null,
-        judging_priorities: judgingPriorities,
-        tech_requirements: techRequirements,
-        hackathon_config: {
+        prizeAmount: prizeAmount ? Number(prizeAmount).toString() : null,
+        judgingPriorities,
+        techRequirements,
+        hackathonConfig: {
           ...hackathonConfig,
           ...(judgeKeyHash ? { judge_key_hash: judgeKeyHash } : {}),
         },
         status: "pending",
-        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
       });
-
-    if (insertErr) {
+    } catch (insertErr) {
       console.error("Proposal insert failed:", insertErr);
       return NextResponse.json(
         { success: false, error: { message: "Failed to submit proposal. Try again." } },
@@ -197,15 +223,26 @@ export async function GET(req: NextRequest) {
   }
 
   const status = req.nextUrl.searchParams.get("status");
-  let query = supabaseAdmin.from("enterprise_proposals").select("*").order("created_at", { ascending: false });
-  if (status) query = query.eq("status", status);
+  const db = getDb();
 
-  const { data, error: queryErr } = await query.limit(100);
-  if (queryErr) {
+  try {
+    const data = status
+      ? await db
+          .select(proposalSelect)
+          .from(schema.enterpriseProposals)
+          .where(eq(schema.enterpriseProposals.status, status))
+          .orderBy(desc(schema.enterpriseProposals.createdAt))
+          .limit(100)
+      : await db
+          .select(proposalSelect)
+          .from(schema.enterpriseProposals)
+          .orderBy(desc(schema.enterpriseProposals.createdAt))
+          .limit(100);
+
+    return NextResponse.json({ success: true, data: data.map(formatProposal) });
+  } catch {
     return NextResponse.json({ success: false, error: { message: "Query failed" } }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true, data });
 }
 
 /**
@@ -232,11 +269,12 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const { data: proposal } = await supabaseAdmin
-      .from("enterprise_proposals")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const db = getDb();
+    const [proposal] = await db
+      .select(proposalSelect)
+      .from(schema.enterpriseProposals)
+      .where(eq(schema.enterpriseProposals.id, id))
+      .limit(1);
 
     if (!proposal) {
       return NextResponse.json({ success: false, error: { message: "Proposal not found" } }, { status: 404 });
@@ -315,59 +353,59 @@ export async function PATCH(req: NextRequest) {
           criteria_text: cfg.rules || null,
         });
 
-          const insertPayload = {
-              id: hackathonId,
-              title: cfg.title,
-              description: `Enterprise hackathon by ${proposal.company}`,
-              brief: cfg.brief,
-              rules: cfg.rules || null,
-              entry_type: "free",
-              entry_fee: 0,
-              prize_pool: prizePool,
-              platform_fee_pct: 0.1,
-              max_participants: 500,
-              team_size_min: 1,
-              team_size_max: cfg.team_size_max || 5,
-              build_time_seconds: 180,
-              challenge_type: cfg.challenge_type || "other",
-              status: "open",
-              created_by: null,
-              starts_at: new Date().toISOString(),
-              ends_at: endsAt.toISOString(),
-              judging_criteria: judgingCriteria,
-            };
+        const insertPayload = {
+          id: hackathonId,
+          title: cfg.title,
+          description: `Enterprise hackathon by ${proposal.company}`,
+          brief: cfg.brief,
+          rules: cfg.rules || null,
+          entryType: "free",
+          entryFee: 0,
+          prizePool,
+          platformFeePct: 0.1,
+          maxParticipants: 500,
+          teamSizeMin: 1,
+          teamSizeMax: cfg.team_size_max || 5,
+          buildTimeSeconds: 180,
+          challengeType: cfg.challenge_type || "other",
+          status: "open",
+          createdBy: null,
+          startsAt: new Date().toISOString(),
+          endsAt: endsAt.toISOString(),
+          judgingCriteria,
+        };
 
-          const { error: insertErr } = await supabaseAdmin
-            .from("hackathons")
-            .insert(insertPayload);
+        try {
+          await db.insert(schema.hackathons).values(insertPayload);
+        } catch (insertErr) {
+          console.error("Auto hackathon creation failed:", JSON.stringify(insertErr));
+          hackathonId = null;
+        }
 
-          if (insertErr) {
-            console.error("Auto hackathon creation failed:", JSON.stringify(insertErr));
-            hackathonId = null;
-          } else {
-            hackathonUrl = `/hackathons/${hackathonId}`;
+        if (hackathonId) {
+          hackathonUrl = `/hackathons/${hackathonId}`;
 
-            // Notify Telegram community (fire-and-forget)
-            telegramHackathonCreated({
-              id: hackathonId!,
-              title: cfg.title,
-              prize_pool: Number(proposal.prize_amount) || 0,
-              challenge_type: cfg.challenge_type || "other",
-            }).catch(() => {});
-          }
+          // Notify Telegram community (fire-and-forget)
+          telegramHackathonCreated({
+            id: hackathonId,
+            title: cfg.title,
+            prize_pool: Number(proposal.prize_amount) || 0,
+            challenge_type: cfg.challenge_type || "other",
+          }).catch(() => {});
+        }
       }
     }
 
-    const { error: updateErr } = await supabaseAdmin
-      .from("enterprise_proposals")
-      .update({
-        status: hackathonId ? "hackathon_created" : newStatus,
-        admin_notes: sanitize(body.notes, 2000) || (hackathonId ? `Hackathon auto-created: ${hackathonId}` : null),
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-
-    if (updateErr) {
+    try {
+      await db
+        .update(schema.enterpriseProposals)
+        .set({
+          status: hackathonId ? "hackathon_created" : newStatus,
+          adminNotes: sanitize(body.notes, 2000) || (hackathonId ? `Hackathon auto-created: ${hackathonId}` : null),
+          reviewedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.enterpriseProposals.id, id));
+    } catch {
       return NextResponse.json({ success: false, error: { message: "Update failed" } }, { status: 500 });
     }
 

@@ -11,6 +11,7 @@
     "types": ["node"],
     "typeRoots": ["../web/node_modules/@types", "node_modules/@types"],
     "paths": {
+      "@buildersclaw/shared/*": ["../../packages/shared/src/*"],
       "@/*": ["../web/src/*"]
     },
     "baseUrl": "."

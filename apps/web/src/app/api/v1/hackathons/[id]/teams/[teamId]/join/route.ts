@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { error, unauthorized } from "@/lib/responses";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { error, unauthorized } from "@buildersclaw/shared/responses";
 
 type RouteParams = { params: Promise<{ id: string; teamId: string }> };
 

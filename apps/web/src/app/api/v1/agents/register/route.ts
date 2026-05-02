@@ -1,10 +1,46 @@
 import { NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { generateApiKey, hashToken, authenticateRequest, toPublicAgent } from "@/lib/auth";
-import { success, created, error, unauthorized } from "@/lib/responses";
-import { sanitizeString } from "@/lib/hackathons";
+import { and, eq } from "drizzle-orm";
+import { generateApiKey, hashToken, authenticateRequest, toPublicAgent } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, created, error, unauthorized } from "@buildersclaw/shared/responses";
+import { sanitizeString } from "@buildersclaw/shared/hackathons";
 import { v4 as uuid } from "uuid";
-import { validateWalletAddress, checkRateLimit } from "@/lib/validation";
+import { validateWalletAddress, checkRateLimit } from "@buildersclaw/shared/validation";
+
+const agentSelect = {
+  id: schema.agents.id,
+  name: schema.agents.name,
+  display_name: schema.agents.displayName,
+  description: schema.agents.description,
+  avatar_url: schema.agents.avatarUrl,
+  wallet_address: schema.agents.walletAddress,
+  api_key_hash: schema.agents.apiKeyHash,
+  model: schema.agents.model,
+  personality: schema.agents.personality,
+  strategy: schema.agents.strategy,
+  total_earnings: schema.agents.totalEarnings,
+  total_hackathons: schema.agents.totalHackathons,
+  total_wins: schema.agents.totalWins,
+  reputation_score: schema.agents.reputationScore,
+  identity_registry: schema.agents.identityRegistry,
+  identity_agent_id: schema.agents.identityAgentId,
+  identity_chain_id: schema.agents.identityChainId,
+  identity_agent_uri: schema.agents.identityAgentUri,
+  identity_wallet: schema.agents.identityWallet,
+  identity_owner_wallet: schema.agents.identityOwnerWallet,
+  identity_source: schema.agents.identitySource,
+  identity_link_status: schema.agents.identityLinkStatus,
+  identity_verified_at: schema.agents.identityVerifiedAt,
+  marketplace_reputation_score: schema.agents.marketplaceReputationScore,
+  marketplace_completed_roles: schema.agents.marketplaceCompletedRoles,
+  marketplace_successful_roles: schema.agents.marketplaceSuccessfulRoles,
+  marketplace_failed_roles: schema.agents.marketplaceFailedRoles,
+  marketplace_review_approvals: schema.agents.marketplaceReviewApprovals,
+  marketplace_no_show_count: schema.agents.marketplaceNoShowCount,
+  status: schema.agents.status,
+  created_at: schema.agents.createdAt,
+  last_active: schema.agents.lastActive,
+};
 
 // Max field lengths to prevent abuse
 const LIMITS = {
@@ -59,11 +95,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Check uniqueness
-    const { data: existing } = await supabaseAdmin
-      .from("agents")
-      .select("id")
-      .eq("name", normalized)
-      .single();
+    const [existing] = await getDb()
+      .select({ id: schema.agents.id })
+      .from(schema.agents)
+      .where(eq(schema.agents.name, normalized))
+      .limit(1);
 
     if (existing) {
       return error("Name already taken", 409, "Try a different name");
@@ -100,22 +136,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { error: insertErr } = await supabaseAdmin
-      .from("agents")
-      .insert({
+    try {
+      await getDb()
+        .insert(schema.agents)
+        .values({
         id,
         name: normalized,
-        display_name: sanitizeString(body.display_name, LIMITS.display_name) || name,
+        displayName: sanitizeString(body.display_name, LIMITS.display_name) || name,
         description: sanitizeString(metadata.description ?? body.description, LIMITS.description),
-        avatar_url: sanitizeString(body.avatar_url, LIMITS.avatar_url),
-        wallet_address: walletAddr,
-        api_key_hash: keyHash,
+        avatarUrl: sanitizeString(body.avatar_url, LIMITS.avatar_url),
+        walletAddress: walletAddr,
+        apiKeyHash: keyHash,
         model: sanitizeString(metadata.model ?? body.model, LIMITS.model) || "unknown",
         personality: null,
         strategy: strategyValue,
       });
-
-    if (insertErr) {
+    } catch {
       return error("Registration failed", 500);
     }
 
@@ -192,12 +228,11 @@ export async function GET(req: NextRequest) {
     const clean = nameParam.toLowerCase().trim().slice(0, 32);
     if (!/^[a-z0-9_]+$/.test(clean)) return error("Invalid agent name", 400);
 
-    const { data: agent } = await supabaseAdmin
-      .from("agents")
-      .select("*")
-      .eq("name", clean)
-      .eq("status", "active")
-      .single();
+    const [agent] = await getDb()
+      .select(agentSelect)
+      .from(schema.agents)
+      .where(and(eq(schema.agents.name, clean), eq(schema.agents.status, "active")))
+      .limit(1);
 
     if (!agent) return error("Agent not found", 404);
     return success(toPublicAgent(agent));
@@ -219,30 +254,30 @@ export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
     const metadata: Record<string, unknown> = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
-    const updates: Record<string, unknown> = { last_active: new Date().toISOString() };
+    const updates: Record<string, string | null> = { lastActive: new Date().toISOString() };
 
-    const fieldLimits: Record<string, number> = {
-      description: LIMITS.description,
-      display_name: LIMITS.display_name,
-      avatar_url: LIMITS.avatar_url,
-      wallet_address: LIMITS.wallet_address,
-      model: LIMITS.model,
-    };
+    const fieldLimits = {
+      description: { limit: LIMITS.description, column: "description" },
+      display_name: { limit: LIMITS.display_name, column: "displayName" },
+      avatar_url: { limit: LIMITS.avatar_url, column: "avatarUrl" },
+      wallet_address: { limit: LIMITS.wallet_address, column: "walletAddress" },
+      model: { limit: LIMITS.model, column: "model" },
+    } as const;
 
-    for (const [field, maxLen] of Object.entries(fieldLimits)) {
+    for (const [field, { limit, column }] of Object.entries(fieldLimits)) {
       if (body[field] !== undefined) {
         if (field === "wallet_address") {
           // Special validation for wallet addresses
-          const rawAddr = sanitizeString(body[field], maxLen);
+          const rawAddr = sanitizeString(body[field], limit);
           if (rawAddr) {
             const valid = validateWalletAddress(rawAddr);
             if (!valid) {
               return error("Invalid wallet_address format. Must be a valid Ethereum address.", 400);
             }
-            updates[field] = valid;
+            updates[column] = valid;
           }
         } else {
-          updates[field] = sanitizeString(body[field], maxLen);
+          updates[column] = sanitizeString(body[field], limit);
         }
       }
     }
@@ -262,7 +297,7 @@ export async function PATCH(req: NextRequest) {
       if (!validWallet) {
         return error("Invalid wallet_address format. Must be a valid Ethereum address.", 400);
       }
-      updates.wallet_address = validWallet;
+      updates.walletAddress = validWallet;
     }
 
     // Handle github_username + telegram_username — stored in strategy field as JSON
@@ -291,14 +326,18 @@ export async function PATCH(req: NextRequest) {
 
     if (Object.keys(updates).length <= 1) return error("No valid fields to update");
 
-    const { data: updated, error: updateErr } = await supabaseAdmin
-      .from("agents")
-      .update(updates)
-      .eq("id", agent.id)
-      .select("*")
-      .single();
+    let updated;
+    try {
+      [updated] = await getDb()
+        .update(schema.agents)
+        .set(updates)
+        .where(eq(schema.agents.id, agent.id))
+        .returning(agentSelect);
+    } catch {
+      return error("Update failed", 500);
+    }
 
-    if (updateErr) return error("Update failed", 500);
+    if (!updated) return error("Update failed", 500);
     return success(toPublicAgent(updated));
   } catch {
     return error("Invalid request body", 400);

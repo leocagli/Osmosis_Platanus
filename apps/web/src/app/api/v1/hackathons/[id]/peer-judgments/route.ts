@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { supabaseAdmin } from "@/lib/supabase";
-import { error as errorResponse, success } from "@/lib/responses";
-import { enqueueJob } from "@/lib/queue";
+import { and, count, eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { error as errorResponse, success } from "@buildersclaw/shared/responses";
+import { enqueueJob } from "@buildersclaw/shared/queue";
 
 export async function POST(
   req: NextRequest,
@@ -30,13 +31,24 @@ export async function POST(
     return errorResponse("total_score must be between 0 and 100", 400);
   }
 
+  const db = getDb();
+
   // Validate peer judgment assignment
-  const { data: assignment } = await supabaseAdmin
-    .from("peer_judgments")
-    .select("*, submissions!inner(hackathon_id)")
-    .eq("submission_id", submission_id)
-    .eq("reviewer_agent_id", agent.id)
-    .single();
+  const [assignment] = await db
+    .select({
+      id: schema.peerJudgments.id,
+      status: schema.peerJudgments.status,
+      submissions: {
+        hackathon_id: schema.submissions.hackathonId,
+      },
+    })
+    .from(schema.peerJudgments)
+    .innerJoin(schema.submissions, eq(schema.peerJudgments.submissionId, schema.submissions.id))
+    .where(and(
+      eq(schema.peerJudgments.submissionId, submission_id),
+      eq(schema.peerJudgments.reviewerAgentId, agent.id),
+    ))
+    .limit(1);
 
   if (!assignment) {
     return errorResponse("Not assigned to review this submission", 403);
@@ -51,11 +63,11 @@ export async function POST(
   }
 
   // Check if hackathon judging is closed
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("judging_criteria")
-    .eq("id", hackathonId)
-    .single();
+  const [hackathon] = await db
+    .select({ judging_criteria: schema.hackathons.judgingCriteria })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (hackathon) {
     let meta: Record<string, unknown> = {};
@@ -76,30 +88,33 @@ export async function POST(
     warnings.extreme_score = true;
   }
 
-  const { error } = await supabaseAdmin
-    .from("peer_judgments")
-    .update({
-      status: "submitted",
-      total_score,
-      feedback,
-      warnings: Object.keys(warnings).length > 0 ? warnings : null,
-      submitted_at: new Date().toISOString(),
-    })
-    .eq("id", assignment.id);
-
-  if (error) {
-    return errorResponse("Failed to submit peer review", 500, error.message);
+  try {
+    await db
+      .update(schema.peerJudgments)
+      .set({
+        status: "submitted",
+        totalScore: total_score,
+        feedback,
+        warnings: Object.keys(warnings).length > 0 ? warnings : null,
+        submittedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.peerJudgments.id, assignment.id));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown database error";
+    return errorResponse("Failed to submit peer review", 500, message);
   }
 
   // Early close logic: check if all assigned reviews for this hackathon are submitted
-  const { count: pendingCount } = await supabaseAdmin
-    .from("peer_judgments")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "assigned")
-    .eq("submissions.hackathon_id", hackathonId)
-    .not("submissions", "is", null);
+  const [pending] = await db
+    .select({ total: count() })
+    .from(schema.peerJudgments)
+    .innerJoin(schema.submissions, eq(schema.peerJudgments.submissionId, schema.submissions.id))
+    .where(and(
+      eq(schema.peerJudgments.status, "assigned"),
+      eq(schema.submissions.hackathonId, hackathonId),
+    ));
 
-  if (pendingCount === 0) {
+  if ((pending?.total ?? 0) === 0) {
     await enqueueJob({
       type: "judging.close_peer_reviews",
       payload: { hackathon_id: hackathonId },

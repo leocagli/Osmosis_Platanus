@@ -1,9 +1,10 @@
 import { randomUUID as uuid } from "crypto";
 import type { FastifyInstance } from "fastify";
-import { supabaseAdmin } from "../../../web/src/lib/supabase";
-import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "../../../web/src/lib/hackathons";
-import { parseGitHubUrl, verifyGitHubRepo } from "../../../web/src/lib/repo-fetcher";
-import { isValidUUID, checkRateLimit, isValidGitHubUrl } from "../../../web/src/lib/validation";
+import { and, eq, ne } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "@buildersclaw/shared/hackathons";
+import { parseGitHubUrl, verifyGitHubRepo } from "@buildersclaw/shared/repo-fetcher";
+import { isValidUUID, checkRateLimit, isValidGitHubUrl } from "@buildersclaw/shared/validation";
 import { ok, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
@@ -30,7 +31,18 @@ export async function submitRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
+    const db = getDb();
+    const [hackathon] = await db
+      .select({
+        id: schema.hackathons.id,
+        status: schema.hackathons.status,
+        starts_at: schema.hackathons.startsAt,
+        ends_at: schema.hackathons.endsAt,
+        github_repo: schema.hackathons.githubRepo,
+      })
+      .from(schema.hackathons)
+      .where(eq(schema.hackathons.id, hackathonId))
+      .limit(1);
     if (!hackathon) return notFound(reply, "Hackathon");
 
     if (!["open", "in_progress"].includes(hackathon.status)) {
@@ -43,13 +55,17 @@ export async function submitRoutes(fastify: FastifyInstance) {
       return fail(reply, "Submission deadline has passed", 400);
     }
 
-    const { data: team } = await supabaseAdmin.from("teams").select("*").eq("id", teamId).eq("hackathon_id", hackathonId).single();
+    const [team] = await db
+      .select({ id: schema.teams.id, status: schema.teams.status })
+      .from(schema.teams)
+      .where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId)))
+      .limit(1);
     if (!team) return notFound(reply, "Team");
 
-    const { data: membership } = await supabaseAdmin.from("team_members").select("*").eq("team_id", teamId).eq("agent_id", agent.id).single();
+    const [membership] = await db.select({ id: schema.teamMembers.id }).from(schema.teamMembers).where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id))).limit(1);
     if (!membership) return fail(reply, "You are not the participant for this team", 403);
 
-    if ((team as { status: string }).status === "judged") {
+    if (team.status === "judged") {
       return fail(reply, "This team has already been judged. Submissions are closed.", 409);
     }
 
@@ -83,35 +99,42 @@ export async function submitRoutes(fastify: FastifyInstance) {
       return fail(reply, "repo_url must be your team's own repository, not the shared hackathon repo", 400, "Create a separate public GitHub repository for your team before submitting.");
     }
 
-    const { data: siblingSubmissions } = await supabaseAdmin.from("submissions").select("team_id, preview_url").eq("hackathon_id", hackathonId).neq("team_id", teamId);
-    const duplicateRepo = (siblingSubmissions || []).some((sub) => typeof sub.preview_url === "string" && normalizeRepoIdentity(sub.preview_url) === submittedRepo);
+    const siblingSubmissions = await db
+      .select({ team_id: schema.submissions.teamId, preview_url: schema.submissions.previewUrl })
+      .from(schema.submissions)
+      .where(and(eq(schema.submissions.hackathonId, hackathonId), ne(schema.submissions.teamId, teamId)));
+    const duplicateRepo = siblingSubmissions.some((sub) => typeof sub.preview_url === "string" && normalizeRepoIdentity(sub.preview_url) === submittedRepo);
     if (duplicateRepo) return fail(reply, "repo_url is already being used by another team in this hackathon", 409, "Each team must submit its own unique GitHub repository URL.");
 
-    const { data: existingSub } = await supabaseAdmin.from("submissions").select("id").eq("team_id", teamId).eq("hackathon_id", hackathonId).single();
+    const [existingSub] = await db
+      .select({ id: schema.submissions.id })
+      .from(schema.submissions)
+      .where(and(eq(schema.submissions.teamId, teamId), eq(schema.submissions.hackathonId, hackathonId)))
+      .limit(1);
     const timestamp = new Date().toISOString();
 
     if (existingSub) {
-      await supabaseAdmin.from("submissions").update({
-        preview_url: repoUrl,
-        build_log: serializeSubmissionMeta({ project_url: projectUrl || repoUrl, repo_url: repoUrl, notes, submitted_by_agent_id: agent.id }),
-        completed_at: timestamp,
-      }).eq("id", existingSub.id);
+      await db.update(schema.submissions).set({
+        previewUrl: repoUrl,
+        buildLog: serializeSubmissionMeta({ project_url: projectUrl || repoUrl, repo_url: repoUrl, notes, submitted_by_agent_id: agent.id }),
+        completedAt: timestamp,
+      }).where(eq(schema.submissions.id, existingSub.id));
 
-      await supabaseAdmin.from("activity_log").insert({ id: uuid(), hackathon_id: hackathonId, team_id: teamId, agent_id: agent.id, event_type: "submission_updated", event_data: { submission_id: existingSub.id, repo_url: repoUrl, project_url: projectUrl } });
+      await db.insert(schema.activityLog).values({ id: uuid(), hackathonId, teamId, agentId: agent.id, eventType: "submission_updated", eventData: { submission_id: existingSub.id, repo_url: repoUrl, project_url: projectUrl } });
 
       return ok(reply, { submission_id: existingSub.id, status: "completed", repo_url: repoUrl, project_url: projectUrl, notes, updated: true, message: "Submission updated. You can resubmit until the deadline." });
     }
 
     const submissionId = uuid();
-    await supabaseAdmin.from("submissions").insert({
-      id: submissionId, team_id: teamId, hackathon_id: hackathonId, status: "completed",
-      preview_url: repoUrl,
-      build_log: serializeSubmissionMeta({ project_url: projectUrl || repoUrl, repo_url: repoUrl, notes, submitted_by_agent_id: agent.id }),
-      started_at: timestamp, completed_at: timestamp,
+    await db.insert(schema.submissions).values({
+      id: submissionId, teamId, hackathonId, status: "completed",
+      previewUrl: repoUrl,
+      buildLog: serializeSubmissionMeta({ project_url: projectUrl || repoUrl, repo_url: repoUrl, notes, submitted_by_agent_id: agent.id }),
+      startedAt: timestamp, completedAt: timestamp,
     });
 
-    await supabaseAdmin.from("teams").update({ status: "submitted" }).eq("id", teamId);
-    await supabaseAdmin.from("activity_log").insert({ id: uuid(), hackathon_id: hackathonId, team_id: teamId, agent_id: agent.id, event_type: "submission_received", event_data: { submission_id: submissionId, repo_url: repoUrl, project_url: projectUrl } });
+    await db.update(schema.teams).set({ status: "submitted" }).where(eq(schema.teams.id, teamId));
+    await db.insert(schema.activityLog).values({ id: uuid(), hackathonId, teamId, agentId: agent.id, eventType: "submission_received", eventData: { submission_id: submissionId, repo_url: repoUrl, project_url: projectUrl } });
 
     return ok(reply, { submission_id: submissionId, status: "completed", repo_url: repoUrl, project_url: projectUrl, notes, message: "Submission received. You can update it by resubmitting before the deadline." }, 201);
   });

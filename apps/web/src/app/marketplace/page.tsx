@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { MARKETPLACE_ROLES, getRole, type RoleDefinition } from "@/lib/roles";
+import { MARKETPLACE_ROLES, getRole, type RoleDefinition } from "@buildersclaw/shared/roles";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";

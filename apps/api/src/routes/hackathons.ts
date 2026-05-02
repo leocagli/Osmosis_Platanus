@@ -1,16 +1,38 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { supabaseAdmin } from "../../../web/src/lib/supabase";
-import { formatHackathon, loadHackathonLeaderboard, calculatePrizePool, parseHackathonMeta, sanitizeString, serializeHackathonMeta, toInternalHackathonStatus } from "../../../web/src/lib/hackathons";
+import { and, asc, count, desc, eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { formatHackathon, loadHackathonLeaderboard, calculatePrizePool, parseHackathonMeta, sanitizeString, serializeHackathonMeta, toInternalHackathonStatus } from "@buildersclaw/shared/hackathons";
 import { ok, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
-function hasSupabaseConfig() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+function hasDbConfig() {
+  return Boolean(process.env.DATABASE_URL);
 }
+
+const hackathonSelect = {
+  id: schema.hackathons.id,
+  title: schema.hackathons.title,
+  description: schema.hackathons.description,
+  brief: schema.hackathons.brief,
+  rules: schema.hackathons.rules,
+  entry_type: schema.hackathons.entryType,
+  entry_fee: schema.hackathons.entryFee,
+  prize_pool: schema.hackathons.prizePool,
+  platform_fee_pct: schema.hackathons.platformFeePct,
+  max_participants: schema.hackathons.maxParticipants,
+  team_size_min: schema.hackathons.teamSizeMin,
+  team_size_max: schema.hackathons.teamSizeMax,
+  build_time_seconds: schema.hackathons.buildTimeSeconds,
+  challenge_type: schema.hackathons.challengeType,
+  status: schema.hackathons.status,
+  created_by: schema.hackathons.createdBy,
+  starts_at: schema.hackathons.startsAt,
+  ends_at: schema.hackathons.endsAt,
+  judging_criteria: schema.hackathons.judgingCriteria,
+  github_repo: schema.hackathons.githubRepo,
+  created_at: schema.hackathons.createdAt,
+  updated_at: schema.hackathons.updatedAt,
+};
 
 function getConfiguredChainId(): number | null {
   const raw = process.env.CHAIN_ID;
@@ -22,37 +44,33 @@ function getConfiguredChainId(): number | null {
 export async function hackathonRoutes(fastify: FastifyInstance) {
   // GET /api/v1/hackathons
   fastify.get("/api/v1/hackathons", async (req, reply) => {
-    if (!hasSupabaseConfig()) return ok(reply, []);
+    if (!hasDbConfig()) return ok(reply, []);
+
+    const db = getDb();
 
     const query = req.query as { status?: string; challenge_type?: string };
 
-    let dbQuery = supabaseAdmin.from("hackathons").select("*");
-    if (query.challenge_type) {
-      dbQuery = dbQuery.eq("challenge_type", query.challenge_type.slice(0, 50));
-    }
-
-    const { data: hackathons, error } = await dbQuery
-      .order("created_at", { ascending: false })
+    const where = query.challenge_type ? eq(schema.hackathons.challengeType, query.challenge_type.slice(0, 50)) : undefined;
+    const hackathons = await db
+      .select(hackathonSelect)
+      .from(schema.hackathons)
+      .where(where)
+      .orderBy(desc(schema.hackathons.createdAt))
       .limit(50);
 
-    if (error) return fail(reply, "Failed to load hackathons", 500);
-
     const enriched = await Promise.all(
-      (hackathons || []).map(async (h) => {
-        const { count: teamCount } = await supabaseAdmin
-          .from("teams")
-          .select("*", { count: "exact", head: true })
-          .eq("hackathon_id", h.id);
+      hackathons.map(async (h) => {
+        const [{ value: teamCount }] = await db.select({ value: count() }).from(schema.teams).where(eq(schema.teams.hackathonId, h.id));
+        const members = await db
+          .select({ agent_id: schema.teamMembers.agentId })
+          .from(schema.teamMembers)
+          .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+          .where(eq(schema.teams.hackathonId, h.id));
 
-        const { data: members } = await supabaseAdmin
-          .from("team_members")
-          .select("agent_id, teams!inner(hackathon_id)")
-          .eq("teams.hackathon_id", h.id);
-
-        const uniqueAgents = new Set((members || []).map((m: Record<string, unknown>) => m.agent_id));
+        const uniqueAgents = new Set(members.map((m) => m.agent_id));
         return {
           ...formatHackathon(h as Record<string, unknown>),
-          total_teams: teamCount || 0,
+          total_teams: teamCount,
           total_agents: uniqueAgents.size,
         };
       }),
@@ -68,33 +86,48 @@ export async function hackathonRoutes(fastify: FastifyInstance) {
   // GET /api/v1/hackathons/:id
   fastify.get("/api/v1/hackathons/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const db = getDb();
 
-    const { data: hackathon } = await supabaseAdmin
-      .from("hackathons")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const [hackathon] = await db.select(hackathonSelect).from(schema.hackathons).where(eq(schema.hackathons.id, id)).limit(1);
 
     if (!hackathon) return notFound(reply, "Hackathon");
 
-    const { data: teams } = await supabaseAdmin
-      .from("teams")
-      .select("*")
-      .eq("hackathon_id", id)
-      .order("floor_number", { ascending: true });
+    const teams = await db
+      .select({
+        id: schema.teams.id,
+        hackathon_id: schema.teams.hackathonId,
+        name: schema.teams.name,
+        color: schema.teams.color,
+        floor_number: schema.teams.floorNumber,
+        status: schema.teams.status,
+        telegram_chat_id: schema.teams.telegramChatId,
+        created_by: schema.teams.createdBy,
+        created_at: schema.teams.createdAt,
+      })
+      .from(schema.teams)
+      .where(eq(schema.teams.hackathonId, id))
+      .orderBy(asc(schema.teams.floorNumber));
 
     const enrichedTeams = await Promise.all(
-      (teams || []).map(async (team) => {
-        const { data: members } = await supabaseAdmin
-          .from("team_members")
-          .select("*, agents(name, display_name, avatar_url)")
-          .eq("team_id", team.id)
-          .order("role", { ascending: true });
-
-        const flatMembers = (members || []).map((m: Record<string, unknown>) => {
-          const agent = m.agents as Record<string, unknown> | null;
-          return { ...m, agents: undefined, agent_name: agent?.name, agent_display_name: agent?.display_name, agent_avatar_url: agent?.avatar_url };
-        });
+      teams.map(async (team) => {
+        const flatMembers = await db
+          .select({
+            id: schema.teamMembers.id,
+            team_id: schema.teamMembers.teamId,
+            agent_id: schema.teamMembers.agentId,
+            role: schema.teamMembers.role,
+            revenue_share_pct: schema.teamMembers.revenueSharePct,
+            joined_via: schema.teamMembers.joinedVia,
+            status: schema.teamMembers.status,
+            joined_at: schema.teamMembers.joinedAt,
+            agent_name: schema.agents.name,
+            agent_display_name: schema.agents.displayName,
+            agent_avatar_url: schema.agents.avatarUrl,
+          })
+          .from(schema.teamMembers)
+          .innerJoin(schema.agents, eq(schema.teamMembers.agentId, schema.agents.id))
+          .where(eq(schema.teamMembers.teamId, team.id))
+          .orderBy(asc(schema.teamMembers.role));
 
         return { ...team, members: flatMembers };
       }),
@@ -106,7 +139,7 @@ export async function hackathonRoutes(fastify: FastifyInstance) {
     return ok(reply, {
       ...formatHackathon(hackathon as Record<string, unknown>),
       teams: enrichedTeams,
-      total_teams: (teams || []).length,
+      total_teams: teams.length,
       total_agents: totalAgents,
       prize_pool_dynamic: prize,
     });
@@ -118,12 +151,9 @@ export async function hackathonRoutes(fastify: FastifyInstance) {
     if (!agent) return unauthorized(reply);
 
     const { id } = req.params as { id: string };
+    const db = getDb();
 
-    const { data: hackathon } = await supabaseAdmin
-      .from("hackathons")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const [hackathon] = await db.select(hackathonSelect).from(schema.hackathons).where(eq(schema.hackathons.id, id)).limit(1);
 
     if (!hackathon) return notFound(reply, "Hackathon");
     if (hackathon.created_by !== agent.id) {
@@ -131,13 +161,18 @@ export async function hackathonRoutes(fastify: FastifyInstance) {
     }
 
     const body = req.body as Record<string, unknown>;
-    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const updates: Partial<typeof schema.hackathons.$inferInsert> = { updatedAt: new Date().toISOString() };
     const meta = parseHackathonMeta(hackathon.judging_criteria);
 
-    const directFields = ["title", "description", "brief", "rules", "starts_at", "ends_at", "entry_fee", "prize_pool", "max_participants"];
-    for (const key of directFields) {
-      if (body[key] !== undefined) updates[key] = body[key];
-    }
+    if (body.title !== undefined) updates.title = body.title as string;
+    if (body.description !== undefined) updates.description = body.description as string;
+    if (body.brief !== undefined) updates.brief = body.brief as string;
+    if (body.rules !== undefined) updates.rules = body.rules as string;
+    if (body.starts_at !== undefined) updates.startsAt = body.starts_at as string;
+    if (body.ends_at !== undefined) updates.endsAt = body.ends_at as string;
+    if (body.entry_fee !== undefined) updates.entryFee = Number(body.entry_fee);
+    if (body.prize_pool !== undefined) updates.prizePool = Number(body.prize_pool);
+    if (body.max_participants !== undefined) updates.maxParticipants = Number(body.max_participants);
 
     if (body.status !== undefined) {
       const mappedStatus = toInternalHackathonStatus(body.status as string);
@@ -146,7 +181,7 @@ export async function hackathonRoutes(fastify: FastifyInstance) {
     }
 
     if (body.contract_address !== undefined || body.judging_criteria !== undefined) {
-      updates.judging_criteria = serializeHackathonMeta({
+      updates.judgingCriteria = serializeHackathonMeta({
         ...meta,
         chain_id: meta.chain_id ?? getConfiguredChainId(),
         contract_address: body.contract_address !== undefined ? sanitizeString(body.contract_address as string, 128) : meta.contract_address,
@@ -154,14 +189,8 @@ export async function hackathonRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const { data: updated, error: updateErr } = await supabaseAdmin
-      .from("hackathons")
-      .update(updates)
-      .eq("id", id)
-      .select("*")
-      .single();
-
-    if (updateErr) return fail(reply, updateErr.message, 500);
+    const [updated] = await db.update(schema.hackathons).set(updates).where(eq(schema.hackathons.id, id)).returning(hackathonSelect);
+    if (!updated) return fail(reply, "Update failed", 500);
     return ok(reply, formatHackathon(updated as Record<string, unknown>));
   });
 

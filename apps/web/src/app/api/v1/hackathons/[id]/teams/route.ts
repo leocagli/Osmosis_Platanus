@@ -1,10 +1,34 @@
 import { NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { authenticateRequest } from "@/lib/auth";
-import { success, created, error, unauthorized, notFound } from "@/lib/responses";
-import { createSingleAgentTeam, toPublicHackathonStatus } from "@/lib/hackathons";
+import { asc, eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, created, error, unauthorized, notFound } from "@buildersclaw/shared/responses";
+import { createSingleAgentTeam, toPublicHackathonStatus } from "@buildersclaw/shared/hackathons";
 
 type RouteParams = { params: Promise<{ id: string }> };
+
+const teamSelect = {
+  id: schema.teams.id,
+  hackathon_id: schema.teams.hackathonId,
+  name: schema.teams.name,
+  color: schema.teams.color,
+  floor_number: schema.teams.floorNumber,
+  status: schema.teams.status,
+  telegram_chat_id: schema.teams.telegramChatId,
+  created_by: schema.teams.createdBy,
+  created_at: schema.teams.createdAt,
+};
+
+const teamMemberSelect = {
+  id: schema.teamMembers.id,
+  team_id: schema.teamMembers.teamId,
+  agent_id: schema.teamMembers.agentId,
+  role: schema.teamMembers.role,
+  revenue_share_pct: schema.teamMembers.revenueSharePct,
+  joined_via: schema.teamMembers.joinedVia,
+  status: schema.teamMembers.status,
+  joined_at: schema.teamMembers.joinedAt,
+};
 
 /**
  * POST /api/v1/hackathons/:id/teams — Create a single-agent participant team.
@@ -14,9 +38,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!agent) return unauthorized();
 
   const { id: hackathonId } = await params;
+  const db = getDb();
 
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons").select("*").eq("id", hackathonId).single();
+  const [hackathon] = await db
+    .select({ status: schema.hackathons.status })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
   if (!hackathon) return notFound("Hackathon");
   if (toPublicHackathonStatus(hackathon.status) !== "open") return error("Hackathon is not open for registration", 400);
 
@@ -45,33 +73,36 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { id: hackathonId } = await params;
+  const db = getDb();
 
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons").select("id").eq("id", hackathonId).single();
+  const [hackathon] = await db
+    .select({ id: schema.hackathons.id })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
   if (!hackathon) return notFound("Hackathon");
 
-  const { data: teams } = await supabaseAdmin
-    .from("teams").select("*")
-    .eq("hackathon_id", hackathonId)
-    .order("floor_number", { ascending: true });
+  const teams = await db
+    .select(teamSelect)
+    .from(schema.teams)
+    .where(eq(schema.teams.hackathonId, hackathonId))
+    .orderBy(asc(schema.teams.floorNumber));
 
   const enriched = await Promise.all(
-    (teams || []).map(async (team) => {
-      const { data: members } = await supabaseAdmin
-        .from("team_members")
-        .select("*, agents(name, display_name, avatar_url, reputation_score)")
-        .eq("team_id", team.id);
+    teams.map(async (team) => {
+      const members = await db
+        .select({
+          ...teamMemberSelect,
+          agent_name: schema.agents.name,
+          agent_display_name: schema.agents.displayName,
+          agent_avatar_url: schema.agents.avatarUrl,
+          reputation_score: schema.agents.reputationScore,
+        })
+        .from(schema.teamMembers)
+        .leftJoin(schema.agents, eq(schema.teamMembers.agentId, schema.agents.id))
+        .where(eq(schema.teamMembers.teamId, team.id));
 
-      const flatMembers = (members || []).map((m: Record<string, unknown>) => {
-        const a = m.agents as Record<string, unknown> | null;
-        return {
-          ...m, agents: undefined,
-          agent_name: a?.name, agent_display_name: a?.display_name,
-          agent_avatar_url: a?.avatar_url, reputation_score: a?.reputation_score,
-        };
-      });
-
-      return { ...team, members: flatMembers };
+      return { ...team, members };
     })
   );
 

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { success, error } from "@/lib/responses";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, error } from "@buildersclaw/shared/responses";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -11,6 +12,7 @@ import { v4 as uuid } from "uuid";
  * SECURITY: Even in dev, all operations are logged.
  */
 export async function POST(req: NextRequest) {
+  const db = getDb();
   // ── SECURITY: Completely disabled in production — NO exceptions ──
   if (process.env.NODE_ENV === "production") {
     return error("Seed-test endpoint is disabled in production.", 403);
@@ -46,56 +48,63 @@ export async function POST(req: NextRequest) {
 
     // Add marketplace listing directly (bypasses schema cache issue)
     if (body.action === "add_listing") {
-      const { error: err } = await supabaseAdmin
-        .from("marketplace_listings")
-        .insert({
+      try {
+        await db.insert(schema.marketplaceListings).values({
           id: uuid(),
-          hackathon_id: body.hackathon_id,
-          team_id: body.team_id,
-          posted_by: body.agent_id,
-          role_title: body.role_title || "Team Member",
-          role_description: body.role_description || null,
-          share_pct: body.share_pct || 20,
+          hackathonId: body.hackathon_id,
+          teamId: body.team_id,
+          postedBy: body.agent_id,
+          roleTitle: body.role_title || "Team Member",
+          roleDescription: body.role_description || null,
+          sharePct: body.share_pct || 20,
           status: "open",
-          created_at: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
         });
-      if (err) return error("Listing insert: " + JSON.stringify(err), 500);
+      } catch (err) {
+        return error("Listing insert: " + JSON.stringify(err), 500);
+      }
       return success({ ok: true });
     }
 
     // Update agent stats for leaderboard seeding
     if (body.action === "update_agent_stats") {
-      const { error: err } = await supabaseAdmin
-        .from("agents")
-        .update({
-          total_wins: body.total_wins ?? 0,
-          total_hackathons: body.total_hackathons ?? 0,
-          reputation_score: body.reputation_score ?? 50,
+      try {
+        await db.update(schema.agents).set({
+          totalWins: body.total_wins ?? 0,
+          totalHackathons: body.total_hackathons ?? 0,
+          reputationScore: body.reputation_score ?? 50,
         })
-        .eq("id", body.agent_id);
-      if (err) return error("Agent stats update: " + JSON.stringify(err), 500);
+          .where(eq(schema.agents.id, body.agent_id));
+      } catch (err) {
+        return error("Agent stats update: " + JSON.stringify(err), 500);
+      }
       return success({ ok: true });
     }
 
     if (body.action === "add_member") {
-      const { error: err } = await supabaseAdmin.from("team_members").insert({
-        id: uuid(),
-        team_id: body.team_id,
-        agent_id: body.agent_id,
-        role: body.role || "member",
-        revenue_share_pct: body.share_pct || 25,
-        status: "active",
-      });
-      if (err) return error("Member insert: " + JSON.stringify(err), 500);
-      if (body.leader_id && body.share_pct) {
-        const { data: ldr } = await supabaseAdmin
-          .from("team_members").select("id, revenue_share_pct")
-          .eq("team_id", body.team_id).eq("agent_id", body.leader_id).single();
-        if (ldr) {
-          await supabaseAdmin.from("team_members")
-            .update({ revenue_share_pct: ldr.revenue_share_pct - body.share_pct })
-            .eq("id", ldr.id);
+      try {
+        await db.insert(schema.teamMembers).values({
+          id: uuid(),
+          teamId: body.team_id,
+          agentId: body.agent_id,
+          role: body.role || "member",
+          revenueSharePct: body.share_pct || 25,
+          status: "active",
+        });
+        if (body.leader_id && body.share_pct) {
+          const [ldr] = await db
+            .select({ id: schema.teamMembers.id, revenue_share_pct: schema.teamMembers.revenueSharePct })
+            .from(schema.teamMembers)
+            .where(eq(schema.teamMembers.agentId, body.leader_id))
+            .limit(1);
+          if (ldr) {
+            await db.update(schema.teamMembers)
+              .set({ revenueSharePct: ldr.revenue_share_pct - body.share_pct })
+              .where(eq(schema.teamMembers.id, ldr.id));
+          }
         }
+      } catch (err) {
+        return error("Member insert: " + JSON.stringify(err), 500);
       }
       return success({ ok: true });
     }
@@ -103,31 +112,29 @@ export async function POST(req: NextRequest) {
     const id = uuid();
     const now = new Date();
 
-    const { error: insertErr } = await supabaseAdmin
-      .from("hackathons")
-      .insert({
+    try {
+      await db.insert(schema.hackathons).values({
         id,
         title: body.title || "Platform Test Sprint",
         description: body.description || "Test hackathon",
         brief: body.brief || "Build the best AI-powered landing page",
         rules: body.rules || null,
-        entry_type: "free",
-        entry_fee: 0,
-        prize_pool: body.prize_pool || 100,
-        platform_fee_pct: 0.1,
-        max_participants: 500,
-        team_size_min: 1,
-        team_size_max: body.team_size_max || 4,
-        build_time_seconds: 180,
-        challenge_type: body.challenge_type || "landing_page",
+        entryType: "free",
+        entryFee: 0,
+        prizePool: body.prize_pool || 100,
+        platformFeePct: 0.1,
+        maxParticipants: 500,
+        teamSizeMin: 1,
+        teamSizeMax: body.team_size_max || 4,
+        buildTimeSeconds: 180,
+        challengeType: body.challenge_type || "landing_page",
         status: "open",
-        created_by: null,
-        starts_at: now.toISOString(),
-        ends_at: body.ends_at || new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+        createdBy: null,
+        startsAt: now.toISOString(),
+        endsAt: body.ends_at || new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
       });
-
-    if (insertErr) {
-      return error("Insert failed: " + insertErr.message, 500);
+    } catch (insertErr) {
+      return error("Insert failed: " + (insertErr instanceof Error ? insertErr.message : "unknown"), 500);
     }
 
     return success({ id, url: `/hackathons/${id}` });

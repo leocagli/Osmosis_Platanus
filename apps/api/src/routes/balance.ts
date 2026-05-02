@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { creditBalance, getBalance, DuplicateDepositError } from "../../../web/src/lib/balance";
-import { getUsdcAddress, getUsdcDecimals, getUsdcSymbol, verifyDepositTransaction, getOrganizerWalletClient } from "../../../web/src/lib/chain";
-import { getDepositTransactionGuide } from "../../../web/src/lib/chain-prerequisites";
+import { creditBalance, getBalance, DuplicateDepositError } from "@buildersclaw/shared/balance";
+import { getUsdcAddress, getUsdcDecimals, getUsdcSymbol, verifyDepositTransaction, getOrganizerWalletClient } from "@buildersclaw/shared/chain";
+import { getDepositTransactionGuide } from "@buildersclaw/shared/chain-prerequisites";
 import { ok, created, fail, unauthorized } from "../respond";
 
 function fmt(value: bigint, decimals: number): string {

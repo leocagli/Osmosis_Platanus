@@ -3,7 +3,8 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { eq, inArray } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
 
 type Mode = "success" | "fallback" | "all";
 type JsonObject = Record<string, unknown>;
@@ -66,12 +67,6 @@ function loadEnvFile(filePath: string, options: { override?: boolean } = {}) {
     const value = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, "");
     if (options.override || !(key in process.env)) process.env[key] = value;
   }
-}
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required environment variable: ${name}`);
-  return value;
 }
 
 function uid(prefix: string) {
@@ -149,107 +144,85 @@ async function waitForGlsim(proc: ReturnType<typeof spawn>) {
   throw new Error("Timed out waiting for GLSim to start");
 }
 
-function createAdminClient() {
-  return createClient(
-    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
-}
+type Db = ReturnType<typeof getDb>;
 
-async function insertAgent(admin: SupabaseClient, name: string) {
+async function insertAgent(db: Db, name: string) {
   const id = crypto.randomUUID();
   const apiKey = `buildersclaw_${crypto.randomBytes(16).toString("hex")}`;
   const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
   const now = new Date().toISOString();
 
-  const { error } = await admin.from("agents").insert({
+  await db.insert(schema.agents).values({
     id,
     name,
-    display_name: name,
+    displayName: name,
     description: `${name} orchestration test agent`,
-    wallet_address: null,
-    api_key_hash: apiKeyHash,
+    walletAddress: null,
+    apiKeyHash,
     model: "gpt-4o",
     personality: null,
     strategy: JSON.stringify({ stack: "node.js" }),
     status: "active",
-    created_at: now,
-    last_active: now,
+    createdAt: now,
+    lastActive: now,
   });
-
-  if (error) {
-    throw new Error(`Failed to insert agent ${name}: ${JSON.stringify(error)}`);
-  }
 
   return { id, apiKey };
 }
 
-async function seedHackathonBase(admin: SupabaseClient, title: string, criteria: JsonObject) {
+async function seedHackathonBase(db: Db, title: string, criteria: JsonObject) {
   const hackathonId = crypto.randomUUID();
   const now = new Date();
 
-  const { error } = await admin.from("hackathons").insert({
+  await db.insert(schema.hackathons).values({
     id: hackathonId,
     title,
     description: "GenLayer orchestration test hackathon",
     brief: "Pick the strongest production-ready developer tool from the top contenders.",
     rules: null,
-    entry_type: "free",
-    entry_fee: 0,
-    prize_pool: 100,
-    platform_fee_pct: 0.1,
-    max_participants: 100,
-    team_size_min: 1,
-    team_size_max: 1,
-    build_time_seconds: 300,
-    challenge_type: "tool",
+    entryType: "free",
+    entryFee: 0,
+    prizePool: 100,
+    platformFeePct: 0.1,
+    maxParticipants: 100,
+    teamSizeMin: 1,
+    teamSizeMax: 1,
+    buildTimeSeconds: 300,
+    challengeType: "tool",
     status: "judging",
-    created_by: null,
-    starts_at: new Date(now.getTime() - 60_000).toISOString(),
-    ends_at: new Date(now.getTime() - 1_000).toISOString(),
-    judging_criteria: criteria,
+    createdBy: null,
+    startsAt: new Date(now.getTime() - 60_000).toISOString(),
+    endsAt: new Date(now.getTime() - 1_000).toISOString(),
+    judgingCriteria: criteria,
   });
-
-  if (error) {
-    throw new Error(`Failed to insert hackathon ${title}: ${JSON.stringify(error)}`);
-  }
 
   return hackathonId;
 }
 
-async function seedTeam(admin: SupabaseClient, hackathonId: string, teamId: string, teamName: string, floorNumber: number, leaderAgentId: string) {
-  const { error: teamError } = await admin.from("teams").insert({
+async function seedTeam(db: Db, hackathonId: string, teamId: string, teamName: string, floorNumber: number, leaderAgentId: string) {
+  await db.insert(schema.teams).values({
     id: teamId,
-    hackathon_id: hackathonId,
+    hackathonId,
     name: teamName,
     color: ["#00c2a8", "#ff8a00", "#5b8cff"][floorNumber - 1] || "#7a5cff",
-    floor_number: floorNumber,
+    floorNumber,
     status: "submitted",
-    created_by: leaderAgentId,
+    createdBy: leaderAgentId,
   });
 
-  if (teamError) {
-    throw new Error(`Failed to insert team ${teamName}: ${JSON.stringify(teamError)}`);
-  }
-
-  const { error: memberError } = await admin.from("team_members").insert({
+  await db.insert(schema.teamMembers).values({
     id: crypto.randomUUID(),
-    team_id: teamId,
-    agent_id: leaderAgentId,
+    teamId,
+    agentId: leaderAgentId,
     role: "leader",
-    revenue_share_pct: 100,
-    joined_via: "direct",
+    revenueSharePct: 100,
+    joinedVia: "direct",
     status: "active",
   });
-
-  if (memberError) {
-    throw new Error(`Failed to insert team member for ${teamName}: ${JSON.stringify(memberError)}`);
-  }
 }
 
 async function seedSubmissionAndEvaluation(
-  admin: SupabaseClient,
+  db: Db,
   hackathonId: string,
   teamId: string,
   repoUrl: string,
@@ -258,49 +231,58 @@ async function seedSubmissionAndEvaluation(
 ) {
   const submissionId = crypto.randomUUID();
   const timestamp = new Date().toISOString();
-  const { error: subError } = await admin.from("submissions").insert({
+  await db.insert(schema.submissions).values({
     id: submissionId,
-    team_id: teamId,
-    hackathon_id: hackathonId,
+    teamId,
+    hackathonId,
     status: "completed",
-    preview_url: repoUrl,
-    build_log: JSON.stringify({ repo_url: repoUrl, project_url: repoUrl, notes: feedback }),
-    started_at: timestamp,
-    completed_at: timestamp,
+    previewUrl: repoUrl,
+    buildLog: JSON.stringify({ repo_url: repoUrl, project_url: repoUrl, notes: feedback }),
+    startedAt: timestamp,
+    completedAt: timestamp,
   });
 
-  if (subError) {
-    throw new Error(`Failed to insert submission for ${teamId}: ${JSON.stringify(subError)}`);
-  }
-
-  const { error: evalError } = await admin.from("evaluations").upsert({
-    submission_id: submissionId,
-    functionality_score: score,
-    brief_compliance_score: score,
-    code_quality_score: score,
-    architecture_score: score,
-    innovation_score: score,
-    completeness_score: score,
-    documentation_score: score,
-    testing_score: score,
-    security_score: score,
-    deploy_readiness_score: score,
-    total_score: score,
-    judge_feedback: feedback,
-    raw_response: JSON.stringify({ total_score: score, judge_feedback: feedback }),
-  }, { onConflict: "submission_id" });
-
-  if (evalError) {
-    throw new Error(`Failed to insert evaluation for ${teamId}: ${JSON.stringify(evalError)}`);
-  }
+  await db.insert(schema.evaluations).values({
+    submissionId,
+    functionalityScore: score,
+    briefComplianceScore: score,
+    codeQualityScore: score,
+    architectureScore: score,
+    innovationScore: score,
+    completenessScore: score,
+    documentationScore: score,
+    testingScore: score,
+    securityScore: score,
+    deployReadinessScore: score,
+    totalScore: score,
+    judgeFeedback: feedback,
+    rawResponse: JSON.stringify({ total_score: score, judge_feedback: feedback }),
+  }).onConflictDoUpdate({
+    target: schema.evaluations.submissionId,
+    set: {
+      functionalityScore: score,
+      briefComplianceScore: score,
+      codeQualityScore: score,
+      architectureScore: score,
+      innovationScore: score,
+      completenessScore: score,
+      documentationScore: score,
+      testingScore: score,
+      securityScore: score,
+      deployReadinessScore: score,
+      totalScore: score,
+      judgeFeedback: feedback,
+      rawResponse: JSON.stringify({ total_score: score, judge_feedback: feedback }),
+    },
+  });
 
   return submissionId;
 }
 
-async function seedQueuedHackathon(admin: SupabaseClient, scenario: string): Promise<SeededHackathon> {
-  const alphaLeader = await insertAgent(admin, uid(`${scenario}_alpha`));
-  const betaLeader = await insertAgent(admin, uid(`${scenario}_beta`));
-  const gammaLeader = await insertAgent(admin, uid(`${scenario}_gamma`));
+async function seedQueuedHackathon(db: Db, scenario: string): Promise<SeededHackathon> {
+  const alphaLeader = await insertAgent(db, uid(`${scenario}_alpha`));
+  const betaLeader = await insertAgent(db, uid(`${scenario}_beta`));
+  const gammaLeader = await insertAgent(db, uid(`${scenario}_gamma`));
 
   const alphaId = TEAM_ALPHA_ID;
   const betaId = TEAM_BETA_ID;
@@ -335,22 +317,22 @@ async function seedQueuedHackathon(admin: SupabaseClient, scenario: string): Pro
     notes: "Gemini pre-scored submissions. Top contenders queued for GenLayer.",
   } satisfies JsonObject;
 
-  const hackathonId = await seedHackathonBase(admin, uid(`${scenario}_hackathon`), criteria);
+  const hackathonId = await seedHackathonBase(db, uid(`${scenario}_hackathon`), criteria);
 
-  await seedTeam(admin, hackathonId, alphaId, "Alpha Team", 1, alphaLeader.id);
-  await seedTeam(admin, hackathonId, betaId, "Beta Team", 2, betaLeader.id);
-  await seedTeam(admin, hackathonId, gammaId, "Gamma Team", 3, gammaLeader.id);
+  await seedTeam(db, hackathonId, alphaId, "Alpha Team", 1, alphaLeader.id);
+  await seedTeam(db, hackathonId, betaId, "Beta Team", 2, betaLeader.id);
+  await seedTeam(db, hackathonId, gammaId, "Gamma Team", 3, gammaLeader.id);
 
   const winnerSubmissionId = await seedSubmissionAndEvaluation(
-    admin,
+    db,
     hackathonId,
     alphaId,
     githubRepoBase,
     91,
     contenders[0].repo_summary,
   );
-  await seedSubmissionAndEvaluation(admin, hackathonId, betaId, githubRepoBase, 84, contenders[1].repo_summary);
-  await seedSubmissionAndEvaluation(admin, hackathonId, gammaId, githubRepoBase, 73, contenders[2].repo_summary);
+  await seedSubmissionAndEvaluation(db, hackathonId, betaId, githubRepoBase, 84, contenders[1].repo_summary);
+  await seedSubmissionAndEvaluation(db, hackathonId, gammaId, githubRepoBase, 73, contenders[2].repo_summary);
 
   return {
     hackathonId,
@@ -361,8 +343,8 @@ async function seedQueuedHackathon(admin: SupabaseClient, scenario: string): Pro
   };
 }
 
-async function seedFallbackHackathon(admin: SupabaseClient, scenario: string): Promise<SeededHackathon> {
-  const seeded = await seedQueuedHackathon(admin, scenario);
+async function seedFallbackHackathon(db: Db, scenario: string): Promise<SeededHackathon> {
+  const seeded = await seedQueuedHackathon(db, scenario);
   const criteria = {
     genlayer_status: "deploying",
     genlayer_contenders: [
@@ -384,81 +366,54 @@ async function seedFallbackHackathon(admin: SupabaseClient, scenario: string): P
     judge_method: "gemini_pending_genlayer",
   } satisfies JsonObject;
 
-  const { error } = await admin
-    .from("hackathons")
-    .update({ judging_criteria: criteria, status: "judging" })
-    .eq("id", seeded.hackathonId);
-
-  if (error) {
-    throw new Error(`Failed to update fallback hackathon metadata: ${JSON.stringify(error)}`);
-  }
+  await db.update(schema.hackathons).set({ judgingCriteria: criteria, status: "judging" }).where(eq(schema.hackathons.id, seeded.hackathonId));
 
   return seeded;
 }
 
-async function fetchHackathon(admin: SupabaseClient, hackathonId: string) {
-  const { data, error } = await admin
-    .from("hackathons")
-    .select("id, title, status, judging_criteria")
-    .eq("id", hackathonId)
-    .single();
-  if (error || !data) {
-    throw new Error(`Failed to fetch hackathon ${hackathonId}: ${JSON.stringify(error)}`);
-  }
+async function fetchHackathon(db: Db, hackathonId: string) {
+  const [data] = await db.select({ id: schema.hackathons.id, title: schema.hackathons.title, status: schema.hackathons.status, judging_criteria: schema.hackathons.judgingCriteria }).from(schema.hackathons).where(eq(schema.hackathons.id, hackathonId)).limit(1);
+  if (!data) throw new Error(`Failed to fetch hackathon ${hackathonId}`);
   return data;
 }
 
-async function fetchEvaluation(admin: SupabaseClient, submissionId: string) {
-  const { data, error } = await admin
-    .from("evaluations")
-    .select("submission_id, total_score, judge_feedback, raw_response")
-    .eq("submission_id", submissionId)
-    .single();
-  if (error || !data) {
-    throw new Error(`Failed to fetch evaluation ${submissionId}: ${JSON.stringify(error)}`);
-  }
+async function fetchEvaluation(db: Db, submissionId: string) {
+  const [data] = await db.select({ submission_id: schema.evaluations.submissionId, total_score: schema.evaluations.totalScore, judge_feedback: schema.evaluations.judgeFeedback, raw_response: schema.evaluations.rawResponse }).from(schema.evaluations).where(eq(schema.evaluations.submissionId, submissionId)).limit(1);
+  if (!data) throw new Error(`Failed to fetch evaluation ${submissionId}`);
   return data;
 }
 
-async function cleanupHackathon(admin: SupabaseClient, hackathonId: string) {
-  const { data: teams } = await admin.from("teams").select("id").eq("hackathon_id", hackathonId);
-  const teamIds = (teams || []).map((team) => team.id as string);
+async function cleanupHackathon(db: Db, hackathonId: string) {
+  const teams = await db.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.hackathonId, hackathonId));
+  const teamIds = teams.map((team) => team.id);
+  const submissions = await db.select({ id: schema.submissions.id }).from(schema.submissions).where(eq(schema.submissions.hackathonId, hackathonId));
+  const submissionIds = submissions.map((submission) => submission.id);
 
-  const { data: submissions } = await admin.from("submissions").select("id").eq("hackathon_id", hackathonId);
-  const submissionIds = (submissions || []).map((submission) => submission.id as string);
-
-  for (const submissionId of submissionIds) {
-    await admin.from("evaluations").delete().eq("submission_id", submissionId);
-  }
-
-  await admin.from("submissions").delete().eq("hackathon_id", hackathonId);
-
-  for (const teamId of teamIds) {
-    await admin.from("team_members").delete().eq("team_id", teamId);
-  }
-
-  await admin.from("teams").delete().eq("hackathon_id", hackathonId);
-  await admin.from("activity_log").delete().eq("hackathon_id", hackathonId);
-  await admin.from("marketplace_listings").delete().eq("hackathon_id", hackathonId);
-  await admin.from("prompt_rounds").delete().eq("hackathon_id", hackathonId);
-  await admin.from("hackathons").delete().eq("id", hackathonId);
+  if (submissionIds.length > 0) await db.delete(schema.evaluations).where(inArray(schema.evaluations.submissionId, submissionIds));
+  await db.delete(schema.submissions).where(eq(schema.submissions.hackathonId, hackathonId));
+  if (teamIds.length > 0) await db.delete(schema.teamMembers).where(inArray(schema.teamMembers.teamId, teamIds));
+  await db.delete(schema.teams).where(eq(schema.teams.hackathonId, hackathonId));
+  await db.delete(schema.activityLog).where(eq(schema.activityLog.hackathonId, hackathonId));
+  await db.delete(schema.marketplaceListings).where(eq(schema.marketplaceListings.hackathonId, hackathonId));
+  await db.delete(schema.promptRounds).where(eq(schema.promptRounds.hackathonId, hackathonId));
+  await db.delete(schema.hackathons).where(eq(schema.hackathons.id, hackathonId));
 }
 
-async function cleanupAgents(admin: SupabaseClient, agentIds: string[]) {
+async function cleanupAgents(db: Db, agentIds: string[]) {
   if (agentIds.length === 0) return;
-  await admin.from("agents").delete().in("id", agentIds);
+  await db.delete(schema.agents).where(inArray(schema.agents.id, agentIds));
 }
 
-async function runSuccessScenario(admin: SupabaseClient, continueGenLayerJudging: (hackathonId: string) => Promise<boolean>) {
+async function runSuccessScenario(db: Db, continueGenLayerJudging: (hackathonId: string) => Promise<boolean>) {
   step("1.", "Seeding queued GenLayer hackathon for success path");
-  const seeded = await seedQueuedHackathon(admin, "gl_success");
+  const seeded = await seedQueuedHackathon(db, "gl_success");
 
   try {
     const observedStatuses: string[] = [];
 
     for (let attempt = 0; attempt < 12; attempt += 1) {
       await continueGenLayerJudging(seeded.hackathonId);
-      const hackathon = await fetchHackathon(admin, seeded.hackathonId);
+      const hackathon = await fetchHackathon(db, seeded.hackathonId);
       const meta = parseMeta(hackathon.judging_criteria);
       const status = typeof meta.genlayer_status === "string" ? meta.genlayer_status : "<missing>";
       observedStatuses.push(status);
@@ -468,9 +423,9 @@ async function runSuccessScenario(admin: SupabaseClient, continueGenLayerJudging
       await sleep(300);
     }
 
-    const hackathon = await fetchHackathon(admin, seeded.hackathonId);
+    const hackathon = await fetchHackathon(db, seeded.hackathonId);
     const meta = parseMeta(hackathon.judging_criteria);
-    const evaluation = await fetchEvaluation(admin, seeded.winnerSubmissionId);
+    const evaluation = await fetchEvaluation(db, seeded.winnerSubmissionId);
     const rawResponse = parseMeta(evaluation.raw_response);
 
     assert(hackathon.status === "completed", "success path completes hackathon", `statuses: ${observedStatuses.join(" -> ")}`);
@@ -487,20 +442,20 @@ async function runSuccessScenario(admin: SupabaseClient, continueGenLayerJudging
     assert(typeof evaluation.judge_feedback === "string" && evaluation.judge_feedback.includes("GenLayer On-Chain Verdict"), "success path annotates winner evaluation feedback");
     assert(typeof rawResponse.genlayer_result === "object" && rawResponse.genlayer_result !== null, "success path stores genlayer_result in evaluation raw_response");
   } finally {
-    await cleanupHackathon(admin, seeded.hackathonId);
-    await cleanupAgents(admin, seeded.agentIds);
+    await cleanupHackathon(db, seeded.hackathonId);
+    await cleanupAgents(db, seeded.agentIds);
   }
 }
 
-async function runFallbackScenario(admin: SupabaseClient, continueGenLayerJudging: (hackathonId: string) => Promise<boolean>) {
+async function runFallbackScenario(db: Db, continueGenLayerJudging: (hackathonId: string) => Promise<boolean>) {
   step("2.", "Seeding broken GenLayer state for fallback path");
-  const seeded = await seedFallbackHackathon(admin, "gl_fallback");
+  const seeded = await seedFallbackHackathon(db, "gl_fallback");
 
   try {
     await continueGenLayerJudging(seeded.hackathonId);
     await sleep(100);
 
-    const hackathon = await fetchHackathon(admin, seeded.hackathonId);
+    const hackathon = await fetchHackathon(db, seeded.hackathonId);
     const meta = parseMeta(hackathon.judging_criteria);
 
     assert(hackathon.status === "completed", "fallback path completes hackathon");
@@ -510,8 +465,8 @@ async function runFallbackScenario(admin: SupabaseClient, continueGenLayerJudgin
     assert(typeof meta.genlayer_last_error === "string" && meta.genlayer_last_error.length > 0, "fallback path records GenLayer error");
     assert(typeof meta.notes === "string" && meta.notes.includes("GenLayer fallback to Gemini winner after error"), "fallback path explains fallback in notes");
   } finally {
-    await cleanupHackathon(admin, seeded.hackathonId);
-    await cleanupAgents(admin, seeded.agentIds);
+    await cleanupHackathon(db, seeded.hackathonId);
+    await cleanupAgents(db, seeded.agentIds);
   }
 }
 
@@ -542,16 +497,16 @@ async function main() {
     process.env.GENLAYER_CHAIN = "localnet";
     process.env.GENLAYER_PRIVATE_KEY = localPrivateKey;
 
-    const admin = createAdminClient();
-    const judgeModule = await import("../src/lib/judge");
+    const db = getDb();
+    const judgeModule = await import("@buildersclaw/shared/judge");
     const continueGenLayerJudging = judgeModule.continueGenLayerJudging;
 
     if (mode === "success" || mode === "all") {
-      await runSuccessScenario(admin, continueGenLayerJudging);
+      await runSuccessScenario(db, continueGenLayerJudging);
     }
 
     if (mode === "fallback" || mode === "all") {
-      await runFallbackScenario(admin, continueGenLayerJudging);
+      await runFallbackScenario(db, continueGenLayerJudging);
     }
   } finally {
     glsim.kill("SIGTERM");

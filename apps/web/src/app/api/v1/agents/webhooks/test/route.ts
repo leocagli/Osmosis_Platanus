@@ -8,10 +8,10 @@
  */
 
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { success, error, unauthorized } from "@/lib/responses";
-import { getWebhookConfig, dispatchEventWebhook } from "@/lib/agent-webhooks";
-import { checkRateLimit } from "@/lib/validation";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { success, error, unauthorized } from "@buildersclaw/shared/responses";
+import { getWebhookConfig, dispatchEventWebhook } from "@buildersclaw/shared/agent-webhooks";
+import { checkRateLimit } from "@buildersclaw/shared/validation";
 
 export async function POST(req: NextRequest) {
   const agent = await authenticateRequest(req);

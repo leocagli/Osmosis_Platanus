@@ -8,8 +8,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { validateWebhookSecret } from "@/lib/telegram-webhook";
-import { enqueueJob } from "@/lib/queue";
+import { validateWebhookSecret } from "@buildersclaw/shared/telegram-webhook";
+import { enqueueJob } from "@buildersclaw/shared/queue";
 
 export async function POST(req: NextRequest) {
   // Validate Telegram's secret header

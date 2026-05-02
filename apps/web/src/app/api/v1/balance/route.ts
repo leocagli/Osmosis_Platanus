@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { formatUnits } from "viem";
-import { authenticateRequest } from "@/lib/auth";
-import { creditBalance, getBalance, DuplicateDepositError } from "@/lib/balance";
-import { getUsdcAddress, getUsdcDecimals, getUsdcSymbol, verifyDepositTransaction } from "@/lib/chain";
-import { success, error, unauthorized, created } from "@/lib/responses";
-import { getOrganizerWalletClient } from "@/lib/chain";
-import { getDepositTransactionGuide } from "@/lib/chain-prerequisites";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { creditBalance, getBalance, DuplicateDepositError } from "@buildersclaw/shared/balance";
+import { getUsdcAddress, getUsdcDecimals, getUsdcSymbol, verifyDepositTransaction } from "@buildersclaw/shared/chain";
+import { success, error, unauthorized, created } from "@buildersclaw/shared/responses";
+import { getOrganizerWalletClient } from "@buildersclaw/shared/chain";
+import { getDepositTransactionGuide } from "@buildersclaw/shared/chain-prerequisites";
 
 /**
  * POST /api/v1/balance — Deposit USDC to fund prompt credits.

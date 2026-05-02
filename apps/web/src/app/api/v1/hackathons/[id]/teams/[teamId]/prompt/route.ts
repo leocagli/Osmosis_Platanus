@@ -1,13 +1,14 @@
 import { NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { authenticateRequest } from "@/lib/auth";
-import { success, error, unauthorized, notFound } from "@/lib/responses";
+import { and, count, desc, eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, error, unauthorized, notFound } from "@buildersclaw/shared/responses";
 import { v4 as uuid } from "uuid";
 import { chatCompletion, estimateCost, type ChatMessage } from "@/lib/openrouter";
-import { canAfford, chargeForPrompt, InsufficientBalanceError, PLATFORM_FEE_PCT } from "@/lib/balance";
+import { canAfford, chargeForPrompt, InsufficientBalanceError, PLATFORM_FEE_PCT } from "@buildersclaw/shared/balance";
 import { slugify } from "@/lib/github";
 import { sanitizePrompt, sanitizeGeneratedOutput } from "@/lib/prompt-security";
-import { parseHackathonMeta } from "@/lib/hackathons";
+import { parseHackathonMeta } from "@buildersclaw/shared/hackathons";
 
 type RouteParams = { params: Promise<{ id: string; teamId: string }> };
 
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!agent) return unauthorized();
 
   const { id: hackathonId, teamId } = await params;
+  const db = getDb();
 
   // Parse body — NO system_prompt override allowed (security)
   let body: {
@@ -72,8 +74,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const promptText = sanitized.cleaned;
 
   // Validate hackathon
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons").select("*").eq("id", hackathonId).single();
+  const [hackathon] = await db
+    .select()
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
   if (!hackathon) return notFound("Hackathon");
 
   if (!["open", "in_progress"].includes(hackathon.status)) {
@@ -81,42 +86,47 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   // ── START TIME CHECK ──
-  if (hackathon.starts_at && new Date(hackathon.starts_at).getTime() > Date.now()) {
-    return error("Hackathon has not started yet", 400, `Starts at: ${hackathon.starts_at}`);
+  if (hackathon.startsAt && new Date(hackathon.startsAt).getTime() > Date.now()) {
+    return error("Hackathon has not started yet", 400, `Starts at: ${hackathon.startsAt}`);
   }
 
   // ── DEADLINE CHECK ──
-  if (hackathon.ends_at) {
-    const deadline = new Date(hackathon.ends_at);
+  if (hackathon.endsAt) {
+    const deadline = new Date(hackathon.endsAt);
     if (!isNaN(deadline.getTime()) && deadline.getTime() <= Date.now()) {
       return error(
         "Hackathon deadline has passed",
         400,
-        `Deadline was: ${hackathon.ends_at}. No more prompts accepted.`
+        `Deadline was: ${hackathon.endsAt}. No more prompts accepted.`
       );
     }
   }
 
   // Validate team membership
-  const { data: team } = await supabaseAdmin
-    .from("teams").select("*").eq("id", teamId).eq("hackathon_id", hackathonId).single();
+  const [team] = await db
+    .select()
+    .from(schema.teams)
+    .where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId)))
+    .limit(1);
   if (!team) return notFound("Team");
 
-  const { data: membership } = await supabaseAdmin
-    .from("team_members").select("*").eq("team_id", teamId).eq("agent_id", agent.id).single();
+  const [membership] = await db
+    .select()
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id)))
+    .limit(1);
   if (!membership) return error("You are not a member of this team", 403);
 
   // ── RATE LIMIT: max 1 prompt per 10 seconds per agent ──
-  const { data: recentPrompt } = await supabaseAdmin
-    .from("prompt_rounds")
-    .select("created_at")
-    .eq("agent_id", agent.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+  const [recentPrompt] = await db
+    .select({ createdAt: schema.promptRounds.createdAt })
+    .from(schema.promptRounds)
+    .where(eq(schema.promptRounds.agentId, agent.id))
+    .orderBy(desc(schema.promptRounds.createdAt))
+    .limit(1);
 
   if (recentPrompt) {
-    const lastPromptAt = new Date(recentPrompt.created_at).getTime();
+    const lastPromptAt = new Date(recentPrompt.createdAt).getTime();
     const cooldownMs = 10_000; // 10 seconds
     const elapsed = Date.now() - lastPromptAt;
     if (elapsed < cooldownMs) {
@@ -130,25 +140,22 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   // Determine round number
-  const { count: existingRounds } = await supabaseAdmin
-    .from("prompt_rounds")
-    .select("*", { count: "exact", head: true })
-    .eq("team_id", teamId)
-    .eq("hackathon_id", hackathonId);
+  const [existingRoundsRow] = await db
+    .select({ count: count() })
+    .from(schema.promptRounds)
+    .where(and(eq(schema.promptRounds.teamId, teamId), eq(schema.promptRounds.hackathonId, hackathonId)));
 
-  const roundNumber = (existingRounds || 0) + 1;
+  const roundNumber = (existingRoundsRow?.count || 0) + 1;
 
   // Get previous round's code (for context in iteration)
   let previousCode = "";
   if (roundNumber > 1) {
-    const { data: prevRound } = await supabaseAdmin
-      .from("prompt_rounds")
-      .select("files")
-      .eq("team_id", teamId)
-      .eq("hackathon_id", hackathonId)
-      .order("round_number", { ascending: false })
-      .limit(1)
-      .single();
+    const [prevRound] = await db
+      .select({ files: schema.promptRounds.files })
+      .from(schema.promptRounds)
+      .where(and(eq(schema.promptRounds.teamId, teamId), eq(schema.promptRounds.hackathonId, hackathonId)))
+      .orderBy(desc(schema.promptRounds.roundNumber))
+      .limit(1);
 
     if (prevRound?.files) {
       const prevFiles = prevRound.files as { path: string; content: string }[];
@@ -157,7 +164,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   // Parse hackathon meta for judging criteria
-  const hackathonMeta = parseHackathonMeta(hackathon.judging_criteria);
+  const hackathonMeta = parseHackathonMeta(hackathon.judgingCriteria);
 
   // Build messages — system prompt is ALWAYS platform-controlled (no override)
   const systemPrompt = buildSystemPrompt(
@@ -167,14 +174,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       description: hackathon.description || null,
       rules: hackathon.rules || null,
       judging_criteria: hackathonMeta.criteria_text,
-      ends_at: hackathon.ends_at || null,
+      ends_at: hackathon.endsAt || null,
       github_repo: null,
       team_slug: slugify(team.name),
     },
     agent.personality || "",
     agent.strategy || "",
     team.name,
-    hackathon.challenge_type || "landing_page",
+    hackathon.challengeType || "landing_page",
     previousCode,
     roundNumber,
   );
@@ -209,9 +216,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   // Update hackathon status to in_progress if open
   if (hackathon.status === "open") {
-    await supabaseAdmin.from("hackathons")
-      .update({ status: "in_progress", updated_at: new Date().toISOString() })
-      .eq("id", hackathonId);
+    await db
+      .update(schema.hackathons)
+      .set({ status: "in_progress", updatedAt: new Date().toISOString() })
+      .where(eq(schema.hackathons.id, hackathonId));
   }
 
   let result;
@@ -256,7 +264,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   // ── PARSE & STORE ──
 
-  const rawFiles = parseGeneratedFiles(result.text, hackathon.challenge_type || "landing_page");
+  const rawFiles = parseGeneratedFiles(result.text, hackathon.challengeType || "landing_page");
 
   // Sanitize generated output (strip exfil attempts, etc.)
   const files = rawFiles.map(f => ({
@@ -265,34 +273,34 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }));
 
   // Store round in DB
-  await supabaseAdmin.from("prompt_rounds").insert({
+  await db.insert(schema.promptRounds).values({
     id: roundId,
-    team_id: teamId,
-    hackathon_id: hackathonId,
-    agent_id: agent.id,
-    round_number: roundNumber,
-    prompt_text: promptText,
-    llm_provider: "openrouter",
-    llm_model: result.model,
+    teamId,
+    hackathonId,
+    agentId: agent.id,
+    roundNumber,
+    promptText,
+    llmProvider: "openrouter",
+    llmModel: result.model,
     files,
-    commit_sha: null,
-    cost_usd: result.cost_usd,
-    fee_usd: charge.fee,
-    input_tokens: result.input_tokens,
-    output_tokens: result.output_tokens,
-    created_at: new Date().toISOString(),
+    commitSha: null,
+    costUsd: result.cost_usd,
+    feeUsd: charge.fee,
+    inputTokens: result.input_tokens,
+    outputTokens: result.output_tokens,
+    createdAt: new Date().toISOString(),
   });
 
-  await supabaseAdmin.from("teams").update({ status: "building" }).eq("id", teamId);
+  await db.update(schema.teams).set({ status: "building" }).where(eq(schema.teams.id, teamId));
 
   // Activity log
-  await supabaseAdmin.from("activity_log").insert({
+  await db.insert(schema.activityLog).values({
     id: uuid(),
-    hackathon_id: hackathonId,
-    team_id: teamId,
-    agent_id: agent.id,
-    event_type: "prompt_submitted",
-    event_data: {
+    hackathonId,
+    teamId,
+    agentId: agent.id,
+    eventType: "prompt_submitted",
+    eventData: {
       round: roundNumber,
       model: result.model,
       input_tokens: result.input_tokens,

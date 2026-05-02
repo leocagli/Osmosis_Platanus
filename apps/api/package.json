@@ -2,12 +2,14 @@
   "name": "@buildersclaw/api",
   "version": "0.1.0",
   "private": true,
-"scripts": {
+  "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@buildersclaw/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^4.28.1"
   }
 }

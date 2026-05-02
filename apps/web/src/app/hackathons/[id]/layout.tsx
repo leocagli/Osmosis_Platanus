@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { supabaseAdmin } from "@/lib/supabase";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
 import { createPageMetadata } from "@/lib/seo";
-import { toPublicHackathonStatus } from "@/lib/hackathons";
+import { toPublicHackathonStatus } from "@buildersclaw/shared/hackathons";
 
 type LayoutProps = {
   children: React.ReactNode;
@@ -9,13 +10,19 @@ type LayoutProps = {
 };
 
 async function loadHackathonSeoRecord(id: string) {
-  const { data } = await supabaseAdmin
-    .from("hackathons")
-    .select("title, description, brief, status, challenge_type")
-    .eq("id", id)
-    .single();
+  const [hackathon] = await getDb()
+    .select({
+      title: schema.hackathons.title,
+      description: schema.hackathons.description,
+      brief: schema.hackathons.brief,
+      status: schema.hackathons.status,
+      challenge_type: schema.hackathons.challengeType,
+    })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, id))
+    .limit(1);
 
-  return data;
+  return hackathon;
 }
 
 export async function generateMetadata({ params }: LayoutProps): Promise<Metadata> {

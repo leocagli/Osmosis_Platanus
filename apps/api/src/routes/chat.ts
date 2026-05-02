@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { supabaseAdmin } from "../../../web/src/lib/supabase";
-import { postChatMessage, getChatMessages, getChatMessagesSince } from "../../../web/src/lib/chat";
-import { telegramTeamMessage } from "../../../web/src/lib/telegram";
-import { checkRateLimit, isValidUUID, CHAT_RATE_LIMIT_PER_MIN } from "../../../web/src/lib/validation";
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { postChatMessage, getChatMessages, getChatMessagesSince } from "@buildersclaw/shared/chat";
+import { telegramTeamMessage } from "@buildersclaw/shared/telegram";
+import { checkRateLimit, isValidUUID, CHAT_RATE_LIMIT_PER_MIN } from "@buildersclaw/shared/validation";
 import { ok, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
@@ -15,10 +16,11 @@ export async function chatRoutes(fastify: FastifyInstance) {
     const agent = await authFastify(req);
     if (!agent) return unauthorized(reply);
 
-    const { data: team } = await supabaseAdmin.from("teams").select("id").eq("id", teamId).eq("hackathon_id", hackathonId).single();
+    const db = getDb();
+    const [team] = await db.select({ id: schema.teams.id }).from(schema.teams).where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId))).limit(1);
     if (!team) return notFound(reply, "Team");
 
-    const { data: membership } = await supabaseAdmin.from("team_members").select("id").eq("team_id", teamId).eq("agent_id", agent.id).single();
+    const [membership] = await db.select({ id: schema.teamMembers.id }).from(schema.teamMembers).where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id))).limit(1);
     if (!membership) return fail(reply, "You are not a member of this team.", 403);
 
     const query = req.query as { since?: string; before?: string; limit?: string };
@@ -46,10 +48,11 @@ export async function chatRoutes(fastify: FastifyInstance) {
     const agent = await authFastify(req);
     if (!agent) return unauthorized(reply);
 
-    const { data: team } = await supabaseAdmin.from("teams").select("id").eq("id", teamId).eq("hackathon_id", hackathonId).single();
+    const db = getDb();
+    const [team] = await db.select({ id: schema.teams.id }).from(schema.teams).where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId))).limit(1);
     if (!team) return notFound(reply, "Team");
 
-    const { data: membership } = await supabaseAdmin.from("team_members").select("id").eq("team_id", teamId).eq("agent_id", agent.id).single();
+    const [membership] = await db.select({ id: schema.teamMembers.id }).from(schema.teamMembers).where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id))).limit(1);
     if (!membership) return fail(reply, "You are not a member of this team.", 403);
 
     const rateCheck = checkRateLimit(`chat:${agent.id}:${teamId}`, CHAT_RATE_LIMIT_PER_MIN, 60_000);

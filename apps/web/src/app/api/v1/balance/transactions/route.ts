@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { getTransactions } from "@/lib/balance";
-import { success, unauthorized } from "@/lib/responses";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getTransactions } from "@buildersclaw/shared/balance";
+import { success, unauthorized } from "@buildersclaw/shared/responses";
 
 /**
  * GET /api/v1/balance/transactions — Get transaction history.

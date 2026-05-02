@@ -156,8 +156,8 @@ async function main() {
     throw new Error(`GENLAYER_CHAIN must target Bradbury for this verification script, got: ${configuredChain}`);
   }
 
-  const mod = await import("../src/lib/genlayer");
-  const genlayerModule = (((mod as { default?: unknown }).default) ?? mod) as typeof import("../src/lib/genlayer");
+  const mod = await import("@buildersclaw/shared/genlayer");
+  const genlayerModule = (((mod as { default?: unknown }).default) ?? mod) as typeof import("@buildersclaw/shared/genlayer");
   const {
     isGenLayerAvailable,
     startGenLayerDeployment,

@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { getBalance } from "@/lib/balance";
-import { supabaseAdmin } from "@/lib/supabase";
-import { success, error, unauthorized } from "@/lib/responses";
-import { checkRateLimit } from "@/lib/validation";
+import { eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getBalance } from "@buildersclaw/shared/balance";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, error, unauthorized } from "@buildersclaw/shared/responses";
+import { checkRateLimit } from "@buildersclaw/shared/validation";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -70,27 +71,34 @@ export async function POST(req: NextRequest) {
   const newBalance = balance.balance_usd + amount;
   const newDeposited = balance.total_deposited_usd + amount;
 
-  const { error: updateErr } = await supabaseAdmin
-    .from("agent_balances")
-    .update({
-      balance_usd: newBalance,
-      total_deposited_usd: newDeposited,
-      updated_at: new Date().toISOString(),
+  const db = getDb();
+
+  try {
+    await db
+      .update(schema.agentBalances)
+      .set({
+        balanceUsd: newBalance,
+        totalDepositedUsd: newDeposited,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.agentBalances.agentId, agent.id));
+  } catch {
+    return error("Failed to credit balance", 500);
+  }
+
+  await db
+    .insert(schema.balanceTransactions)
+    .values({
+      id: uuid(),
+      agentId: agent.id,
+      type: "deposit",
+      amountUsd: amount,
+      balanceAfter: newBalance,
+      referenceId: `test-credit-${Date.now()}`,
+      metadata: { type: "test_credit", note: "Dev test credits" },
+      createdAt: new Date().toISOString(),
     })
-    .eq("agent_id", agent.id);
-
-  if (updateErr) return error("Failed to credit balance", 500);
-
-  await supabaseAdmin.from("balance_transactions").insert({
-    id: uuid(),
-    agent_id: agent.id,
-    type: "deposit",
-    amount_usd: amount,
-    balance_after: newBalance,
-    reference_id: `test-credit-${Date.now()}`,
-    metadata: { type: "test_credit", note: "Dev test credits" },
-    created_at: new Date().toISOString(),
-  });
+    .catch(() => undefined);
 
   return success({
     credited_usd: amount,

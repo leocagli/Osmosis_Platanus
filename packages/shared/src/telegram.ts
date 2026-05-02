@@ -29,9 +29,11 @@
 
 import { getBaseUrl } from "./config";
 import { getRole } from "./roles";
-import { supabaseAdmin } from "./supabase";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { postChatMessage } from "./chat";
 import { dispatchEventWebhook } from "./agent-webhooks";
+import { getDb } from "./db";
+import { hackathons, teamChat, teamMembers, teams } from "./db/schema";
 
 const SITE_URL = getBaseUrl();
 
@@ -74,21 +76,18 @@ export async function verifyTelegramMembership(username: string): Promise<{
   // Instead, we check our DB for a known telegram_user_id from past webhook messages.
 
   // First try: check if this username has ever sent a message in our group (via webhook)
-  const { data: knownMessage } = await supabaseAdmin
-    .from("team_chat")
-    .select("metadata")
-    .eq("sender_type", "telegram")
-    .not("metadata", "is", null)
+  const knownMessage = await getDb()
+    .select({ metadata: teamChat.metadata })
+    .from(teamChat)
+    .where(and(eq(teamChat.senderType, "telegram"), isNotNull(teamChat.metadata)))
     .limit(200);
 
   let userId: number | null = null;
-  if (knownMessage) {
-    for (const msg of knownMessage) {
-      const meta = msg.metadata as Record<string, unknown> | null;
-      if (meta?.telegram_username === username) {
-        userId = meta.telegram_user_id as number;
-        break;
-      }
+  for (const msg of knownMessage) {
+    const meta = msg.metadata as Record<string, unknown> | null;
+    if (meta?.telegram_username === username) {
+      userId = meta.telegram_user_id as number;
+      break;
     }
   }
 
@@ -253,10 +252,7 @@ async function createTeamTopic(teamId: string, teamName: string, hackathonTitle:
   const threadId = topic.message_thread_id;
 
   // Save to DB so we never need to create it again
-  await supabaseAdmin
-    .from("teams")
-    .update({ telegram_chat_id: String(threadId) })
-    .eq("id", teamId);
+  await getDb().update(teams).set({ telegramChatId: String(threadId) }).where(eq(teams.id, teamId));
 
   console.log(`[TELEGRAM] Created topic ${threadId} for team ${teamName}`);
   return threadId;
@@ -272,29 +268,25 @@ async function getTeamTopicId(
   hackathonTitle?: string,
 ): Promise<number | null> {
   // Check DB
-  const { data } = await supabaseAdmin
-    .from("teams")
-    .select("telegram_chat_id")
-    .eq("id", teamId)
-    .single();
+  const [data] = await getDb().select({ telegramChatId: teams.telegramChatId }).from(teams).where(eq(teams.id, teamId)).limit(1);
 
-  if (data?.telegram_chat_id) {
-    return Number(data.telegram_chat_id);
+  if (data?.telegramChatId) {
+    return Number(data.telegramChatId);
   }
 
   // Auto-create topic
   if (!teamName || !hackathonTitle) {
     // Fetch names from DB
-    const { data: teamData } = await supabaseAdmin
-      .from("teams")
-      .select("name, hackathons(title)")
-      .eq("id", teamId)
-      .single();
+    const [teamData] = await getDb()
+      .select({ name: teams.name, hackathonTitle: hackathons.title })
+      .from(teams)
+      .innerJoin(hackathons, eq(hackathons.id, teams.hackathonId))
+      .where(eq(teams.id, teamId))
+      .limit(1);
 
     if (!teamData) return null;
-    const hackathon = teamData.hackathons as unknown as { title: string } | null;
     teamName = teamData.name;
-    hackathonTitle = hackathon?.title || "Hackathon";
+    hackathonTitle = teamData.hackathonTitle || "Hackathon";
   }
 
   return createTeamTopic(teamId, teamName!, hackathonTitle!);
@@ -433,17 +425,15 @@ export async function telegramPushNotification(opts: {
   });
 
   // ─── Dispatch webhook to feedback reviewers and other team members ───
-  const { data: teamMembers } = await supabaseAdmin
-    .from("team_members")
-    .select("agent_id, role")
-    .eq("team_id", opts.teamId)
-    .eq("status", "active")
-    .neq("agent_id", opts.agentId); // Don't notify the pusher
+  const activeMembers = await getDb()
+    .select({ agentId: teamMembers.agentId, role: teamMembers.role })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.teamId, opts.teamId), eq(teamMembers.status, "active"), ne(teamMembers.agentId, opts.agentId)));
 
-  if (teamMembers) {
-    for (const member of teamMembers) {
+  if (activeMembers) {
+    for (const member of activeMembers) {
       dispatchEventWebhook({
-        agentId: member.agent_id,
+        agentId: member.agentId,
         event: "push_notify",
         message: {
           from: opts.agentName,
@@ -460,7 +450,7 @@ export async function telegramPushNotification(opts: {
         teamId: opts.teamId,
         hackathonId: opts.hackathonId,
       }).catch((err) => {
-        console.error(`[TELEGRAM] Push webhook dispatch failed for ${member.agent_id}:`, err);
+        console.error(`[TELEGRAM] Push webhook dispatch failed for ${member.agentId}:`, err);
       });
     }
   }
@@ -516,17 +506,15 @@ export async function telegramFeedbackPosted(opts: {
 
   // ─── Dispatch webhook to ALL builders on the team ───
   // When feedback arrives, every builder needs to know
-  const { data: teamMembers } = await supabaseAdmin
-    .from("team_members")
-    .select("agent_id")
-    .eq("team_id", opts.teamId)
-    .eq("status", "active")
-    .neq("agent_id", opts.reviewerId); // Don't notify the reviewer
+  const activeMembers = await getDb()
+    .select({ agentId: teamMembers.agentId })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.teamId, opts.teamId), eq(teamMembers.status, "active"), ne(teamMembers.agentId, opts.reviewerId)));
 
-  if (teamMembers) {
-    for (const member of teamMembers) {
+  if (activeMembers) {
+    for (const member of activeMembers) {
       dispatchEventWebhook({
-        agentId: member.agent_id,
+        agentId: member.agentId,
         event: "feedback",
         message: {
           from: opts.reviewerName,
@@ -542,7 +530,7 @@ export async function telegramFeedbackPosted(opts: {
         teamId: opts.teamId,
         hackathonId: opts.hackathonId,
       }).catch((err) => {
-        console.error(`[TELEGRAM] Webhook dispatch failed for ${member.agent_id}:`, err);
+        console.error(`[TELEGRAM] Webhook dispatch failed for ${member.agentId}:`, err);
       });
     }
   }

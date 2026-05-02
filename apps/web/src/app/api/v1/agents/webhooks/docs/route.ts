@@ -8,7 +8,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getKnownCommands } from "@/lib/agent-webhooks";
+import { getKnownCommands } from "@buildersclaw/shared/agent-webhooks";
 
 export async function GET() {
   return NextResponse.json({

@@ -6,11 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { postChatMessage, getChatMessages, getChatMessagesSince } from "@/lib/chat";
-import { telegramTeamMessage } from "@/lib/telegram";
-import { supabaseAdmin } from "@/lib/supabase";
-import { checkRateLimit, isValidUUID, CHAT_RATE_LIMIT_PER_MIN } from "@/lib/validation";
+import { and, eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { postChatMessage, getChatMessages, getChatMessagesSince } from "@buildersclaw/shared/chat";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { telegramTeamMessage } from "@buildersclaw/shared/telegram";
+import { checkRateLimit, isValidUUID, CHAT_RATE_LIMIT_PER_MIN } from "@buildersclaw/shared/validation";
 import { escapeHtml } from "@/lib/sanitize";
 
 // ─── GET: Read chat messages ───
@@ -38,12 +39,11 @@ export async function GET(
   }
 
   // Verify team belongs to this hackathon
-  const { data: team } = await supabaseAdmin
-    .from("teams")
-    .select("id")
-    .eq("id", teamId)
-    .eq("hackathon_id", hackathonId)
-    .single();
+  const [team] = await getDb()
+    .select({ id: schema.teams.id })
+    .from(schema.teams)
+    .where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId)))
+    .limit(1);
 
   if (!team) {
     return NextResponse.json(
@@ -53,12 +53,11 @@ export async function GET(
   }
 
   // Verify agent is on this team
-  const { data: membership } = await supabaseAdmin
-    .from("team_members")
-    .select("id")
-    .eq("team_id", teamId)
-    .eq("agent_id", agent.id)
-    .single();
+  const [membership] = await getDb()
+    .select({ id: schema.teamMembers.id })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id)))
+    .limit(1);
 
   if (!membership) {
     return NextResponse.json(
@@ -127,12 +126,11 @@ export async function POST(
   }
 
   // Verify team belongs to this hackathon
-  const { data: team } = await supabaseAdmin
-    .from("teams")
-    .select("id")
-    .eq("id", teamId)
-    .eq("hackathon_id", hackathonId)
-    .single();
+  const [team] = await getDb()
+    .select({ id: schema.teams.id })
+    .from(schema.teams)
+    .where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId)))
+    .limit(1);
 
   if (!team) {
     return NextResponse.json(
@@ -142,12 +140,11 @@ export async function POST(
   }
 
   // Verify agent is on this team
-  const { data: membership } = await supabaseAdmin
-    .from("team_members")
-    .select("id")
-    .eq("team_id", teamId)
-    .eq("agent_id", agent.id)
-    .single();
+  const [membership] = await getDb()
+    .select({ id: schema.teamMembers.id })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id)))
+    .limit(1);
 
   if (!membership) {
     return NextResponse.json(

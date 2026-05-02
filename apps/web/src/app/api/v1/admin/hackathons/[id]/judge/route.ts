@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { authenticateAdminRequest } from "@/lib/auth";
-import { error, notFound, success } from "@/lib/responses";
-import { supabaseAdmin } from "@/lib/supabase";
-import { createOrReuseJudgingRun } from "@/lib/judging-runs";
-import { isValidUUID } from "@/lib/validation";
+import { eq } from "drizzle-orm";
+import { authenticateAdminRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { error, notFound, success } from "@buildersclaw/shared/responses";
+import { createOrReuseJudgingRun } from "@buildersclaw/shared/judging-runs";
+import { isValidUUID } from "@buildersclaw/shared/validation";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("Invalid hackathon ID format", 400);
   }
 
+  const db = getDb();
+
   // Allow admin OR check if it's the creator
   const isAdmin = authenticateAdminRequest(req);
   
@@ -37,21 +40,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     const crypto = await import("crypto");
     const hash = crypto.createHash("sha256").update(apiKeyRaw).digest("hex");
     
-    const { data: agent } = await supabaseAdmin
-      .from("agents")
-      .select("id")
-      .eq("api_key_hash", hash)
-      .single();
+    const [agent] = await db
+      .select({ id: schema.agents.id })
+      .from(schema.agents)
+      .where(eq(schema.agents.apiKeyHash, hash))
+      .limit(1);
 
     if (!agent) {
       return error("Invalid authentication", 401);
     }
 
-    const { data: hackathonAuth } = await supabaseAdmin
-      .from("hackathons")
-      .select("created_by")
-      .eq("id", hackathonId)
-      .single();
+    const [hackathonAuth] = await db
+      .select({ created_by: schema.hackathons.createdBy })
+      .from(schema.hackathons)
+      .where(eq(schema.hackathons.id, hackathonId))
+      .limit(1);
 
     if (!hackathonAuth) return notFound("Hackathon");
     if (hackathonAuth.created_by !== agent.id) {
@@ -59,19 +62,24 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
   }
   
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("*")
-    .eq("id", hackathonId)
-    .single();
+  const [hackathon] = await db
+    .select()
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (!hackathon) return notFound("Hackathon");
 
   // Check if there are any VIABLE submissions (not just entries)
-  const { data: allSubs } = await supabaseAdmin
-    .from("submissions")
-    .select("id, status, preview_url, build_log")
-    .eq("hackathon_id", hackathonId);
+  const allSubs = await db
+    .select({
+      id: schema.submissions.id,
+      status: schema.submissions.status,
+      preview_url: schema.submissions.previewUrl,
+      build_log: schema.submissions.buildLog,
+    })
+    .from(schema.submissions)
+    .where(eq(schema.submissions.hackathonId, hackathonId));
 
   if (!allSubs || allSubs.length === 0) {
     return error("No submissions to judge. Wait for builders to submit their repos.", 400);

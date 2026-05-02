@@ -1,7 +1,8 @@
-import { supabaseAdmin } from "./supabase";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { generateCode } from "./llm";
 import { fetchRepoForJudging, formatRepoForPrompt, parseGitHubUrl } from "./repo-fetcher";
 import { Hackathon, Submission } from "./types";
+import { getDb, schema } from "./db";
 import {
   isGenLayerAvailable,
   startGenLayerDeployment,
@@ -34,10 +35,115 @@ export interface EvaluationResult {
 
 type JudgingMeta = Record<string, unknown>;
 
+type HackathonJudgeRow = Omit<Hackathon, "judging_criteria" | "status"> & {
+  judging_criteria: JudgingMeta | string | null;
+  status: string;
+};
+
+type SubmissionWithTeam = Submission & { teams?: { name?: string; status?: string } | null };
+
 interface JudgingRunResult {
   completed: boolean;
   queuedGenLayer: boolean;
   submissionsJudged: number;
+}
+
+const hackathonSelect = {
+  id: schema.hackathons.id,
+  title: schema.hackathons.title,
+  description: schema.hackathons.description,
+  brief: schema.hackathons.brief,
+  rules: schema.hackathons.rules,
+  entry_type: schema.hackathons.entryType,
+  entry_fee: schema.hackathons.entryFee,
+  prize_pool: schema.hackathons.prizePool,
+  platform_fee_pct: schema.hackathons.platformFeePct,
+  max_participants: schema.hackathons.maxParticipants,
+  team_size_min: schema.hackathons.teamSizeMin,
+  team_size_max: schema.hackathons.teamSizeMax,
+  build_time_seconds: schema.hackathons.buildTimeSeconds,
+  challenge_type: schema.hackathons.challengeType,
+  status: schema.hackathons.status,
+  created_by: schema.hackathons.createdBy,
+  starts_at: schema.hackathons.startsAt,
+  ends_at: schema.hackathons.endsAt,
+  judging_criteria: schema.hackathons.judgingCriteria,
+  github_repo: schema.hackathons.githubRepo,
+  created_at: schema.hackathons.createdAt,
+  updated_at: schema.hackathons.updatedAt,
+};
+
+const submissionSelect = {
+  id: schema.submissions.id,
+  team_id: schema.submissions.teamId,
+  hackathon_id: schema.submissions.hackathonId,
+  html_content: schema.submissions.htmlContent,
+  preview_url: schema.submissions.previewUrl,
+  build_log: schema.submissions.buildLog,
+  status: schema.submissions.status,
+  started_at: schema.submissions.startedAt,
+  completed_at: schema.submissions.completedAt,
+  created_at: schema.submissions.createdAt,
+};
+
+function toEvaluationRow(values: {
+  submission_id: string;
+  functionality_score: number;
+  brief_compliance_score: number;
+  code_quality_score: number;
+  architecture_score: number;
+  innovation_score: number;
+  completeness_score: number;
+  documentation_score: number;
+  testing_score: number;
+  security_score: number;
+  deploy_readiness_score: number;
+  total_score: number;
+  judge_feedback: string;
+  raw_response: string;
+}) {
+  return {
+    submissionId: values.submission_id,
+    functionalityScore: values.functionality_score,
+    briefComplianceScore: values.brief_compliance_score,
+    codeQualityScore: values.code_quality_score,
+    architectureScore: values.architecture_score,
+    innovationScore: values.innovation_score,
+    completenessScore: values.completeness_score,
+    documentationScore: values.documentation_score,
+    testingScore: values.testing_score,
+    securityScore: values.security_score,
+    deployReadinessScore: values.deploy_readiness_score,
+    totalScore: values.total_score,
+    judgeFeedback: values.judge_feedback,
+    rawResponse: values.raw_response,
+  };
+}
+
+async function upsertEvaluations(values: Parameters<typeof toEvaluationRow>[0][]) {
+  if (values.length === 0) return;
+  const rows = values.map(toEvaluationRow);
+  await getDb()
+    .insert(schema.evaluations)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: schema.evaluations.submissionId,
+      set: {
+        functionalityScore: sql`excluded.functionality_score`,
+        briefComplianceScore: sql`excluded.brief_compliance_score`,
+        codeQualityScore: sql`excluded.code_quality_score`,
+        architectureScore: sql`excluded.architecture_score`,
+        innovationScore: sql`excluded.innovation_score`,
+        completenessScore: sql`excluded.completeness_score`,
+        documentationScore: sql`excluded.documentation_score`,
+        testingScore: sql`excluded.testing_score`,
+        securityScore: sql`excluded.security_score`,
+        deployReadinessScore: sql`excluded.deploy_readiness_score`,
+        totalScore: sql`excluded.total_score`,
+        judgeFeedback: sql`excluded.judge_feedback`,
+        rawResponse: sql`excluded.raw_response`,
+      },
+    });
 }
 
 function parseJudgingMeta(raw: unknown): JudgingMeta {
@@ -55,10 +161,10 @@ function parseJudgingMeta(raw: unknown): JudgingMeta {
 }
 
 async function updateHackathonJudgingMeta(hackathonId: string, meta: JudgingMeta, status?: string) {
-  const payload: Record<string, unknown> = { judging_criteria: meta };
+  const payload: Partial<typeof schema.hackathons.$inferInsert> = { judgingCriteria: meta };
   if (status) payload.status = status;
 
-  await supabaseAdmin.from("hackathons").update(payload).eq("id", hackathonId);
+  await getDb().update(schema.hackathons).set(payload).where(eq(schema.hackathons.id, hackathonId));
 }
 
 function buildTopContenders(
@@ -87,23 +193,21 @@ function buildTopContenders(
 }
 
 async function resolveWinnerAgentId(winnerTeamId: string) {
-  const { data: leaderMember } = await supabaseAdmin
-    .from("team_members")
-    .select("agent_id")
-    .eq("team_id", winnerTeamId)
-    .eq("role", "leader")
-    .single();
+  const [leaderMember] = await getDb()
+    .select({ agent_id: schema.teamMembers.agentId })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, winnerTeamId), eq(schema.teamMembers.role, "leader")))
+    .limit(1);
 
-  if (leaderMember?.agent_id) return leaderMember.agent_id as string;
+  if (leaderMember?.agent_id) return leaderMember.agent_id;
 
-  const { data: anyMember } = await supabaseAdmin
-    .from("team_members")
-    .select("agent_id")
-    .eq("team_id", winnerTeamId)
-    .limit(1)
-    .single();
+  const [anyMember] = await getDb()
+    .select({ agent_id: schema.teamMembers.agentId })
+    .from(schema.teamMembers)
+    .where(eq(schema.teamMembers.teamId, winnerTeamId))
+    .limit(1);
 
-  return (anyMember?.agent_id as string | undefined) || null;
+  return anyMember?.agent_id || null;
 }
 
 async function finalizeJudging(
@@ -168,19 +272,18 @@ async function persistGenLayerVerdict(hackathonId: string, meta: JudgingMeta) {
   meta.genlayer_reasoning = result.reasoning || null;
 
   if (result.final_score) {
-    const { data: winnerSub } = await supabaseAdmin
-      .from("submissions")
-      .select("id")
-      .eq("hackathon_id", hackathonId)
-      .eq("team_id", result.winner_team_id)
-      .single();
+    const [winnerSub] = await getDb()
+      .select({ id: schema.submissions.id })
+      .from(schema.submissions)
+      .where(and(eq(schema.submissions.hackathonId, hackathonId), eq(schema.submissions.teamId, result.winner_team_id)))
+      .limit(1);
 
     if (winnerSub?.id) {
-      const { data: existingEval } = await supabaseAdmin
-        .from("evaluations")
-        .select("raw_response")
-        .eq("submission_id", winnerSub.id)
-        .single();
+      const [existingEval] = await getDb()
+        .select({ raw_response: schema.evaluations.rawResponse })
+        .from(schema.evaluations)
+        .where(eq(schema.evaluations.submissionId, winnerSub.id))
+        .limit(1);
 
       const glFeedback = `🔗 GenLayer On-Chain Verdict (5 validators):\nFinal Score: ${result.final_score}/100\n${result.reasoning || ""}`;
 
@@ -193,14 +296,14 @@ async function persistGenLayerVerdict(hackathonId: string, meta: JudgingMeta) {
         rawResponse = {};
       }
 
-      await supabaseAdmin
-        .from("evaluations")
-        .update({
-          total_score: result.final_score,
-          judge_feedback: glFeedback,
-          raw_response: JSON.stringify({ ...rawResponse, genlayer_result: enrichResult }),
+      await getDb()
+        .update(schema.evaluations)
+        .set({
+          totalScore: result.final_score,
+          judgeFeedback: glFeedback,
+          rawResponse: JSON.stringify({ ...rawResponse, genlayer_result: enrichResult }),
         })
-        .eq("submission_id", winnerSub.id);
+        .where(eq(schema.evaluations.submissionId, winnerSub.id));
     }
   }
 
@@ -216,11 +319,17 @@ async function persistGenLayerVerdict(hackathonId: string, meta: JudgingMeta) {
 }
 
 export async function continueGenLayerJudging(hackathonId: string) {
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("id, title, brief, status, judging_criteria")
-    .eq("id", hackathonId)
-    .single();
+  const [hackathon] = await getDb()
+    .select({
+      id: schema.hackathons.id,
+      title: schema.hackathons.title,
+      brief: schema.hackathons.brief,
+      status: schema.hackathons.status,
+      judging_criteria: schema.hackathons.judgingCriteria,
+    })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (!hackathon || hackathon.status !== "judging") return false;
 
@@ -521,11 +630,11 @@ export async function judgeSubmission(
 
 export async function judgeHackathon(hackathonId: string, judgingRunId?: string) {
   await updateJudgingRun(judgingRunId, "running");
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("*")
-    .eq("id", hackathonId)
-    .single();
+  const [hackathon] = await getDb()
+    .select(hackathonSelect)
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1) as HackathonJudgeRow[];
 
   if (!hackathon) throw new Error("Hackathon not found");
 
@@ -536,15 +645,13 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
   }
 
   // Try to claim — works from open, in_progress, OR judging (retry after failure)
-  const { data: locked, error: lockErr } = await supabaseAdmin
-    .from("hackathons")
-    .update({ status: "judging" })
-    .in("status", ["open", "in_progress", "judging"])
-    .eq("id", hackathonId)
-    .select("id")
-    .single();
+  const [locked] = await getDb()
+    .update(schema.hackathons)
+    .set({ status: "judging" })
+    .where(and(eq(schema.hackathons.id, hackathonId), inArray(schema.hackathons.status, ["open", "in_progress", "judging"])))
+    .returning({ id: schema.hackathons.id });
 
-  if (lockErr || !locked) return true;
+  if (!locked) return true;
 
   // Parse existing judging metadata
   let updatedMeta: Record<string, unknown> = {};
@@ -557,18 +664,22 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
   }
 
   try {
-    const { data: allSubmissions } = await supabaseAdmin
-      .from("submissions")
-      .select("*, teams(name, status)")
-      .eq("hackathon_id", hackathonId);
+    const submissionRows = await getDb()
+      .select({ ...submissionSelect, team_name: schema.teams.name, team_status: schema.teams.status })
+      .from(schema.submissions)
+      .leftJoin(schema.teams, eq(schema.submissions.teamId, schema.teams.id))
+      .where(eq(schema.submissions.hackathonId, hackathonId));
 
-    if (!allSubmissions || allSubmissions.length === 0) {
+    const allSubmissions: SubmissionWithTeam[] = submissionRows.map(({ team_name, team_status, ...submission }) => ({
+      ...submission,
+      status: submission.status as Submission["status"],
+      teams: team_name ? { name: team_name, status: team_status ?? undefined } : null,
+    }));
+
+    if (allSubmissions.length === 0) {
       updatedMeta.notes = "Ended with 0 submissions.";
       updatedMeta.finalized_at = new Date().toISOString();
-      await supabaseAdmin
-        .from("hackathons")
-        .update({ status: "completed", judging_criteria: updatedMeta })
-        .eq("id", hackathonId);
+      await updateHackathonJudgingMeta(hackathonId, updatedMeta, "completed");
       await updateJudgingRun(judgingRunId, "completed", { metadata: { submissions_judged: 0 } });
       return true;
     }
@@ -590,9 +701,8 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
         );
 
         // Record a zero-score evaluation for skipped submissions
-        await supabaseAdmin
-          .from("evaluations")
-          .upsert({
+        await upsertEvaluations([
+          {
             submission_id: sub.id,
             functionality_score: 0, brief_compliance_score: 0, code_quality_score: 0,
             architecture_score: 0, innovation_score: 0, completeness_score: 0,
@@ -600,7 +710,8 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
             deploy_readiness_score: 0, total_score: 0,
             judge_feedback: `Submission skipped: ${check.reason}. Teams must submit a valid GitHub repository URL to be judged.`,
             raw_response: JSON.stringify({ skipped: true, reason: check.reason }),
-          }, { onConflict: "submission_id" });
+          },
+        ]);
       }
     }
 
@@ -608,10 +719,7 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
       updatedMeta.notes = `Ended with ${allSubmissions.length} submissions but none had viable repos. ${skippedSubmissions.map(s => s.reason).join("; ")}`;
       updatedMeta.finalized_at = new Date().toISOString();
       updatedMeta.skipped_submissions = skippedSubmissions;
-      await supabaseAdmin
-        .from("hackathons")
-        .update({ status: "completed", judging_criteria: updatedMeta })
-        .eq("id", hackathonId);
+      await updateHackathonJudgingMeta(hackathonId, updatedMeta, "completed");
       await updateJudgingRun(judgingRunId, "completed", { metadata: { submissions_judged: 0, skipped_submissions: skippedSubmissions } });
       return true;
     }
@@ -626,7 +734,7 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
     const evaluationsToUpsert = [];
     for (const submission of submissions) {
       try {
-        const result = await judgeSubmission(submission, hackathon);
+        const result = await judgeSubmission(submission, hackathon as Hackathon);
 
         evaluationsToUpsert.push({
           submission_id: submission.id,
@@ -660,9 +768,7 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
     }
 
     if (evaluationsToUpsert.length > 0) {
-      await supabaseAdmin
-        .from("evaluations")
-        .upsert(evaluationsToUpsert, { onConflict: "submission_id" });
+      await upsertEvaluations(evaluationsToUpsert);
     }
 
     // Determine winner: top Gemini contenders can be escalated to GenLayer.
@@ -744,11 +850,10 @@ export async function judgeHackathon(hackathonId: string, judgingRunId?: string)
   } catch (err) {
     // On unexpected failure, revert to in_progress so cron can retry
     console.error(`judgeHackathon(${hackathonId}) fatal error, reverting status:`, err);
-    await supabaseAdmin
-      .from("hackathons")
-      .update({ status: "in_progress" })
-      .eq("id", hackathonId)
-      .eq("status", "judging");
+    await getDb()
+      .update(schema.hackathons)
+      .set({ status: "in_progress" })
+      .where(and(eq(schema.hackathons.id, hackathonId), eq(schema.hackathons.status, "judging")));
     await updateJudgingRun(judgingRunId, "failed", { error: err instanceof Error ? err.message : String(err) });
     throw err;
   }

@@ -1,11 +1,37 @@
 import { NextRequest } from "next/server";
 import { v4 as uuid } from "uuid";
-import { supabaseAdmin } from "@/lib/supabase";
-import { authenticateAdminRequest } from "@/lib/auth";
-import { created, error, getPlatformFeePct, success } from "@/lib/responses";
-import { formatHackathon, sanitizeString, sanitizeUrl, serializeHackathonMeta } from "@/lib/hackathons";
-import { getUsdcDecimals, getUsdcSymbol } from "@/lib/chain";
-import { telegramHackathonCreated } from "@/lib/telegram";
+import { count, countDistinct, desc, eq } from "drizzle-orm";
+import { authenticateAdminRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { created, error, getPlatformFeePct, success } from "@buildersclaw/shared/responses";
+import { formatHackathon, sanitizeString, sanitizeUrl, serializeHackathonMeta } from "@buildersclaw/shared/hackathons";
+import { getUsdcDecimals, getUsdcSymbol } from "@buildersclaw/shared/chain";
+import { telegramHackathonCreated } from "@buildersclaw/shared/telegram";
+
+const hackathonSelect = {
+  id: schema.hackathons.id,
+  title: schema.hackathons.title,
+  description: schema.hackathons.description,
+  brief: schema.hackathons.brief,
+  rules: schema.hackathons.rules,
+  entry_type: schema.hackathons.entryType,
+  entry_fee: schema.hackathons.entryFee,
+  prize_pool: schema.hackathons.prizePool,
+  platform_fee_pct: schema.hackathons.platformFeePct,
+  max_participants: schema.hackathons.maxParticipants,
+  team_size_min: schema.hackathons.teamSizeMin,
+  team_size_max: schema.hackathons.teamSizeMax,
+  build_time_seconds: schema.hackathons.buildTimeSeconds,
+  challenge_type: schema.hackathons.challengeType,
+  status: schema.hackathons.status,
+  created_by: schema.hackathons.createdBy,
+  starts_at: schema.hackathons.startsAt,
+  ends_at: schema.hackathons.endsAt,
+  judging_criteria: schema.hackathons.judgingCriteria,
+  github_repo: schema.hackathons.githubRepo,
+  created_at: schema.hackathons.createdAt,
+  updated_at: schema.hackathons.updatedAt,
+};
 
 function parseNumber(value: unknown, fallback: number, min: number, max: number) {
   const parsed = Number(value);
@@ -25,12 +51,8 @@ function parseDate(value: unknown, fallback: Date): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function hasSupabaseConfig() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+function hasDatabaseConfig() {
+  return Boolean(process.env.DATABASE_URL);
 }
 
 /**
@@ -81,20 +103,20 @@ export async function POST(req: NextRequest) {
       description: sanitizeString(body.description, 2000) || `Direct hackathon: ${title}`,
       brief,
       rules: sanitizeString(body.rules, 4000),
-      entry_type: entryType,
-      entry_fee: entryFee,
-      prize_pool: prizePool,
-      platform_fee_pct: platformFeePct,
-      max_participants: parseInteger(body.max_participants, 500, 1, 10000),
-      team_size_min: teamSizeMin,
-      team_size_max: teamSizeMax,
-      build_time_seconds: parseInteger(body.build_time_seconds, 180, 30, 86400),
-      challenge_type: sanitizeString(body.challenge_type, 50) || "other",
+      entryType,
+      entryFee,
+      prizePool,
+      platformFeePct,
+      maxParticipants: parseInteger(body.max_participants, 500, 1, 10000),
+      teamSizeMin,
+      teamSizeMax,
+      buildTimeSeconds: parseInteger(body.build_time_seconds, 180, 30, 86400),
+      challengeType: sanitizeString(body.challenge_type, 50) || "other",
       status: internalStatus,
-      created_by: null,
-      starts_at: startsAt.toISOString(),
-      ends_at: endsAt.toISOString(),
-      judging_criteria: serializeHackathonMeta({
+      createdBy: null,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      judgingCriteria: serializeHackathonMeta({
         chain_id: chainId,
         contract_address: contractAddress,
         sponsor_address: sanitizeString(body.sponsor_address, 128),
@@ -107,28 +129,28 @@ export async function POST(req: NextRequest) {
         judge_method: sanitizeString(body.judge_method, 64),
         genlayer_contract: sanitizeString(body.genlayer_contract, 128),
       }),
-      github_repo: sanitizeUrl(body.github_repo),
+      githubRepo: sanitizeUrl(body.github_repo),
     };
 
-    const { data: hackathon, error: insertErr } = await supabaseAdmin
-      .from("hackathons")
-      .insert(insertPayload)
-      .select("*")
-      .single();
-
-    if (insertErr) return error(`Failed to create hackathon: ${insertErr.message}`, 500);
+    let hackathon: Record<string, unknown>;
+    try {
+      [hackathon] = await getDb().insert(schema.hackathons).values(insertPayload).returning(hackathonSelect);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown database error";
+      return error(`Failed to create hackathon: ${message}`, 500);
+    }
 
     if (internalStatus === "open") {
       telegramHackathonCreated({
         id,
         title,
         prize_pool: prizePool,
-        challenge_type: insertPayload.challenge_type,
+        challenge_type: insertPayload.challengeType,
       }).catch(() => {});
     }
 
     return created({
-      ...formatHackathon(hackathon as Record<string, unknown>),
+      ...formatHackathon(hackathon),
       url: `/hackathons/${id}`,
       creation_flow: "direct_admin",
     });
@@ -141,39 +163,36 @@ export async function POST(req: NextRequest) {
  * GET /api/v1/hackathons - List hackathons.
  */
 export async function GET(req: NextRequest) {
-  if (!hasSupabaseConfig()) {
+  if (!hasDatabaseConfig()) {
     return success([]);
   }
 
   const status = req.nextUrl.searchParams.get("status");
   const challengeType = req.nextUrl.searchParams.get("challenge_type");
+  const db = getDb();
 
-  let query = supabaseAdmin.from("hackathons").select("*");
-
-  if (challengeType) {
-    query = query.eq("challenge_type", challengeType.slice(0, 50));
-  }
-
-  const { data: hackathons, error: queryErr } = await query.order("created_at", { ascending: false }).limit(50);
-
-  if (queryErr) return error("Failed to load hackathons", 500);
+  const hackathons = challengeType
+    ? await db
+        .select(hackathonSelect)
+        .from(schema.hackathons)
+        .where(eq(schema.hackathons.challengeType, challengeType.slice(0, 50)))
+        .orderBy(desc(schema.hackathons.createdAt))
+        .limit(50)
+    : await db.select(hackathonSelect).from(schema.hackathons).orderBy(desc(schema.hackathons.createdAt)).limit(50);
 
   const enriched = await Promise.all(
-    (hackathons || []).map(async (h) => {
-      const { count: teamCount } = await supabaseAdmin
-        .from("teams")
-        .select("*", { count: "exact", head: true })
-        .eq("hackathon_id", h.id);
-
-      const { data: members } = await supabaseAdmin
-        .from("team_members")
-        .select("agent_id, teams!inner(hackathon_id)")
-        .eq("teams.hackathon_id", h.id);
-
-      const uniqueAgents = new Set((members || []).map((m: Record<string, unknown>) => m.agent_id));
+    hackathons.map(async (h) => {
+      const [[teamRow], [agentRow]] = await Promise.all([
+        db.select({ total: count() }).from(schema.teams).where(eq(schema.teams.hackathonId, h.id)),
+        db
+          .select({ total: countDistinct(schema.teamMembers.agentId) })
+          .from(schema.teamMembers)
+          .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+          .where(eq(schema.teams.hackathonId, h.id)),
+      ]);
       const publicHackathon = formatHackathon(h as Record<string, unknown>);
 
-      return { ...publicHackathon, total_teams: teamCount || 0, total_agents: uniqueAgents.size };
+      return { ...publicHackathon, total_teams: teamRow?.total || 0, total_agents: agentRow?.total || 0 };
     }),
   );
 

@@ -9,7 +9,7 @@ BuildersClaw is a B2B AI agent hackathon platform. Companies post challenges wit
 Two main packages:
 
 - **buildersclaw-contracts/** - Solidity smart contracts (Foundry)
-- **apps/web/** - Next.js 16 frontend + API routes (Supabase backend, AI judging, contract verification)
+- **apps/web/** - Next.js 16 frontend + API routes (Postgres/Drizzle backend, AI judging, contract verification)
 
 ## Core Flow
 
@@ -44,7 +44,7 @@ npm run test:onchain-prize-flow
 
 - **API routes** at `src/app/api/v1/` - agent registration, hackathons, submissions, balance, contract inspection, judging
 - **Auth** - Bearer token API keys via `src/lib/auth.ts`
-- **Database** - Supabase in `src/lib/supabase.ts`
+- **Database** - Postgres with Drizzle ORM via `packages/shared/src/db/`
 - **Judging** - judge helpers in `src/lib/judge.ts`
 - **Chain verification** - `src/lib/chain.ts`
 - **Types** - `src/lib/types.ts`
@@ -153,9 +153,7 @@ Keep these aligned in both `apps/web` and `buildersclaw-contracts` when testing 
 
 ### App-specific
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL` — Postgres connection string (Neon or any Postgres)
 - `ADMIN_API_KEY`
 - `FACTORY_ADDRESS` (preferred)
 - `FACTORYA_ADDRESS` (legacy fallback only)

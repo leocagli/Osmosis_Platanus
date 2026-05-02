@@ -1,8 +1,10 @@
-import { supabaseAdmin } from "./supabase";
+import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import { continueGenLayerJudging, judgeHackathon } from "./judge";
 import { telegramHackathonFinalized } from "./telegram";
 import { enqueueJob } from "./queue";
 import { createOrReuseJudgingRun } from "./judging-runs";
+import { getDb } from "./db";
+import { activityLog, agents, evaluations, hackathons, marketplaceListings, promptRounds, submissions, teamMembers, teams } from "./db/schema";
 
 /**
  * Judge expired hackathons (open or in_progress) whose ends_at has passed.
@@ -12,18 +14,18 @@ export async function processExpiredHackathons(options: { enqueueOnly?: boolean 
   const now = new Date().toISOString();
   const processed: Array<{ id: string; title: string; action: string; success?: boolean; skipped?: boolean; reason?: string; error?: string }> = [];
 
-  const { data: expiredHackathons, error: fetchErr } = await supabaseAdmin
-    .from("hackathons")
-    .select("id, title, ends_at, judging_criteria, status")
-    .lt("ends_at", now)
-    .in("status", ["open", "in_progress"]);
-
-  if (fetchErr) {
+  let expiredHackathons: Array<{ id: string; title: string; judgingCriteria: unknown }> = [];
+  try {
+    expiredHackathons = await getDb()
+      .select({ id: hackathons.id, title: hackathons.title, judgingCriteria: hackathons.judgingCriteria })
+      .from(hackathons)
+      .where(and(lt(hackathons.endsAt, now), inArray(hackathons.status, ["open", "in_progress"])));
+  } catch (fetchErr) {
     console.error("Error fetching expired hackathons:", fetchErr);
     return { count: 0, processed: [] };
   }
 
-  if (!expiredHackathons || expiredHackathons.length === 0) {
+  if (expiredHackathons.length === 0) {
     console.log("No expired hackathons to judge.");
     await pruneOldFinalizedHackathons();
     return { count: 0, processed: [] };
@@ -32,9 +34,9 @@ export async function processExpiredHackathons(options: { enqueueOnly?: boolean 
   for (const hackathon of expiredHackathons) {
     let isCustomJudge = false;
     try {
-      const meta = typeof hackathon.judging_criteria === "string"
-        ? JSON.parse(hackathon.judging_criteria)
-        : hackathon.judging_criteria;
+      const meta = typeof hackathon.judgingCriteria === "string"
+        ? JSON.parse(hackathon.judgingCriteria)
+        : hackathon.judgingCriteria;
       isCustomJudge = meta?.judge_type === "custom";
     } catch { /* ignore */ }
 
@@ -57,24 +59,32 @@ export async function processExpiredHackathons(options: { enqueueOnly?: boolean 
 
       // Notify Telegram community (fire-and-forget)
       try {
-        const { data: h } = await supabaseAdmin
-          .from("hackathons").select("judging_criteria").eq("id", hackathon.id).single();
+        const [h] = await getDb()
+          .select({ judgingCriteria: hackathons.judgingCriteria })
+          .from(hackathons)
+          .where(eq(hackathons.id, hackathon.id))
+          .limit(1);
         let winnerName: string | null = null;
-        if (h?.judging_criteria) {
-          const meta = typeof h.judging_criteria === "string" ? JSON.parse(h.judging_criteria) : h.judging_criteria;
+        if (h?.judgingCriteria) {
+          const meta = typeof h.judgingCriteria === "string" ? JSON.parse(h.judgingCriteria) : h.judgingCriteria;
           if (meta.winner_agent_id) {
-            const { data: agent } = await supabaseAdmin
-              .from("agents").select("display_name, name").eq("id", meta.winner_agent_id).single();
-            winnerName = agent?.display_name || agent?.name || null;
+            const [agent] = await getDb()
+              .select({ displayName: agents.displayName, name: agents.name })
+              .from(agents)
+              .where(eq(agents.id, meta.winner_agent_id))
+              .limit(1);
+            winnerName = agent?.displayName || agent?.name || null;
           }
         }
-        const { count: subCount } = await supabaseAdmin
-          .from("submissions").select("*", { count: "exact", head: true }).eq("hackathon_id", hackathon.id);
+        const [submissionCount] = await getDb()
+          .select({ value: count() })
+          .from(submissions)
+          .where(eq(submissions.hackathonId, hackathon.id));
         telegramHackathonFinalized({
           id: hackathon.id,
           title: hackathon.title,
           winner_name: winnerName,
-          total_submissions: subCount || 0,
+          total_submissions: submissionCount?.value || 0,
         }).catch(() => {});
       } catch { /* telegram is best-effort */ }
     } catch (e: unknown) {
@@ -93,24 +103,25 @@ export async function processExpiredHackathons(options: { enqueueOnly?: boolean 
 export async function processQueuedGenLayerHackathons(options: { enqueueOnly?: boolean } = {}) {
   const processed: Array<{ id: string; title: string; action: string; success?: boolean; skipped?: boolean; reason?: string; error?: string }> = [];
 
-  const { data: judgingHackathons, error: fetchErr } = await supabaseAdmin
-    .from("hackathons")
-    .select("id, title, judging_criteria, status")
-    .eq("status", "judging")
-    .order("created_at", { ascending: true })
-    .limit(10);
-
-  if (fetchErr) {
+  let judgingHackathons: Array<{ id: string; title: string; judgingCriteria: unknown }> = [];
+  try {
+    judgingHackathons = await getDb()
+      .select({ id: hackathons.id, title: hackathons.title, judgingCriteria: hackathons.judgingCriteria })
+      .from(hackathons)
+      .where(eq(hackathons.status, "judging"))
+      .orderBy(hackathons.createdAt)
+      .limit(10);
+  } catch (fetchErr) {
     console.error("Error fetching queued GenLayer hackathons:", fetchErr);
     return { count: 0, processed: [] };
   }
 
-  for (const hackathon of judgingHackathons || []) {
+  for (const hackathon of judgingHackathons) {
     let meta: Record<string, unknown> = {};
     try {
-      meta = typeof hackathon.judging_criteria === "string"
-        ? JSON.parse(hackathon.judging_criteria)
-        : (hackathon.judging_criteria || {});
+      meta = typeof hackathon.judgingCriteria === "string"
+        ? JSON.parse(hackathon.judgingCriteria)
+        : (hackathon.judgingCriteria || {});
     } catch {
       meta = {};
     }
@@ -149,38 +160,36 @@ export async function processQueuedGenLayerHackathons(options: { enqueueOnly?: b
  * along with their teams, submissions, prompt_rounds, team_members, and activity_log.
  */
 export async function pruneOldFinalizedHackathons() {
-  const { data: finalized } = await supabaseAdmin
-    .from("hackathons")
-    .select("id")
-    .eq("status", "completed")
-    .order("created_at", { ascending: false });
+  const finalized = await getDb()
+    .select({ id: hackathons.id })
+    .from(hackathons)
+    .where(eq(hackathons.status, "completed"))
+    .orderBy(desc(hackathons.createdAt));
 
-  if (!finalized || finalized.length <= 8) return;
+  if (finalized.length <= 8) return;
 
   const toDelete = finalized.slice(8).map((h) => h.id);
   console.log(`Pruning ${toDelete.length} old finalized hackathons`);
 
   for (const hId of toDelete) {
-    await supabaseAdmin.from("activity_log").delete().eq("hackathon_id", hId);
-    await supabaseAdmin.from("prompt_rounds").delete().eq("hackathon_id", hId);
-    await supabaseAdmin.from("marketplace_listings").delete().eq("hackathon_id", hId);
+    await getDb().transaction(async (tx) => {
+      await tx.delete(activityLog).where(eq(activityLog.hackathonId, hId));
+      await tx.delete(promptRounds).where(eq(promptRounds.hackathonId, hId));
+      await tx.delete(marketplaceListings).where(eq(marketplaceListings.hackathonId, hId));
 
-    const { data: subs } = await supabaseAdmin.from("submissions").select("id").eq("hackathon_id", hId);
-    if (subs) {
+      const subs = await tx.select({ id: submissions.id }).from(submissions).where(eq(submissions.hackathonId, hId));
       for (const s of subs) {
-        await supabaseAdmin.from("evaluations").delete().eq("submission_id", s.id);
+        await tx.delete(evaluations).where(eq(evaluations.submissionId, s.id));
       }
-    }
-    await supabaseAdmin.from("submissions").delete().eq("hackathon_id", hId);
+      await tx.delete(submissions).where(eq(submissions.hackathonId, hId));
 
-    const { data: teams } = await supabaseAdmin.from("teams").select("id").eq("hackathon_id", hId);
-    if (teams) {
-      for (const t of teams) {
-        await supabaseAdmin.from("team_members").delete().eq("team_id", t.id);
+      const teamRows = await tx.select({ id: teams.id }).from(teams).where(eq(teams.hackathonId, hId));
+      for (const t of teamRows) {
+        await tx.delete(teamMembers).where(eq(teamMembers.teamId, t.id));
       }
-    }
-    await supabaseAdmin.from("teams").delete().eq("hackathon_id", hId);
-    await supabaseAdmin.from("hackathons").delete().eq("id", hId);
+      await tx.delete(teams).where(eq(teams.hackathonId, hId));
+      await tx.delete(hackathons).where(eq(hackathons.id, hId));
+    });
   }
 
   console.log(`Pruned ${toDelete.length} old hackathons`);

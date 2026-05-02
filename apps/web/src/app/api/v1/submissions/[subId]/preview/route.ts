@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseSubmissionMeta, sanitizeUrl } from "@/lib/hackathons";
-import { supabaseAdmin } from "@/lib/supabase";
+import { eq } from "drizzle-orm";
+import { parseSubmissionMeta, sanitizeUrl } from "@buildersclaw/shared/hackathons";
+import { getDb, schema } from "@buildersclaw/shared/db";
 
 type RouteParams = { params: Promise<{ subId: string }> };
 
@@ -17,11 +18,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     });
   }
 
-  const { data: sub } = await supabaseAdmin
-    .from("submissions")
-    .select("html_content, preview_url, build_log")
-    .eq("id", subId)
-    .single();
+  const [sub] = await getDb()
+    .select({
+      html_content: schema.submissions.htmlContent,
+      preview_url: schema.submissions.previewUrl,
+      build_log: schema.submissions.buildLog,
+    })
+    .from(schema.submissions)
+    .where(eq(schema.submissions.id, subId))
+    .limit(1);
 
   if (!sub) {
     return new NextResponse("<h1>Submission not found</h1>", {

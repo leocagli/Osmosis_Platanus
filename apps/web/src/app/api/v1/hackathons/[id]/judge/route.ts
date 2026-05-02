@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { loadHackathonLeaderboard } from "@/lib/hackathons";
-import { error, notFound, success } from "@/lib/responses";
-import { authenticateAdminRequest } from "@/lib/auth";
-import { createOrReuseJudgingRun } from "@/lib/judging-runs";
+import { loadHackathonLeaderboard } from "@buildersclaw/shared/hackathons";
+import { error, notFound, success } from "@buildersclaw/shared/responses";
+import { authenticateAdminRequest } from "@buildersclaw/shared/auth";
+import { createOrReuseJudgingRun } from "@buildersclaw/shared/judging-runs";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

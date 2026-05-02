@@ -2,9 +2,12 @@
   "name": "@buildersclaw/worker",
   "version": "0.1.0",
   "private": true,
-"scripts": {
+  "scripts": {
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@buildersclaw/shared": "workspace:*"
   }
 }

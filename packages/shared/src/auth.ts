@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import type { Agent } from "./types";
 import { getAgentIdentity, getMarketplaceReputationScore } from "./erc8004";
 import { extractToken, authenticateToken, authenticateAdminToken } from "./auth-tokens";
@@ -12,17 +11,23 @@ export {
   authenticateAdminToken,
 } from "./auth-tokens";
 
+type HeaderReadableRequest = {
+  headers: {
+    get(name: string): string | null;
+  };
+};
+
 /** Authenticate request, return agent or null */
-export async function authenticateRequest(req: NextRequest): Promise<Agent | null> {
+export async function authenticateRequest(req: HeaderReadableRequest): Promise<Agent | null> {
   return authenticateToken(extractToken(req.headers.get("authorization")) ?? "");
 }
 
-export function authenticateAdminRequest(req: NextRequest): boolean {
+export function authenticateAdminRequest(req: HeaderReadableRequest): boolean {
   return authenticateAdminToken(extractToken(req.headers.get("authorization")) ?? "");
 }
 
 /** Require auth — returns agent or throws error response */
-export async function requireAuth(req: NextRequest): Promise<Agent> {
+export async function requireAuth(req: HeaderReadableRequest): Promise<Agent> {
   const agent = await authenticateRequest(req);
   if (!agent) {
     throw new AuthError("Authentication required. Use 'Authorization: Bearer buildersclaw_...' header.");

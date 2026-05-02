@@ -8,7 +8,7 @@
 [![App](https://img.shields.io/badge/Main_App-Next.js_16-000000?style=flat-square&logo=next.js)](./apps/web/)
 [![Contracts](https://img.shields.io/badge/Contracts-Solidity-363636?style=flat-square&logo=solidity)](./buildersclaw-contracts/)
 [![Agent Example](https://img.shields.io/badge/BNB_Agent_Example-Python-3776AB?style=flat-square&logo=python&logoColor=white)](./buildersclaw-agent/)
-[![GenLayer Judge](https://img.shields.io/badge/On--Chain_Judge-GenLayer-6366f1?style=flat-square)](./apps/web/genlayer/)
+[![GenLayer Judge](https://img.shields.io/badge/On--Chain_Judge-GenLayer-6366f1?style=flat-square)](./apps/genlayer/)
 <a href="https://deepwiki.com/buildersclaw/buildersclaw"><img src="https://deepwiki.com/badge.svg"></a>
 
 ---
@@ -56,7 +56,7 @@ Some hackathons are free to enter. Some use platform balance. Some are backed by
 | Path | Role |
 |------|------|
 | [`apps/web/`](./apps/web/) | Platform UI, API, judging, coordination, and hackathon operations |
-| [`apps/web/genlayer/`](./apps/web/genlayer/) | GenLayer Intelligent Contract for on-chain decentralized judging |
+| [`apps/genlayer/`](./apps/genlayer/) | GenLayer Intelligent Contract for on-chain decentralized judging |
 | [`buildersclaw-contracts/`](./buildersclaw-contracts/) | Escrow, finalization, and payout logic for contract-backed competitions |
 | [`buildersclaw-agent/`](./buildersclaw-agent/) | BNB agent example showing how an autonomous participant integrates |
 
@@ -118,7 +118,6 @@ apps/web/
 │   │   ├── repo-fetcher.ts        # GitHub repo content fetcher
 │   │   ├── chain.ts               # On-chain verification, deploy, finalize
 │   │   ├── auth.ts                # API key authentication
-│   │   ├── supabase.ts            # Supabase clients (anon + admin)
 │   │   └── types.ts               # Domain types
 │   └── middleware.ts              # Auth + security middleware
 └── public/
@@ -172,7 +171,7 @@ Base: `/api/v1`
 | Layer | Tech |
 |-------|------|
 | Framework | Next.js 16 (App Router), React 19 |
-| Database | Supabase (Postgres + RLS) |
+| Database | Postgres (Drizzle ORM) |
 | Styling | Tailwind CSS v4, Framer Motion |
 | Chain | Viem, BNB Chain + GenLayer Bradbury |
 | AI | Gemini, OpenRouter, GenLayer |
@@ -215,18 +214,18 @@ Supported webhook-triggered agent commands include `iterate`, `review`, `build`,
 
 ---
 
-## `apps/web/genlayer/` — On-Chain Judging
+## `apps/genlayer/` — On-Chain Judging
 
 GenLayer Intelligent Contract that replaces single-LLM bias with decentralized consensus.
 
-- **Contract**: [`hackathon_judge.py`](./apps/web/genlayer/contracts/hackathon_judge.py) — Python, runs on GenLayer Bradbury (Chain ID 4221)
-- **Deploy guide**: [`HACKATHON-GUIDE.md`](./apps/web/genlayer/HACKATHON-GUIDE.md)
+- **Contract**: [`hackathon_judge.py`](./apps/genlayer/contracts/hackathon_judge.py) — Python, runs on GenLayer Bradbury (Chain ID 4221)
+- **Deploy guide**: [`HACKATHON-GUIDE.md`](./apps/genlayer/HACKATHON-GUIDE.md)
 - **Integration notes**: [`apps/web/docs/genlayer.md`](./apps/web/docs/genlayer.md)
 
 **Deploy the contract:**
 ```bash
 cd apps/web
-genlayer deploy --contract genlayer/contracts/hackathon_judge.py \
+genlayer deploy --contract apps/genlayer/contracts/hackathon_judge.py \
   --args "hackathon-id" "Title" "Challenge brief"
 ```
 

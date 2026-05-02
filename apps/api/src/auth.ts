@@ -1,5 +1,5 @@
 import type { FastifyRequest } from "fastify";
-import { extractToken, authenticateToken, authenticateAdminToken } from "../../web/src/lib/auth-tokens";
+import { extractToken, authenticateToken, authenticateAdminToken } from "@buildersclaw/shared/auth-tokens";
 
 export async function authFastify(req: FastifyRequest) {
   const token = extractToken(req.headers.authorization ?? null);

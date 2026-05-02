@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { authenticateRequest } from "@/lib/auth";
-import { success, unauthorized } from "@/lib/responses";
-import { getBalance } from "@/lib/balance";
-import { getAgentIdentity, getMarketplaceReputationScore } from "@/lib/erc8004";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { success, unauthorized } from "@buildersclaw/shared/responses";
+import { getBalance } from "@buildersclaw/shared/balance";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { getAgentIdentity, getMarketplaceReputationScore } from "@buildersclaw/shared/erc8004";
 
 /**
  * GET /api/v1/agents/me
@@ -15,6 +16,7 @@ export async function GET(req: NextRequest) {
 
   // Get balance
   const balance = await getBalance(agent.id);
+  const db = getDb();
 
   // Parse github_username + telegram_username from strategy JSON
   let githubUsername: string | null = null;
@@ -35,59 +37,93 @@ export async function GET(req: NextRequest) {
   if (!githubUsername) missingPrereqs.push("github_username");
 
   // Get all teams this agent is in
-  const { data: memberships } = await supabaseAdmin
-    .from("team_members")
-    .select("team_id, role, revenue_share_pct, teams(id, name, hackathon_id, status, color)")
-    .eq("agent_id", agent.id);
+  const memberships = await db
+    .select({
+      role: schema.teamMembers.role,
+      revenue_share_pct: schema.teamMembers.revenueSharePct,
+      team: {
+        id: schema.teams.id,
+        name: schema.teams.name,
+        hackathon_id: schema.teams.hackathonId,
+        status: schema.teams.status,
+        color: schema.teams.color,
+      },
+    })
+    .from(schema.teamMembers)
+    .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+    .where(eq(schema.teamMembers.agentId, agent.id));
 
   // For each team, get hackathon info and submission
   const hackathons = await Promise.all(
-    (memberships || []).map(async (m) => {
-      const team = (m as Record<string, unknown>).teams as Record<string, unknown> | null;
-      if (!team) return null;
+    memberships.map(async (m) => {
+      const team = m.team;
 
-      const { data: hackathon } = await supabaseAdmin
-        .from("hackathons")
-        .select("id, title, status, entry_type, entry_fee, prize_pool, max_participants, challenge_type, build_time_seconds, github_repo")
-        .eq("id", team.hackathon_id)
-        .single();
+      const [hackathon] = await db
+        .select({
+          id: schema.hackathons.id,
+          title: schema.hackathons.title,
+          status: schema.hackathons.status,
+          entry_type: schema.hackathons.entryType,
+          entry_fee: schema.hackathons.entryFee,
+          prize_pool: schema.hackathons.prizePool,
+          max_participants: schema.hackathons.maxParticipants,
+          challenge_type: schema.hackathons.challengeType,
+          build_time_seconds: schema.hackathons.buildTimeSeconds,
+          github_repo: schema.hackathons.githubRepo,
+        })
+        .from(schema.hackathons)
+        .where(eq(schema.hackathons.id, team.hackathon_id))
+        .limit(1);
 
       if (!hackathon) return null;
 
       // Get submission + score
-      const { data: sub } = await supabaseAdmin
-        .from("submissions")
-        .select("id, status, project_type, file_count, languages")
-        .eq("team_id", team.id)
-        .eq("hackathon_id", hackathon.id)
-        .single();
+      const [sub] = await db
+        .select({
+          id: schema.submissions.id,
+          status: schema.submissions.status,
+          project_type: schema.submissions.projectType,
+          file_count: schema.submissions.fileCount,
+          languages: schema.submissions.languages,
+        })
+        .from(schema.submissions)
+        .where(and(eq(schema.submissions.teamId, team.id), eq(schema.submissions.hackathonId, hackathon.id)))
+        .limit(1);
 
       let score = null;
       if (sub) {
-        const { data: evalData } = await supabaseAdmin
-          .from("evaluations")
-          .select("total_score, judge_feedback")
-          .eq("submission_id", sub.id)
-          .single();
+        const [evalData] = await db
+          .select({
+            total_score: schema.evaluations.totalScore,
+            judge_feedback: schema.evaluations.judgeFeedback,
+          })
+          .from(schema.evaluations)
+          .where(eq(schema.evaluations.submissionId, sub.id))
+          .limit(1);
         score = evalData;
       }
 
       // Get latest prompt round for iteration visibility.
-      const { data: latestRound } = await supabaseAdmin
-        .from("prompt_rounds")
-        .select("round_number, llm_provider, llm_model, commit_sha, created_at")
-        .eq("team_id", team.id)
-        .eq("hackathon_id", hackathon.id)
-        .order("round_number", { ascending: false })
-        .limit(1)
-        .single();
+      const [latestRound] = await db
+        .select({
+          round_number: schema.promptRounds.roundNumber,
+          llm_provider: schema.promptRounds.llmProvider,
+          llm_model: schema.promptRounds.llmModel,
+          commit_sha: schema.promptRounds.commitSha,
+          created_at: schema.promptRounds.createdAt,
+        })
+        .from(schema.promptRounds)
+        .where(and(eq(schema.promptRounds.teamId, team.id), eq(schema.promptRounds.hackathonId, hackathon.id)))
+        .orderBy(desc(schema.promptRounds.roundNumber))
+        .limit(1);
 
       // Count current participants
-      const { data: participants } = await supabaseAdmin
-        .from("team_members")
-        .select("agent_id, teams!inner(hackathon_id)")
-        .eq("teams.hackathon_id", hackathon.id);
-      const participantCount = new Set((participants || []).map((p: Record<string, unknown>) => p.agent_id)).size;
+      const [participants] = await db
+        .select({ count: sql<number>`count(distinct ${schema.teamMembers.agentId})` })
+        .from(schema.teamMembers)
+        .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+        .where(eq(schema.teams.hackathonId, hackathon.id));
+      const participantCount = Number(participants?.count || 0);
 
       return {
         hackathon_id: hackathon.id,

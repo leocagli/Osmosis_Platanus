@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
-import { authenticateAdminRequest } from "@/lib/auth";
-import { normalizeAddress } from "@/lib/chain";
-import { parseHackathonMeta, sanitizeString } from "@/lib/hackathons";
-import { error, notFound, success } from "@/lib/responses";
-import { supabaseAdmin } from "@/lib/supabase";
-import { createOrReuseFinalizationRun } from "@/lib/finalization";
-import { validateWinnerShares, isValidUUID, WINNER_MIN_BPS } from "@/lib/validation";
+import { and, eq } from "drizzle-orm";
+import { authenticateAdminRequest } from "@buildersclaw/shared/auth";
+import { normalizeAddress } from "@buildersclaw/shared/chain";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { parseHackathonMeta, sanitizeString } from "@buildersclaw/shared/hackathons";
+import { error, notFound, success } from "@buildersclaw/shared/responses";
+import { createOrReuseFinalizationRun } from "@buildersclaw/shared/finalization";
+import { validateWinnerShares, isValidUUID, WINNER_MIN_BPS } from "@buildersclaw/shared/validation";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -25,13 +26,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("Invalid hackathon ID format", 400);
   }
 
-  const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
+  const db = getDb();
+
+  const [hackathon] = await db
+    .select()
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (!hackathon) return notFound("Hackathon");
 
   // ── SECURITY: Prevent double finalization ──
   if (hackathon.status === "completed") {
-    const existingMeta = parseHackathonMeta(hackathon.judging_criteria);
+    const existingMeta = parseHackathonMeta(hackathon.judgingCriteria);
     return error(
       "Hackathon is already finalized",
       409,
@@ -51,30 +58,35 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return error("winner_team_id or winner_agent_id is required", 400);
   }
 
-  const meta = parseHackathonMeta(hackathon.judging_criteria);
+  const meta = parseHackathonMeta(hackathon.judgingCriteria);
   if (!meta.contract_address) {
     return error("Hackathon does not have a configured contract address", 400);
   }
 
   // If only winner_agent_id provided, look up their team (backward compat)
   if (!winnerTeamId && winnerAgentId) {
-    const { data: membership } = await supabaseAdmin
-      .from("team_members")
-      .select("team_id, teams!inner(hackathon_id)")
-      .eq("agent_id", winnerAgentId)
-      .eq("teams.hackathon_id", hackathonId)
-      .single();
+    const [membership] = await db
+      .select({ team_id: schema.teamMembers.teamId })
+      .from(schema.teamMembers)
+      .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+      .where(and(eq(schema.teamMembers.agentId, winnerAgentId), eq(schema.teams.hackathonId, hackathonId)))
+      .limit(1);
 
     if (!membership) return error("winner_agent_id is not registered in this hackathon", 400);
     winnerTeamId = membership.team_id;
   }
 
   // Load all active team members with their wallets
-  const { data: members } = await supabaseAdmin
-    .from("team_members")
-    .select("agent_id, revenue_share_pct, role, agents!inner(wallet_address)")
-    .eq("team_id", winnerTeamId!)
-    .eq("status", "active");
+  const members = await db
+    .select({
+      agent_id: schema.teamMembers.agentId,
+      revenue_share_pct: schema.teamMembers.revenueSharePct,
+      role: schema.teamMembers.role,
+      agents: { wallet_address: schema.agents.walletAddress },
+    })
+    .from(schema.teamMembers)
+    .innerJoin(schema.agents, eq(schema.teamMembers.agentId, schema.agents.id))
+    .where(and(eq(schema.teamMembers.teamId, winnerTeamId!), eq(schema.teamMembers.status, "active")));
 
   if (!members || members.length === 0) {
     return error("Winning team has no active members", 400);

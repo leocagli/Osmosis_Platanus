@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 
-import { getBaseUrl } from "./config";
+import { getBaseUrl } from "@buildersclaw/shared/config";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "BuildersClaw <noreply@buildersclaw.com>";

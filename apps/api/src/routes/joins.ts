@@ -1,12 +1,13 @@
 import crypto from "crypto";
 import type { FastifyInstance } from "fastify";
-import { supabaseAdmin } from "../../../web/src/lib/supabase";
-import { createSingleAgentTeam, sanitizeString, calculatePrizePool, parseHackathonMeta } from "../../../web/src/lib/hackathons";
-import { getBalance } from "../../../web/src/lib/balance";
-import { verifyJoinTransaction } from "../../../web/src/lib/chain";
-import { getJoinTransactionGuide, checkAgentChainReadiness } from "../../../web/src/lib/chain-prerequisites";
-import { validateWalletAddress, isValidTxHash, isValidUUID, checkRateLimit } from "../../../web/src/lib/validation";
-import { parseTelegramUsername, verifyTelegramMembership } from "../../../web/src/lib/telegram";
+import { and, count, eq, gte, sql } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { createSingleAgentTeam, sanitizeString, calculatePrizePool, parseHackathonMeta } from "@buildersclaw/shared/hackathons";
+import { getBalance } from "@buildersclaw/shared/balance";
+import { verifyJoinTransaction } from "@buildersclaw/shared/chain";
+import { getJoinTransactionGuide, checkAgentChainReadiness } from "@buildersclaw/shared/chain-prerequisites";
+import { validateWalletAddress, isValidTxHash, isValidUUID, checkRateLimit } from "@buildersclaw/shared/validation";
+import { parseTelegramUsername, verifyTelegramMembership } from "@buildersclaw/shared/telegram";
 import { ok, created, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
@@ -21,7 +22,25 @@ export async function joinRoutes(fastify: FastifyInstance) {
     const rateCheck = checkRateLimit(`join:${agent.id}`, 10, 3600_000);
     if (!rateCheck.allowed) return fail(reply, "Too many join attempts. Try again later.", 429);
 
-    const { data: hackathon } = await supabaseAdmin.from("hackathons").select("*").eq("id", hackathonId).single();
+    const db = getDb();
+    const [hackathon] = await db
+      .select({
+        id: schema.hackathons.id,
+        title: schema.hackathons.title,
+        description: schema.hackathons.description,
+        brief: schema.hackathons.brief,
+        rules: schema.hackathons.rules,
+        entry_fee: schema.hackathons.entryFee,
+        max_participants: schema.hackathons.maxParticipants,
+        challenge_type: schema.hackathons.challengeType,
+        status: schema.hackathons.status,
+        ends_at: schema.hackathons.endsAt,
+        judging_criteria: schema.hackathons.judgingCriteria,
+        github_repo: schema.hackathons.githubRepo,
+      })
+      .from(schema.hackathons)
+      .where(eq(schema.hackathons.id, hackathonId))
+      .limit(1);
     if (!hackathon) return notFound(reply, "Hackathon");
 
     if (!["open", "in_progress"].includes(hackathon.status)) {
@@ -42,15 +61,19 @@ export async function joinRoutes(fastify: FastifyInstance) {
     const body = req.body as Record<string, unknown> || {};
     const meta = parseHackathonMeta(hackathon.judging_criteria);
 
-    const { data: existingMembership } = await supabaseAdmin
-      .from("team_members")
-      .select("team_id, teams!inner(hackathon_id)")
-      .eq("agent_id", agent.id)
-      .eq("teams.hackathon_id", hackathonId)
-      .single();
+    const [existingMembership] = await db
+      .select({ team_id: schema.teamMembers.teamId })
+      .from(schema.teamMembers)
+      .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+      .where(and(eq(schema.teamMembers.agentId, agent.id), eq(schema.teams.hackathonId, hackathonId)))
+      .limit(1);
 
     if (existingMembership) {
-      const { data: existingTeam } = await supabaseAdmin.from("teams").select("*").eq("id", (existingMembership as { team_id: string }).team_id).single();
+      const [existingTeam] = await db
+        .select({ id: schema.teams.id, hackathon_id: schema.teams.hackathonId, name: schema.teams.name, color: schema.teams.color, floor_number: schema.teams.floorNumber, status: schema.teams.status, telegram_chat_id: schema.teams.telegramChatId, created_by: schema.teams.createdBy, created_at: schema.teams.createdAt })
+        .from(schema.teams)
+        .where(eq(schema.teams.id, existingMembership.team_id))
+        .limit(1);
       return created(reply, {
         joined: false,
         team: existingTeam,
@@ -60,9 +83,8 @@ export async function joinRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const { count: currentParticipants } = await supabaseAdmin
-      .from("teams").select("*", { count: "exact", head: true }).eq("hackathon_id", hackathonId);
-    if ((currentParticipants || 0) >= hackathon.max_participants) {
+    const [{ value: currentParticipants }] = await db.select({ value: count() }).from(schema.teams).where(eq(schema.teams.hackathonId, hackathonId));
+    if (currentParticipants >= hackathon.max_participants) {
       return fail(reply, "Hackathon is full", 400, `Max participants: ${hackathon.max_participants}`);
     }
 
@@ -79,13 +101,12 @@ export async function joinRoutes(fastify: FastifyInstance) {
     }
 
     if (txHash) {
-      const { data: existingTx } = await supabaseAdmin
-        .from("activity_log")
-        .select("id")
-        .eq("event_type", "hackathon_joined")
-        .contains("event_data", { tx_hash: txHash })
+      const existingTx = await db
+        .select({ id: schema.activityLog.id })
+        .from(schema.activityLog)
+        .where(and(eq(schema.activityLog.eventType, "hackathon_joined"), sql`${schema.activityLog.eventData} @> ${JSON.stringify({ tx_hash: txHash })}::jsonb`))
         .limit(1);
-      if (existingTx && existingTx.length > 0) {
+      if (existingTx.length > 0) {
         return fail(reply, "This transaction hash has already been used to join a hackathon.", 409);
       }
     }
@@ -123,28 +144,29 @@ export async function joinRoutes(fastify: FastifyInstance) {
         return fail(reply, `Insufficient balance for entry fee. Need $${entryFee.toFixed(2)}, have $${balance.balance_usd.toFixed(2)}`, 402, "Deposit USDC via POST /api/v1/balance to fund your account.");
       }
 
-      const { data: updated, error: chargeErr } = await supabaseAdmin
-        .from("agent_balances")
-        .update({ balance_usd: balance.balance_usd - entryFee, total_spent_usd: balance.total_spent_usd + entryFee, updated_at: new Date().toISOString() })
-        .eq("agent_id", agent.id)
-        .gte("balance_usd", entryFee)
-        .select("balance_usd")
-        .single();
-
-      if (chargeErr || !updated) return fail(reply, "Failed to charge entry fee (balance may have changed). Try again.", 402);
-
-      await supabaseAdmin.from("balance_transactions").insert({
-        id: crypto.randomUUID(),
-        agent_id: agent.id,
-        type: "entry_fee",
-        amount_usd: -entryFee,
-        balance_after: (updated as { balance_usd: number }).balance_usd,
-        reference_id: hackathonId,
-        metadata: { type: "entry_fee", hackathon_id: hackathonId, hackathon_title: hackathon.title },
-        created_at: new Date().toISOString(),
+      const [updated] = await db.transaction(async (tx) => {
+        const rows = await tx
+          .update(schema.agentBalances)
+          .set({ balanceUsd: balance.balance_usd - entryFee, totalSpentUsd: balance.total_spent_usd + entryFee, updatedAt: new Date().toISOString() })
+          .where(and(eq(schema.agentBalances.agentId, agent.id), gte(schema.agentBalances.balanceUsd, entryFee)))
+          .returning({ balance_usd: schema.agentBalances.balanceUsd });
+        if (rows.length === 0) return [];
+        await tx.insert(schema.balanceTransactions).values({
+          id: crypto.randomUUID(),
+          agentId: agent.id,
+          type: "entry_fee",
+          amountUsd: -entryFee,
+          balanceAfter: rows[0].balance_usd,
+          referenceId: hackathonId,
+          metadata: { type: "entry_fee", hackathon_id: hackathonId, hackathon_title: hackathon.title },
+          createdAt: new Date().toISOString(),
+        });
+        return rows;
       });
 
-      entryCharge = { entry_fee_usd: entryFee, balance_after_usd: (updated as { balance_usd: number }).balance_usd };
+      if (!updated) return fail(reply, "Failed to charge entry fee (balance may have changed). Try again.", 402);
+
+      entryCharge = { entry_fee_usd: entryFee, balance_after_usd: updated.balance_usd };
     }
 
     const { team, existed } = await createSingleAgentTeam({
@@ -159,13 +181,13 @@ export async function joinRoutes(fastify: FastifyInstance) {
     if (!team) return fail(reply, "Failed to join hackathon", 500);
 
     if (!existed) {
-      await supabaseAdmin.from("activity_log").insert({
+      await db.insert(schema.activityLog).values({
         id: crypto.randomUUID(),
-        hackathon_id: hackathonId,
-        team_id: typeof team.id === "string" ? team.id : null,
-        agent_id: agent.id,
-        event_type: "hackathon_joined",
-        event_data: { entry_fee_usd: entryFee, paid_from_balance: entryFee > 0 },
+        hackathonId,
+        teamId: typeof team.id === "string" ? team.id : null,
+        agentId: agent.id,
+        eventType: "hackathon_joined",
+        eventData: { entry_fee_usd: entryFee, paid_from_balance: entryFee > 0 },
       });
     }
 

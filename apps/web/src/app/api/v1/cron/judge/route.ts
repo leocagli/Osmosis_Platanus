@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { processExpiredHackathons, processQueuedGenLayerHackathons } from "@/lib/judge-trigger";
+import { processExpiredHackathons, processQueuedGenLayerHackathons } from "@buildersclaw/shared/judge-trigger";
 
 export async function GET(request: Request) {
   try {

@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { error, success, unauthorized } from "@/lib/responses";
-import { supabaseAdmin } from "@/lib/supabase";
+import { eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { error, success, unauthorized } from "@buildersclaw/shared/responses";
 import {
   buildIdentityLinkMessage,
   fetchRegistrationFile,
@@ -11,7 +12,56 @@ import {
   syncAgentIdentity,
   syncAgentReputation,
   verifyIdentityLinkSignature,
-} from "@/lib/erc8004";
+} from "@buildersclaw/shared/erc8004";
+
+function dbErrorCode(err: unknown) {
+  return typeof err === "object" && err !== null && "code" in err && typeof err.code === "string"
+    ? err.code
+    : null;
+}
+
+async function getAgentById(agentId: string) {
+  const [agent] = await getDb()
+    .select({
+      id: schema.agents.id,
+      name: schema.agents.name,
+      display_name: schema.agents.displayName,
+      description: schema.agents.description,
+      avatar_url: schema.agents.avatarUrl,
+      wallet_address: schema.agents.walletAddress,
+      api_key_hash: schema.agents.apiKeyHash,
+      model: schema.agents.model,
+      personality: schema.agents.personality,
+      strategy: schema.agents.strategy,
+      total_earnings: schema.agents.totalEarnings,
+      total_hackathons: schema.agents.totalHackathons,
+      total_wins: schema.agents.totalWins,
+      reputation_score: schema.agents.reputationScore,
+      identity_registry: schema.agents.identityRegistry,
+      identity_agent_id: schema.agents.identityAgentId,
+      identity_chain_id: schema.agents.identityChainId,
+      identity_agent_uri: schema.agents.identityAgentUri,
+      identity_wallet: schema.agents.identityWallet,
+      identity_owner_wallet: schema.agents.identityOwnerWallet,
+      identity_source: schema.agents.identitySource,
+      identity_link_status: schema.agents.identityLinkStatus,
+      identity_verified_at: schema.agents.identityVerifiedAt,
+      marketplace_reputation_score: schema.agents.marketplaceReputationScore,
+      marketplace_completed_roles: schema.agents.marketplaceCompletedRoles,
+      marketplace_successful_roles: schema.agents.marketplaceSuccessfulRoles,
+      marketplace_failed_roles: schema.agents.marketplaceFailedRoles,
+      marketplace_review_approvals: schema.agents.marketplaceReviewApprovals,
+      marketplace_no_show_count: schema.agents.marketplaceNoShowCount,
+      status: schema.agents.status,
+      created_at: schema.agents.createdAt,
+      last_active: schema.agents.lastActive,
+    })
+    .from(schema.agents)
+    .where(eq(schema.agents.id, agentId))
+    .limit(1);
+
+  return agent;
+}
 
 /**
  * GET /api/v1/agents/identity
@@ -26,8 +76,39 @@ export async function GET(req: NextRequest) {
   const messageIssuedAt = req.nextUrl.searchParams.get("issued_at");
 
   const [identitySnapshot, reputationSnapshot] = await Promise.all([
-    supabaseAdmin.from("agent_identity_snapshots").select("*").eq("agent_id", agent.id).maybeSingle(),
-    supabaseAdmin.from("agent_reputation_snapshots").select("*").eq("agent_id", agent.id).maybeSingle(),
+    getDb()
+      .select({
+        agent_id: schema.agentIdentitySnapshots.agentId,
+        identity_registry: schema.agentIdentitySnapshots.identityRegistry,
+        identity_agent_id: schema.agentIdentitySnapshots.identityAgentId,
+        identity_chain_id: schema.agentIdentitySnapshots.identityChainId,
+        identity_agent_uri: schema.agentIdentitySnapshots.identityAgentUri,
+        identity_wallet: schema.agentIdentitySnapshots.identityWallet,
+        identity_owner_wallet: schema.agentIdentitySnapshots.identityOwnerWallet,
+        registration_valid: schema.agentIdentitySnapshots.registrationValid,
+        last_synced_at: schema.agentIdentitySnapshots.lastSyncedAt,
+        payload: schema.agentIdentitySnapshots.payload,
+      })
+      .from(schema.agentIdentitySnapshots)
+      .where(eq(schema.agentIdentitySnapshots.agentId, agent.id))
+      .limit(1),
+    getDb()
+      .select({
+        agent_id: schema.agentReputationSnapshots.agentId,
+        identity_registry: schema.agentReputationSnapshots.identityRegistry,
+        identity_agent_id: schema.agentReputationSnapshots.identityAgentId,
+        trusted_client_count: schema.agentReputationSnapshots.trustedClientCount,
+        trusted_feedback_count: schema.agentReputationSnapshots.trustedFeedbackCount,
+        trusted_summary_value: schema.agentReputationSnapshots.trustedSummaryValue,
+        trusted_summary_decimals: schema.agentReputationSnapshots.trustedSummaryDecimals,
+        raw_client_count: schema.agentReputationSnapshots.rawClientCount,
+        raw_feedback_count: schema.agentReputationSnapshots.rawFeedbackCount,
+        last_synced_at: schema.agentReputationSnapshots.lastSyncedAt,
+        payload: schema.agentReputationSnapshots.payload,
+      })
+      .from(schema.agentReputationSnapshots)
+      .where(eq(schema.agentReputationSnapshots.agentId, agent.id))
+      .limit(1),
   ]);
 
   return success({
@@ -52,8 +133,8 @@ export async function GET(req: NextRequest) {
         }),
       }
       : {}),
-    identity_snapshot: identitySnapshot.data || null,
-    reputation_snapshot: reputationSnapshot.data || null,
+    identity_snapshot: identitySnapshot[0] || null,
+    reputation_snapshot: reputationSnapshot[0] || null,
   });
 }
 
@@ -89,7 +170,7 @@ export async function POST(req: NextRequest) {
     const identity = await syncAgentIdentity(agent);
     const reputation = await syncAgentReputation(agent);
 
-    const { data: refreshed } = await supabaseAdmin.from("agents").select("*").eq("id", agent.id).single();
+    const refreshed = await getAgentById(agent.id);
 
     return success({
       identity: getAgentIdentity(refreshed || agent),
@@ -130,47 +211,73 @@ export async function POST(req: NextRequest) {
   const registration = onChain.agentUri ? await fetchRegistrationFile(onChain.agentUri) : null;
   const now = new Date().toISOString();
 
-  const { error: updateErr } = await supabaseAdmin
-    .from("agents")
-    .update({
-      identity_registry: config.agentRegistry,
-      identity_agent_id: identityAgentId,
-      identity_chain_id: config.chainId,
-      identity_agent_uri: onChain.agentUri || null,
-      identity_wallet: onChain.agentWallet,
-      identity_owner_wallet: onChain.ownerWallet,
-      identity_source: source === "buildersclaw" ? "buildersclaw" : "external",
-      identity_link_status: "linked",
-      identity_verified_at: now,
-    })
-    .eq("id", agent.id);
-
-  if (updateErr) {
-    const message = updateErr.code === "23505"
+  try {
+    await getDb()
+      .update(schema.agents)
+      .set({
+        identityRegistry: config.agentRegistry,
+        identityAgentId: identityAgentId,
+        identityChainId: config.chainId,
+        identityAgentUri: onChain.agentUri || null,
+        identityWallet: onChain.agentWallet,
+        identityOwnerWallet: onChain.ownerWallet,
+        identitySource: source === "buildersclaw" ? "buildersclaw" : "external",
+        identityLinkStatus: "linked",
+        identityVerifiedAt: now,
+      })
+      .where(eq(schema.agents.id, agent.id));
+  } catch (err) {
+    const code = dbErrorCode(err);
+    const message = code === "23505"
       ? "That ERC-8004 identity is already linked to another BuildersClaw agent"
       : "Failed to link ERC-8004 identity";
-    return error(message, updateErr.code === "23505" ? 409 : 500);
+    return error(message, code === "23505" ? 409 : 500);
   }
 
-  await supabaseAdmin.from("agent_identity_snapshots").upsert({
-    agent_id: agent.id,
-    identity_registry: config.agentRegistry,
-    identity_agent_id: identityAgentId,
-    identity_chain_id: config.chainId,
-    identity_agent_uri: onChain.agentUri || null,
-    identity_wallet: onChain.agentWallet,
-    identity_owner_wallet: onChain.ownerWallet,
-    registration_valid: !!registration,
-    last_synced_at: now,
-    payload: {
-      registration,
-      owner_wallet: onChain.ownerWallet,
-      agent_wallet: onChain.agentWallet,
-      agent_uri: onChain.agentUri || null,
-    },
-  }, { onConflict: "agent_id" });
+  try {
+    await getDb()
+      .insert(schema.agentIdentitySnapshots)
+      .values({
+        agentId: agent.id,
+        identityRegistry: config.agentRegistry,
+        identityAgentId,
+        identityChainId: config.chainId,
+        identityAgentUri: onChain.agentUri || null,
+        identityWallet: onChain.agentWallet,
+        identityOwnerWallet: onChain.ownerWallet,
+        registrationValid: !!registration,
+        lastSyncedAt: now,
+        payload: {
+          registration,
+          owner_wallet: onChain.ownerWallet,
+          agent_wallet: onChain.agentWallet,
+          agent_uri: onChain.agentUri || null,
+        },
+      })
+      .onConflictDoUpdate({
+        target: schema.agentIdentitySnapshots.agentId,
+        set: {
+          identityRegistry: config.agentRegistry,
+          identityAgentId,
+          identityChainId: config.chainId,
+          identityAgentUri: onChain.agentUri || null,
+          identityWallet: onChain.agentWallet,
+          identityOwnerWallet: onChain.ownerWallet,
+          registrationValid: !!registration,
+          lastSyncedAt: now,
+          payload: {
+            registration,
+            owner_wallet: onChain.ownerWallet,
+            agent_wallet: onChain.agentWallet,
+            agent_uri: onChain.agentUri || null,
+          },
+        },
+      });
+  } catch {
+    // Match the previous Supabase call: snapshot write errors were not surfaced.
+  }
 
-  const { data: refreshed } = await supabaseAdmin.from("agents").select("*").eq("id", agent.id).single();
+  const refreshed = await getAgentById(agent.id);
   const reputation = await syncAgentReputation(refreshed || agent);
 
   return success({

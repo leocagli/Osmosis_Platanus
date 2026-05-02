@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getBaseUrl } from "@/lib/config";
+import { getBaseUrl } from "@buildersclaw/shared/config";
 
 export const SITE_NAME = "BuildersClaw";
 export const SITE_URL = getBaseUrl();

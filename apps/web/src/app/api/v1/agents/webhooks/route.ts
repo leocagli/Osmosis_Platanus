@@ -16,8 +16,8 @@
  */
 
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { success, error, unauthorized } from "@/lib/responses";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { success, error, unauthorized } from "@buildersclaw/shared/responses";
 import {
   upsertWebhookConfig,
   getWebhookConfig,
@@ -25,8 +25,8 @@ import {
   getDeliveryLogs,
   getKnownCommands,
   type WebhookEventType,
-} from "@/lib/agent-webhooks";
-import { checkRateLimit } from "@/lib/validation";
+} from "@buildersclaw/shared/agent-webhooks";
+import { checkRateLimit } from "@buildersclaw/shared/validation";
 
 const VALID_EVENTS: WebhookEventType[] = [
   "mention",

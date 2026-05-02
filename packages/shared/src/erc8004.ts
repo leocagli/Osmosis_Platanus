@@ -1,7 +1,9 @@
 import { getAddress, isAddress, parseAbi, verifyMessage, type Address } from "viem";
-import type { Agent } from "@/lib/types";
-import { getConfiguredChainId, getPublicChainClient } from "@/lib/chain";
-import { supabaseAdmin } from "@/lib/supabase";
+import { eq } from "drizzle-orm";
+import type { Agent } from "./types";
+import { getConfiguredChainId, getPublicChainClient } from "./chain";
+import { getDb } from "./db";
+import { agentIdentitySnapshots, agentReputationSnapshots, agents, trustedReputationSources } from "./db/schema";
 
 const identityRegistryAbi = parseAbi([
   "function ownerOf(uint256 tokenId) view returns (address)",
@@ -300,25 +302,59 @@ export async function syncAgentIdentity(agent: Partial<Agent>) {
     identity_verified_at: now,
   };
 
-  await supabaseAdmin.from("agents").update(updates).eq("id", agent.id);
+  await getDb().transaction(async (tx) => {
+    await tx
+      .update(agents)
+      .set({
+        identityRegistry: config.agentRegistry,
+        identityChainId: config.chainId,
+        identityAgentUri: onChain.agentUri || null,
+        identityWallet: onChain.agentWallet,
+        identityOwnerWallet: onChain.ownerWallet,
+        identityLinkStatus: "linked",
+        identityVerifiedAt: now,
+      })
+      .where(eq(agents.id, agent.id!));
 
-  await supabaseAdmin.from("agent_identity_snapshots").upsert({
-    agent_id: agent.id,
-    identity_registry: config.agentRegistry,
-    identity_agent_id: identityAgentId,
-    identity_chain_id: config.chainId,
-    identity_agent_uri: onChain.agentUri || null,
-    identity_wallet: onChain.agentWallet,
-    identity_owner_wallet: onChain.ownerWallet,
-    registration_valid: !!registration,
-    last_synced_at: now,
-    payload: {
-      registration,
-      owner_wallet: onChain.ownerWallet,
-      agent_wallet: onChain.agentWallet,
-      agent_uri: onChain.agentUri || null,
-    },
-  }, { onConflict: "agent_id" });
+    await tx
+      .insert(agentIdentitySnapshots)
+      .values({
+        agentId: agent.id!,
+        identityRegistry: config.agentRegistry,
+        identityAgentId,
+        identityChainId: config.chainId,
+        identityAgentUri: onChain.agentUri || null,
+        identityWallet: onChain.agentWallet,
+        identityOwnerWallet: onChain.ownerWallet,
+        registrationValid: !!registration,
+        lastSyncedAt: now,
+        payload: {
+          registration,
+          owner_wallet: onChain.ownerWallet,
+          agent_wallet: onChain.agentWallet,
+          agent_uri: onChain.agentUri || null,
+        },
+      })
+      .onConflictDoUpdate({
+        target: agentIdentitySnapshots.agentId,
+        set: {
+          identityRegistry: config.agentRegistry,
+          identityAgentId,
+          identityChainId: config.chainId,
+          identityAgentUri: onChain.agentUri || null,
+          identityWallet: onChain.agentWallet,
+          identityOwnerWallet: onChain.ownerWallet,
+          registrationValid: !!registration,
+          lastSyncedAt: now,
+          payload: {
+            registration,
+            owner_wallet: onChain.ownerWallet,
+            agent_wallet: onChain.agentWallet,
+            agent_uri: onChain.agentUri || null,
+          },
+        },
+      });
+  });
 
   return {
     ...updates,
@@ -335,13 +371,13 @@ export async function syncAgentReputation(agent: Partial<Agent>) {
   const agentId = BigInt(identityAgentId);
   const now = new Date().toISOString();
 
-  const trustedSourcesResponse = await supabaseAdmin
-    .from("trusted_reputation_sources")
-    .select("wallet_address, kind, label, weight")
-    .eq("active", true);
+  const trustedSources = await getDb()
+    .select({ walletAddress: trustedReputationSources.walletAddress })
+    .from(trustedReputationSources)
+    .where(eq(trustedReputationSources.active, true));
 
-  const trustedWallets = (trustedSourcesResponse.data || [])
-    .map((row) => row.wallet_address)
+  const trustedWallets = trustedSources
+    .map((row) => row.walletAddress)
     .filter((wallet): wallet is string => !!wallet && isAddress(wallet))
     .map((wallet) => getAddress(wallet));
 
@@ -381,26 +417,50 @@ export async function syncAgentReputation(agent: Partial<Agent>) {
 
   const rawFeedbackCount = Array.isArray(allFeedback?.[0]) ? allFeedback[0].length : 0;
 
-  await supabaseAdmin.from("agent_reputation_snapshots").upsert({
-    agent_id: agent.id,
-    identity_registry: config.agentRegistry,
-    identity_agent_id: identityAgentId,
-    trusted_client_count: trustedWallets.length,
-    trusted_feedback_count: trustedSummaryCount,
-    trusted_summary_value: trustedSummaryValue,
-    trusted_summary_decimals: trustedSummaryDecimals,
-    raw_client_count: clients.length,
-    raw_feedback_count: rawFeedbackCount,
-    last_synced_at: now,
-    payload: {
-      trusted_wallets: trustedWallets,
-      raw_clients: clients,
-      raw_feedback_count: rawFeedbackCount,
-      trusted_summary_count: trustedSummaryCount,
-      trusted_summary_value: trustedSummaryValue,
-      trusted_summary_decimals: trustedSummaryDecimals,
-    },
-  }, { onConflict: "agent_id" });
+  await getDb()
+    .insert(agentReputationSnapshots)
+    .values({
+      agentId: agent.id,
+      identityRegistry: config.agentRegistry,
+      identityAgentId,
+      trustedClientCount: trustedWallets.length,
+      trustedFeedbackCount: trustedSummaryCount,
+      trustedSummaryValue,
+      trustedSummaryDecimals,
+      rawClientCount: clients.length,
+      rawFeedbackCount,
+      lastSyncedAt: now,
+      payload: {
+        trusted_wallets: trustedWallets,
+        raw_clients: clients,
+        raw_feedback_count: rawFeedbackCount,
+        trusted_summary_count: trustedSummaryCount,
+        trusted_summary_value: trustedSummaryValue,
+        trusted_summary_decimals: trustedSummaryDecimals,
+      },
+    })
+    .onConflictDoUpdate({
+      target: agentReputationSnapshots.agentId,
+      set: {
+        identityRegistry: config.agentRegistry,
+        identityAgentId,
+        trustedClientCount: trustedWallets.length,
+        trustedFeedbackCount: trustedSummaryCount,
+        trustedSummaryValue,
+        trustedSummaryDecimals,
+        rawClientCount: clients.length,
+        rawFeedbackCount,
+        lastSyncedAt: now,
+        payload: {
+          trusted_wallets: trustedWallets,
+          raw_clients: clients,
+          raw_feedback_count: rawFeedbackCount,
+          trusted_summary_count: trustedSummaryCount,
+          trusted_summary_value: trustedSummaryValue,
+          trusted_summary_decimals: trustedSummaryDecimals,
+        },
+      },
+    });
 
   return {
     trusted_client_count: trustedWallets.length,

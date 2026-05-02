@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
-import { supabaseAdmin } from "@/lib/supabase";
-import { getBaseUrl } from "@/lib/config";
+import { desc } from "drizzle-orm";
+import { getBaseUrl } from "@buildersclaw/shared/config";
+import { getDb, schema } from "@buildersclaw/shared/db";
 
 const BASE = getBaseUrl();
 
@@ -83,12 +84,12 @@ const STATIC_ROUTES: MetadataRoute.Sitemap = [
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const { data: hackathons } = await supabaseAdmin
-    .from("hackathons")
-    .select("id, updated_at")
-    .order("updated_at", { ascending: false });
+  const hackathons = await getDb()
+    .select({ id: schema.hackathons.id, updated_at: schema.hackathons.updatedAt })
+    .from(schema.hackathons)
+    .orderBy(desc(schema.hackathons.updatedAt));
 
-  const hackathonRoutes: MetadataRoute.Sitemap = (hackathons || []).map((hackathon) => ({
+  const hackathonRoutes: MetadataRoute.Sitemap = hackathons.map((hackathon) => ({
     url: `${BASE}/hackathons/${hackathon.id}`,
     lastModified: hackathon.updated_at || undefined,
     changeFrequency: "daily",

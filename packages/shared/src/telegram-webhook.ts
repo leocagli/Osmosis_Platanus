@@ -18,9 +18,11 @@
  */
 
 import crypto from "crypto";
-import { supabaseAdmin } from "./supabase";
+import { eq } from "drizzle-orm";
 import { postChatMessage } from "./chat";
 import { dispatchMentionWebhooks, extractMentions } from "./agent-webhooks";
+import { getDb } from "./db";
+import { teams } from "./db/schema";
 
 const BOT_TOKEN = () => process.env.TELEGRAM_BOT_TOKEN || "";
 const WEBHOOK_SECRET = () => process.env.TELEGRAM_WEBHOOK_SECRET || "buildersclaw_tg_hook";
@@ -74,11 +76,11 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
   if (!threadId) return; // General topic messages — skip
 
   // Find which team this topic belongs to
-  const { data: team } = await supabaseAdmin
-    .from("teams")
-    .select("id, hackathon_id, name")
-    .eq("telegram_chat_id", String(threadId))
-    .single();
+  const [team] = await getDb()
+    .select({ id: teams.id, hackathonId: teams.hackathonId, name: teams.name })
+    .from(teams)
+    .where(eq(teams.telegramChatId, String(threadId)))
+    .limit(1);
 
   if (!team) {
     console.log(`[TG-WEBHOOK] No team found for thread ${threadId}`);
@@ -99,7 +101,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
   // Save to team_chat
   await postChatMessage({
     teamId: team.id,
-    hackathonId: team.hackathon_id,
+    hackathonId: team.hackathonId,
     senderType: "telegram",
     senderId: null, // Not an agent — external Telegram user
     senderName: `📱 ${senderName}`,
@@ -125,7 +127,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
       fromName: senderName,
       fromType: "telegram",
       teamId: team.id,
-      hackathonId: team.hackathon_id,
+      hackathonId: team.hackathonId,
       telegramMessageId: msg.message_id,
     }).then((notified) => {
       if (notified.length > 0) {

@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { v4 as uuid } from "uuid";
-import { authenticateRequest } from "@/lib/auth";
-import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "@/lib/hackathons";
-import { error, notFound, success, unauthorized } from "@/lib/responses";
-import { supabaseAdmin } from "@/lib/supabase";
-import { parseGitHubUrl, verifyGitHubRepo } from "@/lib/repo-fetcher";
-import { isValidUUID, checkRateLimit, isValidGitHubUrl } from "@/lib/validation";
+import { and, eq, ne } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { sanitizeString, sanitizeUrl, serializeSubmissionMeta } from "@buildersclaw/shared/hackathons";
+import { error, notFound, success, unauthorized } from "@buildersclaw/shared/responses";
+import { parseGitHubUrl, verifyGitHubRepo } from "@buildersclaw/shared/repo-fetcher";
+import { isValidUUID, checkRateLimit, isValidGitHubUrl } from "@buildersclaw/shared/validation";
 
 type RouteParams = { params: Promise<{ id: string; teamId: string }> };
 
@@ -42,12 +43,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     );
   }
 
+  const db = getDb();
+
   // ── Fetch hackathon ──
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("*")
-    .eq("id", hackathonId)
-    .single();
+  const [hackathon] = await db
+    .select()
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (!hackathon) return notFound("Hackathon");
 
@@ -56,34 +59,32 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   // ── Check start time ──
-  if (hackathon.starts_at && new Date(hackathon.starts_at).getTime() > Date.now()) {
-    return error("Hackathon has not started yet", 400, `Starts at: ${hackathon.starts_at}`);
+  if (hackathon.startsAt && new Date(hackathon.startsAt).getTime() > Date.now()) {
+    return error("Hackathon has not started yet", 400, `Starts at: ${hackathon.startsAt}`);
   }
 
   // ── Check deadline ──
-  if (hackathon.ends_at) {
-    const deadline = new Date(hackathon.ends_at).getTime();
+  if (hackathon.endsAt) {
+    const deadline = new Date(hackathon.endsAt).getTime();
     if (Date.now() > deadline) {
       return error("Submission deadline has passed", 400);
     }
   }
 
   // ── Verify team membership ──
-  const { data: team } = await supabaseAdmin
-    .from("teams")
-    .select("*")
-    .eq("id", teamId)
-    .eq("hackathon_id", hackathonId)
-    .single();
+  const [team] = await db
+    .select()
+    .from(schema.teams)
+    .where(and(eq(schema.teams.id, teamId), eq(schema.teams.hackathonId, hackathonId)))
+    .limit(1);
 
   if (!team) return notFound("Team");
 
-  const { data: membership } = await supabaseAdmin
-    .from("team_members")
-    .select("*")
-    .eq("team_id", teamId)
-    .eq("agent_id", agent.id)
-    .single();
+  const [membership] = await db
+    .select()
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id)))
+    .limit(1);
 
   if (!membership) return error("You are not the participant for this team", 403);
 
@@ -139,8 +140,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   const submittedRepo = normalizeRepoIdentity(repoUrl);
-  const sharedHackathonRepo = typeof hackathon.github_repo === "string"
-    ? normalizeRepoIdentity(hackathon.github_repo)
+  const sharedHackathonRepo = typeof hackathon.githubRepo === "string"
+    ? normalizeRepoIdentity(hackathon.githubRepo)
     : null;
 
   if (submittedRepo && sharedHackathonRepo && submittedRepo === sharedHackathonRepo) {
@@ -151,15 +152,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     );
   }
 
-  const { data: siblingSubmissions } = await supabaseAdmin
-    .from("submissions")
-    .select("team_id, preview_url")
-    .eq("hackathon_id", hackathonId)
-    .neq("team_id", teamId);
+  const siblingSubmissions = await db
+    .select({ teamId: schema.submissions.teamId, previewUrl: schema.submissions.previewUrl })
+    .from(schema.submissions)
+    .where(and(eq(schema.submissions.hackathonId, hackathonId), ne(schema.submissions.teamId, teamId)));
 
-  const duplicateRepo = (siblingSubmissions || []).some((submission) => {
-    if (typeof submission.preview_url !== "string") return false;
-    return normalizeRepoIdentity(submission.preview_url) === submittedRepo;
+  const duplicateRepo = siblingSubmissions.some((submission) => {
+    if (typeof submission.previewUrl !== "string") return false;
+    return normalizeRepoIdentity(submission.previewUrl) === submittedRepo;
   });
 
   if (duplicateRepo) {
@@ -171,42 +171,43 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   // ── Check for existing submission (allow updates before deadline) ──
-  const { data: existingSub } = await supabaseAdmin
-    .from("submissions")
-    .select("id")
-    .eq("team_id", teamId)
-    .eq("hackathon_id", hackathonId)
-    .single();
+  const [existingSub] = await db
+    .select({ id: schema.submissions.id })
+    .from(schema.submissions)
+    .where(and(eq(schema.submissions.teamId, teamId), eq(schema.submissions.hackathonId, hackathonId)))
+    .limit(1);
 
   const timestamp = new Date().toISOString();
 
   if (existingSub) {
     // Update existing submission (re-submit with new repo link)
-    await supabaseAdmin
-      .from("submissions")
-      .update({
-        preview_url: repoUrl,
-        build_log: serializeSubmissionMeta({
-          project_url: projectUrl || repoUrl,
-          repo_url: repoUrl,
-          notes,
-          submitted_by_agent_id: agent.id,
-        }),
-        completed_at: timestamp,
-      })
-      .eq("id", existingSub.id);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.submissions)
+        .set({
+          previewUrl: repoUrl,
+          buildLog: serializeSubmissionMeta({
+            project_url: projectUrl || repoUrl,
+            repo_url: repoUrl,
+            notes,
+            submitted_by_agent_id: agent.id,
+          }),
+          completedAt: timestamp,
+        })
+        .where(eq(schema.submissions.id, existingSub.id));
 
-    await supabaseAdmin.from("activity_log").insert({
-      id: uuid(),
-      hackathon_id: hackathonId,
-      team_id: teamId,
-      agent_id: agent.id,
-      event_type: "submission_updated",
-      event_data: {
-        submission_id: existingSub.id,
-        repo_url: repoUrl,
-        project_url: projectUrl,
-      },
+      await tx.insert(schema.activityLog).values({
+        id: uuid(),
+        hackathonId,
+        teamId,
+        agentId: agent.id,
+        eventType: "submission_updated",
+        eventData: {
+          submission_id: existingSub.id,
+          repo_url: repoUrl,
+          project_url: projectUrl,
+        },
+      });
     });
 
     return success({
@@ -223,38 +224,40 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   // ── Create new submission ──
   const submissionId = uuid();
 
-  await supabaseAdmin.from("submissions").insert({
-    id: submissionId,
-    team_id: teamId,
-    hackathon_id: hackathonId,
-    status: "completed",
-    preview_url: repoUrl,
-    build_log: serializeSubmissionMeta({
-      project_url: projectUrl || repoUrl,
-      repo_url: repoUrl,
-      notes,
-      submitted_by_agent_id: agent.id,
-    }),
-    started_at: timestamp,
-    completed_at: timestamp,
-  });
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.submissions).values({
+      id: submissionId,
+      teamId,
+      hackathonId,
+      status: "completed",
+      previewUrl: repoUrl,
+      buildLog: serializeSubmissionMeta({
+        project_url: projectUrl || repoUrl,
+        repo_url: repoUrl,
+        notes,
+        submitted_by_agent_id: agent.id,
+      }),
+      startedAt: timestamp,
+      completedAt: timestamp,
+    });
 
-  await supabaseAdmin
-    .from("teams")
-    .update({ status: "submitted" })
-    .eq("id", teamId);
+    await tx
+      .update(schema.teams)
+      .set({ status: "submitted" })
+      .where(eq(schema.teams.id, teamId));
 
-  await supabaseAdmin.from("activity_log").insert({
-    id: uuid(),
-    hackathon_id: hackathonId,
-    team_id: teamId,
-    agent_id: agent.id,
-    event_type: "submission_received",
-    event_data: {
-      submission_id: submissionId,
-      repo_url: repoUrl,
-      project_url: projectUrl,
-    },
+    await tx.insert(schema.activityLog).values({
+      id: uuid(),
+      hackathonId,
+      teamId,
+      agentId: agent.id,
+      eventType: "submission_received",
+      eventData: {
+        submission_id: submissionId,
+        repo_url: repoUrl,
+        project_url: projectUrl,
+      },
+    });
   });
 
   return success({

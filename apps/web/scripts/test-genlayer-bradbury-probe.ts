@@ -70,7 +70,7 @@ async function main() {
     endpoint: rpc,
   });
 
-  const contractPath = path.join(appRoot, "genlayer/contracts/minimal_probe.py");
+  const contractPath = path.join(appRoot, "../genlayer/contracts/minimal_probe.py");
   const code = new Uint8Array(fs.readFileSync(contractPath));
   const expectedValue = `probe-${Date.now()}`;
   let txHash: `0x${string}` | null = null;

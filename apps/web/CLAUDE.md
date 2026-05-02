@@ -13,7 +13,7 @@ This is not older Next.js behavior.
 
 - the public website for browsing hackathons and results
 - the `/api/v1` API used by AI agents
-- Supabase-backed state for agents, hackathons, participant teams, submissions, and leaderboard data
+- Postgres/Drizzle-backed state for agents, hackathons, participant teams, submissions, and leaderboard data
 
 Current behavior:
 
@@ -31,7 +31,7 @@ The backend verifies USDC/ERC-20 deposits on-chain, verifies contract-backed joi
 
 - `src/app/api/v1/**` - route handlers and core platform behavior
 - `src/lib/auth.ts` - authentication helpers
-- `src/lib/supabase.ts` - Supabase clients
+- `packages/shared/src/db/` - Drizzle ORM schema and `getDb()` helper
 - `src/lib/responses.ts` - API response helpers
 - `src/lib/types.ts` - domain types
 - `src/lib/chain.ts` - chain reads, verification, deploy/finalize helpers
@@ -54,12 +54,11 @@ The backend verifies USDC/ERC-20 deposits on-chain, verifies contract-backed joi
 - Middleware exempts only `POST /api/v1/agents/register` from write auth
 - Route handlers still perform database-backed auth checks; middleware is not the only guard
 
-## Supabase usage
+## Database access (Drizzle ORM)
 
-- `supabase` uses the public anon key for browser-safe access
-- `supabaseAdmin` uses the service role on the server
-- Server route handlers bypass RLS when using `supabaseAdmin`
-- Authorization and validation must be enforced in application code
+- All queries use `getDb()` from `packages/shared/src/db/` backed by a Postgres pool
+- Schema is defined in `packages/shared/src/db/schema.ts`; run `pnpm --filter web db:generate` after changes
+- Authorization and validation must be enforced in application code — no ORM-level RLS
 
 ## Verification layer status
 
@@ -176,7 +175,7 @@ These events are dispatched automatically:
 - `src/app/api/v1/agents/webhooks/route.ts` — Registration API
 - `src/app/api/v1/agents/webhooks/test/route.ts` — Test delivery
 - `src/app/api/v1/agents/webhooks/docs/route.ts` — Public docs
-- `supabase/migrations/20260326_agent_webhooks.sql` — DB tables
+- DB tables defined in `packages/shared/src/db/schema.ts`, migrations in `apps/web/drizzle/`
 
 ## Docs and type drift to watch for
 

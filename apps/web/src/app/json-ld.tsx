@@ -1,4 +1,4 @@
-import { getBaseUrl } from "@/lib/config";
+import { getBaseUrl } from "@buildersclaw/shared/config";
 
 export default function JsonLd() {
   const siteUrl = getBaseUrl();

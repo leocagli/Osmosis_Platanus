@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { v4 as uuid } from "uuid";
-import { authenticateRequest } from "@/lib/auth";
-import { supabaseAdmin } from "@/lib/supabase";
-import { success, created, error, unauthorized } from "@/lib/responses";
-import { sanitizeString } from "@/lib/hackathons";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, created, error, unauthorized } from "@buildersclaw/shared/responses";
+import { sanitizeString } from "@buildersclaw/shared/hackathons";
 import {
   MEMBER_MIN_SHARE_PCT,
   LEADER_MIN_KEEP_PCT,
@@ -17,8 +18,8 @@ import {
   validateTeamTotalShares,
   validateSharePct,
   validateRoleType,
-} from "@/lib/validation";
-import { getMarketplaceReputationScore } from "@/lib/erc8004";
+} from "@buildersclaw/shared/validation";
+import { getMarketplaceReputationScore } from "@buildersclaw/shared/erc8004";
 
 /**
  * ═══════════════════════════════════════════════════════════════
@@ -51,7 +52,7 @@ import { getMarketplaceReputationScore } from "@/lib/erc8004";
  * CREATE INDEX idx_marketplace_listings_team ON marketplace_listings(team_id);
  */
 
-/** Share % guardrails — imported from @/lib/validation */
+/** Share % guardrails — imported from @buildersclaw/shared/validation */
 const MIN_SHARE_PCT = MEMBER_MIN_SHARE_PCT;
 const MAX_SHARE_PCT = LISTING_MAX_SHARE_PCT;
 const LEADER_MIN_KEEP = LEADER_MIN_KEEP_PCT;
@@ -64,131 +65,177 @@ const LEADER_MIN_KEEP = LEADER_MIN_KEEP_PCT;
  * ?status=        — open (default) | taken | withdrawn
  */
 export async function GET(req: NextRequest) {
+  const db = getDb();
   const hackathonId = req.nextUrl.searchParams.get("hackathon_id");
   const status = req.nextUrl.searchParams.get("status") || "open";
 
-  // Build query with joins to get team name, poster name, hackathon title
-  let query = supabaseAdmin
-    .from("marketplace_listings")
-    .select(`
-      *,
-      agents!marketplace_listings_posted_by_fkey(id, name, display_name, avatar_url, reputation_score, marketplace_reputation_score, strategy, identity_registry, identity_agent_id, identity_chain_id, identity_agent_uri, identity_wallet, identity_owner_wallet, identity_source, identity_link_status, identity_verified_at),
-      teams!marketplace_listings_team_id_fkey(id, name, status),
-      hackathons!marketplace_listings_hackathon_id_fkey(id, title, brief, prize_pool, status, ends_at, challenge_type, build_time_seconds)
-    `)
-    .eq("status", status)
-    .order("created_at", { ascending: false })
-    .limit(100);
+  try {
+    const where = hackathonId
+      ? and(eq(schema.marketplaceListings.status, status as "open" | "taken" | "withdrawn"), eq(schema.marketplaceListings.hackathonId, hackathonId))
+      : eq(schema.marketplaceListings.status, status as "open" | "taken" | "withdrawn");
 
-  if (hackathonId) query = query.eq("hackathon_id", hackathonId);
+    const listings = await db
+      .select({
+        id: schema.marketplaceListings.id,
+        hackathon_id: schema.marketplaceListings.hackathonId,
+        team_id: schema.marketplaceListings.teamId,
+        posted_by: schema.marketplaceListings.postedBy,
+        role_title: schema.marketplaceListings.roleTitle,
+        role_description: schema.marketplaceListings.roleDescription,
+        share_pct: schema.marketplaceListings.sharePct,
+        status: schema.marketplaceListings.status,
+        taken_by: schema.marketplaceListings.takenBy,
+        taken_at: schema.marketplaceListings.takenAt,
+        created_at: schema.marketplaceListings.createdAt,
+        poster: {
+          id: schema.agents.id,
+          name: schema.agents.name,
+          display_name: schema.agents.displayName,
+          avatar_url: schema.agents.avatarUrl,
+          reputation_score: schema.agents.reputationScore,
+          marketplace_reputation_score: schema.agents.marketplaceReputationScore,
+          strategy: schema.agents.strategy,
+          identity_registry: schema.agents.identityRegistry,
+          identity_agent_id: schema.agents.identityAgentId,
+          identity_chain_id: schema.agents.identityChainId,
+          identity_agent_uri: schema.agents.identityAgentUri,
+          identity_wallet: schema.agents.identityWallet,
+          identity_owner_wallet: schema.agents.identityOwnerWallet,
+          identity_source: schema.agents.identitySource,
+          identity_link_status: schema.agents.identityLinkStatus,
+          identity_verified_at: schema.agents.identityVerifiedAt,
+        },
+        team: {
+          id: schema.teams.id,
+          name: schema.teams.name,
+          status: schema.teams.status,
+        },
+        hackathon: {
+          id: schema.hackathons.id,
+          title: schema.hackathons.title,
+          brief: schema.hackathons.brief,
+          prize_pool: schema.hackathons.prizePool,
+          status: schema.hackathons.status,
+          ends_at: schema.hackathons.endsAt,
+          challenge_type: schema.hackathons.challengeType,
+          build_time_seconds: schema.hackathons.buildTimeSeconds,
+        },
+      })
+      .from(schema.marketplaceListings)
+      .innerJoin(schema.agents, eq(schema.marketplaceListings.postedBy, schema.agents.id))
+      .innerJoin(schema.teams, eq(schema.marketplaceListings.teamId, schema.teams.id))
+      .innerJoin(schema.hackathons, eq(schema.marketplaceListings.hackathonId, schema.hackathons.id))
+      .where(where)
+      .orderBy(desc(schema.marketplaceListings.createdAt))
+      .limit(100);
 
-  const { data: listings, error: queryErr } = await query;
-  if (queryErr) {
+    const posterIds = Array.from(new Set(listings.map((listing) => listing.posted_by)));
+
+    type ReputationSnapshotRow = {
+      agent_id: string;
+      trusted_feedback_count: number | null;
+      trusted_summary_value: string | null;
+      trusted_summary_decimals: number | null;
+      raw_feedback_count: number | null;
+      last_synced_at: string | null;
+    };
+
+    const reputationSnapshots = posterIds.length > 0
+      ? await db
+        .select({
+          agent_id: schema.agentReputationSnapshots.agentId,
+          trusted_feedback_count: schema.agentReputationSnapshots.trustedFeedbackCount,
+          trusted_summary_value: schema.agentReputationSnapshots.trustedSummaryValue,
+          trusted_summary_decimals: schema.agentReputationSnapshots.trustedSummaryDecimals,
+          raw_feedback_count: schema.agentReputationSnapshots.rawFeedbackCount,
+          last_synced_at: schema.agentReputationSnapshots.lastSyncedAt,
+        })
+        .from(schema.agentReputationSnapshots)
+        .where(inArray(schema.agentReputationSnapshots.agentId, posterIds))
+      : [];
+
+    const reputationSnapshotMap = new Map<string, ReputationSnapshotRow>(
+      reputationSnapshots.map((snapshot) => [snapshot.agent_id, snapshot])
+    );
+
+    const flat = listings.map((l) => {
+      const poster = l.poster;
+      const team = l.team;
+      const hackathon = l.hackathon;
+
+      return {
+        id: l.id,
+        hackathon_id: l.hackathon_id,
+        hackathon_title: hackathon?.title || null,
+        hackathon_brief: hackathon?.brief || null,
+        hackathon_prize_pool: hackathon?.prize_pool ?? 0,
+        hackathon_status: hackathon?.status || null,
+        hackathon_ends_at: hackathon?.ends_at || null,
+        hackathon_challenge_type: hackathon?.challenge_type || null,
+        hackathon_build_time: hackathon?.build_time_seconds || null,
+        team_id: l.team_id,
+        team_name: team?.name || null,
+        team_status: team?.status || null,
+        posted_by: l.posted_by,
+        poster_name: poster?.display_name || poster?.name || null,
+        poster_avatar: poster?.avatar_url || null,
+        poster_reputation: getMarketplaceReputationScore(poster || {}),
+        poster_identity: {
+          linked: !!poster?.identity_registry && !!poster?.identity_agent_id,
+          agent_registry: poster?.identity_registry || null,
+          agent_id: poster?.identity_agent_id || null,
+          chain_id: poster?.identity_chain_id || null,
+          agent_uri: poster?.identity_agent_uri || null,
+          wallet: poster?.identity_wallet || null,
+          owner_wallet: poster?.identity_owner_wallet || null,
+          source: poster?.identity_source || null,
+          link_status: poster?.identity_link_status || null,
+          verified_at: poster?.identity_verified_at || null,
+        },
+        poster_external_reputation: (() => {
+          const snapshot = reputationSnapshotMap.get(l.posted_by);
+          if (!snapshot) return null;
+          return {
+            trusted_feedback_count: snapshot.trusted_feedback_count ?? 0,
+            trusted_summary_value: snapshot.trusted_summary_value ?? null,
+            trusted_summary_decimals: snapshot.trusted_summary_decimals ?? null,
+            raw_feedback_count: snapshot.raw_feedback_count ?? 0,
+            last_synced_at: snapshot.last_synced_at ?? null,
+          };
+        })(),
+        poster_github: (() => {
+          try {
+            const s = poster?.strategy;
+            if (s) { const p = JSON.parse(s); return p?.github_username || null; }
+          } catch { /* not JSON */ }
+          return null;
+        })(),
+        role_title: l.role_title,
+        role_description: (() => {
+          try {
+            const parsed = JSON.parse(l.role_description || "{}");
+            return parsed?.description || null;
+          } catch { return l.role_description; }
+        })(),
+        repo_url: (() => {
+          try {
+            const parsed = JSON.parse(l.role_description || "{}");
+            return parsed?.repo_url || null;
+          } catch { return null; }
+        })(),
+        share_pct: l.share_pct,
+        status: l.status,
+        taken_by: l.taken_by,
+        taken_at: l.taken_at,
+        created_at: l.created_at,
+      };
+    });
+
+    return success(flat);
+  } catch (queryErr) {
     console.error("Marketplace GET failed:", queryErr);
     return error("Failed to fetch listings", 500);
   }
-
-  const posterIds = Array.from(new Set(
-    (listings || [])
-      .map((listing: Record<string, unknown>) => listing.posted_by)
-      .filter((postedBy): postedBy is string => typeof postedBy === "string"),
-  ));
-
-  type ReputationSnapshotRow = {
-    agent_id: string;
-    trusted_feedback_count: number | null;
-    trusted_summary_value: string | null;
-    trusted_summary_decimals: number | null;
-    raw_feedback_count: number | null;
-    last_synced_at: string | null;
-  };
-
-  const { data: reputationSnapshots } = posterIds.length > 0
-    ? await supabaseAdmin
-      .from("agent_reputation_snapshots")
-      .select("agent_id, trusted_feedback_count, trusted_summary_value, trusted_summary_decimals, raw_feedback_count, last_synced_at")
-      .in("agent_id", posterIds)
-    : { data: [] as ReputationSnapshotRow[] };
-
-  const reputationSnapshotMap = new Map<string, ReputationSnapshotRow>(
-    (reputationSnapshots || []).map((snapshot) => [snapshot.agent_id, snapshot as ReputationSnapshotRow])
-  );
-
-  // Flatten the joined data for a clean response
-  const flat = (listings || []).map((l: Record<string, unknown>) => {
-    const poster = l.agents as Record<string, unknown> | null;
-    const team = l.teams as Record<string, unknown> | null;
-    const hackathon = l.hackathons as Record<string, unknown> | null;
-
-    return {
-      id: l.id,
-      hackathon_id: l.hackathon_id,
-      hackathon_title: hackathon?.title || null,
-      hackathon_brief: hackathon?.brief || null,
-      hackathon_prize_pool: hackathon?.prize_pool ?? 0,
-      hackathon_status: hackathon?.status || null,
-      hackathon_ends_at: hackathon?.ends_at || null,
-      hackathon_challenge_type: hackathon?.challenge_type || null,
-      hackathon_build_time: hackathon?.build_time_seconds || null,
-      team_id: l.team_id,
-      team_name: team?.name || null,
-      team_status: team?.status || null,
-      posted_by: l.posted_by,
-      poster_name: poster?.display_name || poster?.name || null,
-      poster_avatar: poster?.avatar_url || null,
-      poster_reputation: getMarketplaceReputationScore(poster || {}),
-      poster_identity: {
-        linked: !!poster?.identity_registry && !!poster?.identity_agent_id,
-        agent_registry: poster?.identity_registry || null,
-        agent_id: poster?.identity_agent_id || null,
-        chain_id: poster?.identity_chain_id || null,
-        agent_uri: poster?.identity_agent_uri || null,
-        wallet: poster?.identity_wallet || null,
-        owner_wallet: poster?.identity_owner_wallet || null,
-        source: poster?.identity_source || null,
-        link_status: poster?.identity_link_status || null,
-        verified_at: poster?.identity_verified_at || null,
-      },
-      poster_external_reputation: (() => {
-        const snapshot = reputationSnapshotMap.get(l.posted_by as string);
-        if (!snapshot) return null;
-        return {
-          trusted_feedback_count: snapshot.trusted_feedback_count ?? 0,
-          trusted_summary_value: snapshot.trusted_summary_value ?? null,
-          trusted_summary_decimals: snapshot.trusted_summary_decimals ?? null,
-          raw_feedback_count: snapshot.raw_feedback_count ?? 0,
-          last_synced_at: snapshot.last_synced_at ?? null,
-        };
-      })(),
-      poster_github: (() => {
-        try {
-          const s = poster?.strategy as string | undefined;
-          if (s) { const p = JSON.parse(s); return p?.github_username || null; }
-        } catch { /* not JSON */ }
-        return null;
-      })(),
-      role_title: l.role_title,
-      role_description: (() => {
-        try {
-          const parsed = JSON.parse(l.role_description as string);
-          return parsed?.description || null;
-        } catch { return l.role_description; }
-      })(),
-      repo_url: (() => {
-        try {
-          const parsed = JSON.parse(l.role_description as string);
-          return parsed?.repo_url || null;
-        } catch { return null; }
-      })(),
-      share_pct: l.share_pct,
-      status: l.status,
-      taken_by: l.taken_by,
-      taken_at: l.taken_at,
-      created_at: l.created_at,
-    };
-  });
-
-  return success(flat);
 }
 
 /**
@@ -205,6 +252,7 @@ export async function GET(req: NextRequest) {
  * }
  */
 export async function POST(req: NextRequest) {
+  const db = getDb();
   const agent = await authenticateRequest(req);
   if (!agent) return unauthorized();
 
@@ -271,11 +319,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Verify hackathon is active ──
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("id, status, team_size_max")
-    .eq("id", hackathonId)
-    .single();
+  const [hackathon] = await db
+    .select({ id: schema.hackathons.id, status: schema.hackathons.status, team_size_max: schema.hackathons.teamSizeMax })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (!hackathon) return error("Hackathon not found", 404);
   if (hackathon.status !== "open" && hackathon.status !== "in_progress") {
@@ -283,11 +331,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Verify team belongs to this hackathon ──
-  const { data: team } = await supabaseAdmin
-    .from("teams")
-    .select("id, hackathon_id, name")
-    .eq("id", teamId)
-    .single();
+  const [team] = await db
+    .select({ id: schema.teams.id, hackathon_id: schema.teams.hackathonId, name: schema.teams.name })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId))
+    .limit(1);
 
   if (!team) return error("Team not found", 404);
   if (team.hackathon_id !== hackathonId) {
@@ -295,13 +343,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Verify caller is the team leader ──
-  const { data: leaderMember } = await supabaseAdmin
-    .from("team_members")
-    .select("id, role, revenue_share_pct")
-    .eq("team_id", teamId)
-    .eq("agent_id", agent.id)
-    .eq("role", "leader")
-    .single();
+  const [leaderMember] = await db
+    .select({ id: schema.teamMembers.id, role: schema.teamMembers.role, revenue_share_pct: schema.teamMembers.revenueSharePct })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.agentId, agent.id), eq(schema.teamMembers.role, "leader")))
+    .limit(1);
 
   if (!leaderMember) {
     return error("Only the team leader can post marketplace listings", 403);
@@ -312,15 +358,12 @@ export async function POST(req: NextRequest) {
   const snapshot = await getTeamShareSnapshot(teamId);
 
   // ── Cap open listings per team ──
-  const { data: existingOpenListings } = await supabaseAdmin
-    .from("marketplace_listings")
-    .select("id", { count: "exact", head: true })
-    .eq("team_id", teamId)
-    .eq("status", "open");
+  const [{ value: openCount }] = await db
+    .select({ value: count() })
+    .from(schema.marketplaceListings)
+    .where(and(eq(schema.marketplaceListings.teamId, teamId), eq(schema.marketplaceListings.status, "open")));
 
-  const openCount = existingOpenListings ?? 0;
-  // @ts-expect-error - count is available from head query
-  if ((openCount.count ?? 0) >= MAX_OPEN_LISTINGS_PER_TEAM) {
+  if (openCount >= MAX_OPEN_LISTINGS_PER_TEAM) {
     return error(`Maximum ${MAX_OPEN_LISTINGS_PER_TEAM} open listings per team. Withdraw one first.`, 400);
   }
 
@@ -346,36 +389,34 @@ export async function POST(req: NextRequest) {
   const listingId = uuid();
   const now = new Date().toISOString();
 
-  const { error: insertErr } = await supabaseAdmin
-    .from("marketplace_listings")
-    .insert({
+  try {
+    await db.insert(schema.marketplaceListings).values({
       id: listingId,
-      hackathon_id: hackathonId,
-      team_id: teamId,
-      posted_by: agent.id,
-      role_title: roleTitle,
-      role_description: JSON.stringify({
+      hackathonId,
+      teamId,
+      postedBy: agent.id,
+      roleTitle,
+      roleDescription: JSON.stringify({
         description: roleDescription,
         repo_url: repoUrl,
       }),
-      share_pct: Math.round(sharePct),
+      sharePct: Math.round(sharePct),
       status: "open",
-      created_at: now,
+      createdAt: now,
     });
-
-  if (insertErr) {
+  } catch (insertErr) {
     console.error("Marketplace listing insert failed:", insertErr);
-    return error("Failed to create listing: " + (insertErr.message || "unknown"), 500);
+    return error("Failed to create listing", 500);
   }
 
   // ── Activity log ──
-  await supabaseAdmin.from("activity_log").insert({
+  await db.insert(schema.activityLog).values({
     id: uuid(),
-    hackathon_id: hackathonId,
-    team_id: teamId,
-    agent_id: agent.id,
-    event_type: "marketplace_listing_posted",
-    event_data: {
+    hackathonId,
+    teamId,
+    agentId: agent.id,
+    eventType: "marketplace_listing_posted",
+    eventData: {
       listing_id: listingId,
       role_title: roleTitle,
       share_pct: Math.round(sharePct),
@@ -402,6 +443,7 @@ export async function POST(req: NextRequest) {
  * Body: { listing_id }
  */
 export async function DELETE(req: NextRequest) {
+  const db = getDb();
   const agent = await authenticateRequest(req);
   if (!agent) return unauthorized();
 
@@ -417,11 +459,11 @@ export async function DELETE(req: NextRequest) {
   if (!isValidUUID(listingId)) return error("Invalid listing_id format", 400);
 
   // Fetch the listing
-  const { data: listing } = await supabaseAdmin
-    .from("marketplace_listings")
-    .select("id, posted_by, status")
-    .eq("id", listingId)
-    .single();
+  const [listing] = await db
+    .select({ id: schema.marketplaceListings.id, posted_by: schema.marketplaceListings.postedBy, status: schema.marketplaceListings.status })
+    .from(schema.marketplaceListings)
+    .where(eq(schema.marketplaceListings.id, listingId))
+    .limit(1);
 
   if (!listing) return error("Listing not found", 404);
   if (listing.posted_by !== agent.id) return error("Only the poster can withdraw this listing", 403);
@@ -430,12 +472,9 @@ export async function DELETE(req: NextRequest) {
   }
 
   // Mark as withdrawn
-  const { error: updateErr } = await supabaseAdmin
-    .from("marketplace_listings")
-    .update({ status: "withdrawn" })
-    .eq("id", listingId);
-
-  if (updateErr) {
+  try {
+    await db.update(schema.marketplaceListings).set({ status: "withdrawn" }).where(eq(schema.marketplaceListings.id, listingId));
+  } catch (updateErr) {
     console.error("Marketplace listing withdraw failed:", updateErr);
     return error("Failed to withdraw listing", 500);
   }
@@ -455,6 +494,7 @@ export async function DELETE(req: NextRequest) {
  * Body: { listing_id, share_pct?, role_title?, role_description?, repo_url? }
  */
 export async function PATCH(req: NextRequest) {
+  const db = getDb();
   const agent = await authenticateRequest(req);
   if (!agent) return unauthorized();
 
@@ -470,11 +510,11 @@ export async function PATCH(req: NextRequest) {
   if (!isValidUUID(listingId)) return error("Invalid listing_id format", 400);
 
   // Fetch the listing
-  const { data: listing } = await supabaseAdmin
-    .from("marketplace_listings")
-    .select("id, posted_by, status, team_id, share_pct")
-    .eq("id", listingId)
-    .single();
+  const [listing] = await db
+    .select({ id: schema.marketplaceListings.id, posted_by: schema.marketplaceListings.postedBy, status: schema.marketplaceListings.status, team_id: schema.marketplaceListings.teamId, share_pct: schema.marketplaceListings.sharePct })
+    .from(schema.marketplaceListings)
+    .where(eq(schema.marketplaceListings.id, listingId))
+    .limit(1);
 
   if (!listing) return error("Listing not found", 404);
   if (listing.posted_by !== agent.id) return error("Only the poster can edit this listing", 403);
@@ -525,11 +565,11 @@ export async function PATCH(req: NextRequest) {
   if (body.role_description !== undefined || body.repo_url !== undefined) {
     // Parse existing description
     let existing: Record<string, unknown> = {};
-    const { data: fullListing } = await supabaseAdmin
-      .from("marketplace_listings")
-      .select("role_description")
-      .eq("id", listingId)
-      .single();
+    const [fullListing] = await db
+      .select({ role_description: schema.marketplaceListings.roleDescription })
+      .from(schema.marketplaceListings)
+      .where(eq(schema.marketplaceListings.id, listingId))
+      .limit(1);
 
     if (fullListing?.role_description) {
       try {
@@ -551,13 +591,14 @@ export async function PATCH(req: NextRequest) {
     return error("No valid fields to update. Editable: share_pct, role_title, role_description, repo_url", 400);
   }
 
-  const { error: updateErr } = await supabaseAdmin
-    .from("marketplace_listings")
-    .update(updates)
-    .eq("id", listingId)
-    .eq("status", "open"); // Optimistic lock
+  const drizzleUpdates: Partial<typeof schema.marketplaceListings.$inferInsert> = {};
+  if (typeof updates.share_pct === "number") drizzleUpdates.sharePct = updates.share_pct;
+  if (typeof updates.role_title === "string") drizzleUpdates.roleTitle = updates.role_title;
+  if (typeof updates.role_description === "string") drizzleUpdates.roleDescription = updates.role_description;
 
-  if (updateErr) {
+  try {
+    await db.update(schema.marketplaceListings).set(drizzleUpdates).where(and(eq(schema.marketplaceListings.id, listingId), eq(schema.marketplaceListings.status, "open")));
+  } catch (updateErr) {
     console.error("Marketplace listing edit failed:", updateErr);
     return error("Failed to update listing", 500);
   }

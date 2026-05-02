@@ -1,14 +1,80 @@
 import { v4 as uuid } from "uuid";
+import { and, count, eq, max } from "drizzle-orm";
 import { formatUnits } from "viem";
-import { supabaseAdmin } from "@/lib/supabase";
-import { getContractPrizePool } from "@/lib/chain";
-import { telegramTeamCreated } from "@/lib/telegram";
-import type { Agent } from "@/lib/types";
+import { getContractPrizePool } from "./chain";
+import { getDb, schema } from "./db";
+import { telegramTeamCreated } from "./telegram";
+import type { Agent } from "./types";
 
 const META_VERSION = "buildersclaw-mvp-v1";
 const TEAM_COLORS = ["#00c2a8", "#ff8a00", "#ff5c7a", "#5b8cff", "#7a5cff", "#17b26a"];
 
 type JsonObject = Record<string, unknown>;
+
+const hackathonSelect = {
+  id: schema.hackathons.id,
+  title: schema.hackathons.title,
+  description: schema.hackathons.description,
+  brief: schema.hackathons.brief,
+  rules: schema.hackathons.rules,
+  entry_type: schema.hackathons.entryType,
+  entry_fee: schema.hackathons.entryFee,
+  prize_pool: schema.hackathons.prizePool,
+  platform_fee_pct: schema.hackathons.platformFeePct,
+  max_participants: schema.hackathons.maxParticipants,
+  team_size_min: schema.hackathons.teamSizeMin,
+  team_size_max: schema.hackathons.teamSizeMax,
+  build_time_seconds: schema.hackathons.buildTimeSeconds,
+  challenge_type: schema.hackathons.challengeType,
+  status: schema.hackathons.status,
+  created_by: schema.hackathons.createdBy,
+  starts_at: schema.hackathons.startsAt,
+  ends_at: schema.hackathons.endsAt,
+  judging_criteria: schema.hackathons.judgingCriteria,
+  github_repo: schema.hackathons.githubRepo,
+  created_at: schema.hackathons.createdAt,
+  updated_at: schema.hackathons.updatedAt,
+};
+
+const teamSelect = {
+  id: schema.teams.id,
+  hackathon_id: schema.teams.hackathonId,
+  name: schema.teams.name,
+  color: schema.teams.color,
+  floor_number: schema.teams.floorNumber,
+  status: schema.teams.status,
+  telegram_chat_id: schema.teams.telegramChatId,
+  created_by: schema.teams.createdBy,
+  created_at: schema.teams.createdAt,
+};
+
+const submissionSelect = {
+  id: schema.submissions.id,
+  team_id: schema.submissions.teamId,
+  hackathon_id: schema.submissions.hackathonId,
+  html_content: schema.submissions.htmlContent,
+  preview_url: schema.submissions.previewUrl,
+  build_log: schema.submissions.buildLog,
+  status: schema.submissions.status,
+  files: schema.submissions.files,
+  project_type: schema.submissions.projectType,
+  file_count: schema.submissions.fileCount,
+  languages: schema.submissions.languages,
+  started_at: schema.submissions.startedAt,
+  completed_at: schema.submissions.completedAt,
+  created_at: schema.submissions.createdAt,
+};
+
+const teamMemberSelect = {
+  id: schema.teamMembers.id,
+  team_id: schema.teamMembers.teamId,
+  agent_id: schema.teamMembers.agentId,
+  role: schema.teamMembers.role,
+  revenue_share_pct: schema.teamMembers.revenueSharePct,
+  joined_via: schema.teamMembers.joinedVia,
+  status: schema.teamMembers.status,
+  joined_at: schema.teamMembers.joinedAt,
+};
 
 export interface HackathonMeta {
   chain_id: number | null;
@@ -252,17 +318,21 @@ export async function calculatePrizePool(hackathonId: string): Promise<{
   sponsored: boolean;
   currency?: string;
 }> {
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons").select("entry_fee, judging_criteria").eq("id", hackathonId).single();
+  const db = getDb();
+  const [hackathon] = await db
+    .select({ entry_fee: schema.hackathons.entryFee, judging_criteria: schema.hackathons.judgingCriteria })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   const entryFee = hackathon?.entry_fee ?? 0;
 
-  const { count } = await supabaseAdmin
-    .from("teams")
-    .select("*", { count: "exact", head: true })
-    .eq("hackathon_id", hackathonId);
+  const [participantCountRow] = await db
+    .select({ count: count() })
+    .from(schema.teams)
+    .where(eq(schema.teams.hackathonId, hackathonId));
 
-  const participantCount = count || 0;
+  const participantCount = participantCountRow?.count || 0;
 
   // Sponsored mode: entry_fee is 0 and contract holds the bounty
   if (entryFee === 0) {
@@ -375,89 +445,88 @@ export async function createSingleAgentTeam(options: {
   txHash?: string | null;
 }) {
   const { hackathonId, agent, wallet, txHash } = options;
+  const db = getDb();
 
-  const { data: existingMembership } = await supabaseAdmin
-    .from("team_members")
-    .select("team_id, teams!inner(*)")
-    .eq("agent_id", agent.id)
-    .eq("teams.hackathon_id", hackathonId)
-    .single();
+  const [existingTeam] = await db
+    .select(teamSelect)
+    .from(schema.teamMembers)
+    .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+    .where(and(eq(schema.teamMembers.agentId, agent.id), eq(schema.teams.hackathonId, hackathonId)))
+    .limit(1);
 
-  if (existingMembership) {
-    const existingTeamValue = existingMembership.teams as unknown;
-    const existingTeam = Array.isArray(existingTeamValue)
-      ? (existingTeamValue[0] as JsonObject | undefined) ?? null
-      : (existingTeamValue as JsonObject | null);
+  if (existingTeam) {
     return {
       team: existingTeam,
       existed: true,
     };
   }
 
-  const { data: maxFloorData } = await supabaseAdmin
-    .from("teams")
-    .select("floor_number")
-    .eq("hackathon_id", hackathonId)
-    .order("floor_number", { ascending: false })
-    .limit(1);
+  const { team, teamName, teamId, hackathonTitle } = await db.transaction(async (tx) => {
+    const [maxFloorData] = await tx
+      .select({ floor_number: max(schema.teams.floorNumber) })
+      .from(schema.teams)
+      .where(eq(schema.teams.hackathonId, hackathonId));
 
-  const floorNumber = (maxFloorData?.[0]?.floor_number || 0) + 1;
-  const teamId = uuid();
-  const teamName =
-    sanitizeString(options.name, 120) ||
-    sanitizeString(agent.display_name, 120) ||
-    sanitizeString(agent.name, 120) ||
-    `participant-${floorNumber}`;
+    const floorNumber = (maxFloorData?.floor_number || 0) + 1;
+    const teamId = uuid();
+    const teamName =
+      sanitizeString(options.name, 120) ||
+      sanitizeString(agent.display_name, 120) ||
+      sanitizeString(agent.name, 120) ||
+      `participant-${floorNumber}`;
 
-  await supabaseAdmin.from("teams").insert({
-    id: teamId,
-    hackathon_id: hackathonId,
-    name: teamName,
-    color: sanitizeString(options.color, 32) || pickTeamColor(agent.id),
-    floor_number: floorNumber,
-    status: "ready",
-    created_by: agent.id,
+    const [team] = await tx
+      .insert(schema.teams)
+      .values({
+        id: teamId,
+        hackathonId,
+        name: teamName,
+        color: sanitizeString(options.color, 32) || pickTeamColor(agent.id),
+        floorNumber,
+        status: "ready",
+        createdBy: agent.id,
+      })
+      .returning(teamSelect);
+
+    await tx.insert(schema.teamMembers).values({
+      id: uuid(),
+      teamId,
+      agentId: agent.id,
+      role: "leader",
+      revenueSharePct: 100,
+      joinedVia: "direct",
+    });
+
+    if (wallet) {
+      await tx.update(schema.agents).set({ walletAddress: wallet }).where(eq(schema.agents.id, agent.id));
+    }
+
+    await tx.insert(schema.activityLog).values({
+      id: uuid(),
+      hackathonId,
+      teamId,
+      agentId: agent.id,
+      eventType: "hackathon_joined",
+      eventData: {
+        team_name: teamName,
+        wallet: wallet ?? agent.wallet_address ?? null,
+        tx_hash: txHash ?? null,
+      },
+    });
+
+    const [hackathonData] = await tx
+      .select({ title: schema.hackathons.title })
+      .from(schema.hackathons)
+      .where(eq(schema.hackathons.id, hackathonId))
+      .limit(1);
+
+    return { team, teamName, teamId, hackathonTitle: hackathonData?.title || "Hackathon" };
   });
-
-  await supabaseAdmin.from("team_members").insert({
-    id: uuid(),
-    team_id: teamId,
-    agent_id: agent.id,
-    role: "leader",
-    revenue_share_pct: 100,
-    joined_via: "direct",
-  });
-
-  if (wallet) {
-    await supabaseAdmin.from("agents").update({ wallet_address: wallet }).eq("id", agent.id);
-  }
-
-  await supabaseAdmin.from("activity_log").insert({
-    id: uuid(),
-    hackathon_id: hackathonId,
-    team_id: teamId,
-    agent_id: agent.id,
-    event_type: "hackathon_joined",
-    event_data: {
-      team_name: teamName,
-      wallet: wallet ?? agent.wallet_address ?? null,
-      tx_hash: txHash ?? null,
-    },
-  });
-
-  const { data: team } = await supabaseAdmin.from("teams").select("*").eq("id", teamId).single();
-
-  // Auto-create Telegram topic for the team (fire-and-forget)
-  const { data: hackathonData } = await supabaseAdmin
-    .from("hackathons")
-    .select("title")
-    .eq("id", hackathonId)
-    .single();
 
   telegramTeamCreated({
     teamId,
     teamName,
-    hackathonTitle: hackathonData?.title || "Hackathon",
+    hackathonTitle,
     hackathonId,
     leaderName: agent.display_name || agent.name,
   }).catch((err) => console.error("[TELEGRAM] Auto-topic failed:", err));
@@ -466,45 +535,47 @@ export async function createSingleAgentTeam(options: {
 }
 
 export async function loadHackathonLeaderboard(hackathonId: string) {
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons")
-    .select("*")
-    .eq("id", hackathonId)
-    .single();
+  const db = getDb();
+  const [hackathon] = await db
+    .select(hackathonSelect)
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
 
   if (!hackathon) return null;
 
   const meta = parseHackathonMeta(hackathon.judging_criteria);
 
-  const { data: teams } = await supabaseAdmin
-    .from("teams")
-    .select("*")
-    .eq("hackathon_id", hackathonId)
-    .order("floor_number", { ascending: true });
+  const teams = await db
+    .select(teamSelect)
+    .from(schema.teams)
+    .where(eq(schema.teams.hackathonId, hackathonId))
+    .orderBy(schema.teams.floorNumber);
 
   const ranked = await Promise.all(
-    (teams || []).map(async (team) => {
-      const { data: submission } = await supabaseAdmin
-        .from("submissions")
-        .select("*")
-        .eq("team_id", team.id)
-        .eq("hackathon_id", hackathonId)
-        .single();
+    teams.map(async (team) => {
+      const [submission] = await db
+        .select(submissionSelect)
+        .from(schema.submissions)
+        .where(and(eq(schema.submissions.teamId, team.id), eq(schema.submissions.hackathonId, hackathonId)))
+        .limit(1);
 
-      const { data: members } = await supabaseAdmin
-        .from("team_members")
-        .select("*, agents(name, display_name, avatar_url)")
-        .eq("team_id", team.id)
-        .order("joined_at", { ascending: true });
+      const members = await db
+        .select({
+          ...teamMemberSelect,
+          agent_name: schema.agents.name,
+          agent_display_name: schema.agents.displayName,
+          agent_avatar_url: schema.agents.avatarUrl,
+        })
+        .from(schema.teamMembers)
+        .leftJoin(schema.agents, eq(schema.teamMembers.agentId, schema.agents.id))
+        .where(eq(schema.teamMembers.teamId, team.id))
+        .orderBy(schema.teamMembers.joinedAt);
 
-      const flatMembers: Array<JsonObject & { agent_id?: string }> = (members || []).map((member: JsonObject) => {
-        const linkedAgent = member.agents as JsonObject | null;
+      const flatMembers: Array<JsonObject & { agent_id?: string }> = members.map((member) => {
         return {
           ...member,
           agents: undefined,
-          agent_name: linkedAgent?.name,
-          agent_display_name: linkedAgent?.display_name,
-          agent_avatar_url: linkedAgent?.avatar_url,
         };
       });
 
@@ -514,11 +585,15 @@ export async function loadHackathonLeaderboard(hackathonId: string) {
       let aiScore = null;
       let rawResponse = null;
       if (submission?.id) {
-        const { data: evalData } = await supabaseAdmin
-          .from("evaluations")
-          .select("total_score, judge_feedback, raw_response")
-          .eq("submission_id", submission.id)
-          .single();
+        const [evalData] = await db
+          .select({
+            total_score: schema.evaluations.totalScore,
+            judge_feedback: schema.evaluations.judgeFeedback,
+            raw_response: schema.evaluations.rawResponse,
+          })
+          .from(schema.evaluations)
+          .where(eq(schema.evaluations.submissionId, submission.id))
+          .limit(1);
         if (evalData) {
           aiScore = evalData;
           try {

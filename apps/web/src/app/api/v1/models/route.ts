@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
 import { listModels } from "@/lib/openrouter";
-import { success, error, unauthorized } from "@/lib/responses";
-import { PLATFORM_FEE_PCT } from "@/lib/balance";
+import { success, error, unauthorized } from "@buildersclaw/shared/responses";
+import { PLATFORM_FEE_PCT } from "@buildersclaw/shared/balance";
 
 /**
  * GET /api/v1/models — List available OpenRouter models with pricing.

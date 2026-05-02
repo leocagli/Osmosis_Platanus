@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { supabaseAdmin } from "@/lib/supabase";
-import { error, notFound, success } from "@/lib/responses";
-import { createOrReuseJudgingRun } from "@/lib/judging-runs";
+import { eq } from "drizzle-orm";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { error, notFound, success } from "@buildersclaw/shared/responses";
+import { createOrReuseJudgingRun } from "@buildersclaw/shared/judging-runs";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -18,13 +19,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!agent) return error("Authentication required", 401, "Add 'Authorization: Bearer buildersclaw_...' header.");
   const { id } = await params;
 
-  const { data: hackathon, error: fetchErr } = await supabaseAdmin
-    .from("hackathons")
-    .select("id, status, ends_at")
-    .eq("id", id)
-    .single();
+  const [hackathon] = await getDb()
+    .select({ id: schema.hackathons.id, status: schema.hackathons.status, ends_at: schema.hackathons.endsAt })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, id))
+    .limit(1);
 
-  if (fetchErr || !hackathon) return notFound("Hackathon");
+  if (!hackathon) return notFound("Hackathon");
 
   if (hackathon.status === "completed") {
     return success({ status: "finalized", already: true });

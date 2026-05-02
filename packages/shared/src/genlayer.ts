@@ -23,6 +23,7 @@ const GENLAYER_PK  = process.env.GENLAYER_PRIVATE_KEY || "";
 const GENLAYER_CHAIN = (process.env.GENLAYER_CHAIN || "bradbury").trim().toLowerCase();
 const GENLAYER_RPC_RETRY_ATTEMPTS = 4;
 const GENLAYER_RPC_RETRY_INTERVAL_MS = 1500;
+const GENLAYER_JUDGE_CONTRACT = "contracts/hackathon_judge.py";
 
 // ─── Types ───
 
@@ -75,6 +76,22 @@ function getChain() {
     default:
       throw new Error(`Unsupported GENLAYER_CHAIN \"${GENLAYER_CHAIN}\"`);
   }
+}
+
+async function resolveGenLayerContractPath(): Promise<string> {
+  const { existsSync } = await import("fs");
+  const { resolve } = await import("path");
+  const candidates = [
+    resolve(process.cwd(), "apps/genlayer", GENLAYER_JUDGE_CONTRACT),
+    resolve(process.cwd(), "../genlayer", GENLAYER_JUDGE_CONTRACT),
+    resolve(process.cwd(), "genlayer", GENLAYER_JUDGE_CONTRACT),
+  ];
+
+  const contractPath = candidates.find((path) => existsSync(path));
+  if (!contractPath) {
+    throw new Error(`[GenLayer] Contract not found. Checked: ${candidates.join(", ")}`);
+  }
+  return contractPath;
 }
 
 async function makeClient() {
@@ -240,12 +257,7 @@ async function deployJudgeContract(
   brief: string,
 ): Promise<{ contractAddress: string; txHash: string }> {
   const { readFileSync } = await import("fs");
-  const { resolve } = await import("path");
-
-  const contractPath = resolve(
-    process.cwd(),
-    "genlayer/contracts/hackathon_judge.py",
-  );
+  const contractPath = await resolveGenLayerContractPath();
 
   const contractCode = new Uint8Array(readFileSync(contractPath));
 
@@ -365,9 +377,7 @@ export async function startGenLayerDeployment(
   hackathonBrief: string,
 ): Promise<{ txHash: string }> {
   const { readFileSync } = await import("fs");
-  const { resolve } = await import("path");
-
-  const contractPath = resolve(process.cwd(), "genlayer/contracts/hackathon_judge.py");
+  const contractPath = await resolveGenLayerContractPath();
   const contractCode = new Uint8Array(readFileSync(contractPath));
   const { client } = await makeClient();
 

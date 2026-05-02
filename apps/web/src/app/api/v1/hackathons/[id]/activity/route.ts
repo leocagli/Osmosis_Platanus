@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { success, notFound } from "@/lib/responses";
+import { and, desc, eq, gt } from "drizzle-orm";
+import { getDb, schema } from "@buildersclaw/shared/db";
+import { success, notFound } from "@buildersclaw/shared/responses";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -9,38 +10,55 @@ type RouteParams = { params: Promise<{ id: string }> };
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { id: hackathonId } = await params;
+  const db = getDb();
 
-  const { data: hackathon } = await supabaseAdmin
-    .from("hackathons").select("id").eq("id", hackathonId).single();
+  const [hackathon] = await db
+    .select({ id: schema.hackathons.id })
+    .from(schema.hackathons)
+    .where(eq(schema.hackathons.id, hackathonId))
+    .limit(1);
   if (!hackathon) return notFound("Hackathon");
 
   const since = req.nextUrl.searchParams.get("since");
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") || "50"), 200);
 
-  let query = supabaseAdmin
-    .from("activity_log")
-    .select("*, agents(name, display_name), teams(name, color)")
-    .eq("hackathon_id", hackathonId)
-    .order("created_at", { ascending: false })
+  const where = since
+    ? and(eq(schema.activityLog.hackathonId, hackathonId), gt(schema.activityLog.createdAt, since))
+    : eq(schema.activityLog.hackathonId, hackathonId);
+
+  const events = await db
+    .select({
+      id: schema.activityLog.id,
+      hackathon_id: schema.activityLog.hackathonId,
+      team_id: schema.activityLog.teamId,
+      agent_id: schema.activityLog.agentId,
+      event_type: schema.activityLog.eventType,
+      event_data: schema.activityLog.eventData,
+      created_at: schema.activityLog.createdAt,
+      agents: {
+        name: schema.agents.name,
+        display_name: schema.agents.displayName,
+      },
+      teams: {
+        name: schema.teams.name,
+        color: schema.teams.color,
+      },
+    })
+    .from(schema.activityLog)
+    .leftJoin(schema.agents, eq(schema.activityLog.agentId, schema.agents.id))
+    .leftJoin(schema.teams, eq(schema.activityLog.teamId, schema.teams.id))
+    .where(where)
+    .orderBy(desc(schema.activityLog.createdAt))
     .limit(limit);
 
-  if (since) {
-    query = query.gt("created_at", since);
-  }
-
-  const { data: events } = await query;
-
-  // Flatten joined data
-  const flat = (events || []).map((e: Record<string, unknown>) => {
-    const agent = e.agents as Record<string, unknown> | null;
-    const team = e.teams as Record<string, unknown> | null;
-    return {
-      ...e,
-      agents: undefined, teams: undefined,
-      agent_name: agent?.name, agent_display_name: agent?.display_name,
-      team_name: team?.name, team_color: team?.color,
-    };
-  });
+  // Flatten joined data to match the previous Supabase response shape.
+  const flat = events.map(({ agents, teams, ...event }) => ({
+    ...event,
+    agent_name: agents?.name,
+    agent_display_name: agents?.display_name,
+    team_name: teams?.name,
+    team_color: teams?.color,
+  }));
 
   return success(flat);
 }

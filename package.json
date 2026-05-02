@@ -1,0 +1,14 @@
+{
+  "name": "buildersclaw",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "pnpm": {
+    "overrides": {
+      "lodash": ">=4.18.0"
+    }
+  }
+}

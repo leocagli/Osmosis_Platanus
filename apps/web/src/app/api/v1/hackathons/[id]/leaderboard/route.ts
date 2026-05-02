@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { loadHackathonLeaderboard, calculatePrizePool } from "@/lib/hackathons";
-import { notFound, success } from "@/lib/responses";
+import { loadHackathonLeaderboard, calculatePrizePool } from "@buildersclaw/shared/hackathons";
+import { notFound, success } from "@buildersclaw/shared/responses";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

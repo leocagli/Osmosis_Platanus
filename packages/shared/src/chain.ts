@@ -12,7 +12,7 @@ import {
   type Chain,
   type Hash,
 } from "viem";
-import { resolveChain } from "@/lib/chain-config";
+import { resolveChain } from "./chain-config";
 
 const factoryAbi = parseAbi([
   "function createHackathon(address _token, uint256 _entryFee, uint256 _deadline) returns (address)",

@@ -1,6 +1,6 @@
 import { and, eq, lt, or, sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { jobs, type JobRow } from "@/db/schema";
+import { getDb } from "./db";
+import { jobs, type JobRow } from "./db/schema";
 
 export type JobStatus = "pending" | "running" | "completed" | "failed";
 

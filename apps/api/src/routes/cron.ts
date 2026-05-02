@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import type { FastifyInstance } from "fastify";
-import { processExpiredHackathons, processQueuedGenLayerHackathons } from "../../../web/src/lib/judge-trigger";
+import { processExpiredHackathons, processQueuedGenLayerHackathons } from "@buildersclaw/shared/judge-trigger";
 
 export async function cronRoutes(fastify: FastifyInstance) {
   fastify.get("/api/v1/cron/judge", async (req, reply) => {

@@ -11,8 +11,9 @@
  * ═══════════════════════════════════════════════════════════════
  */
 
-import { supabaseAdmin } from "./supabase";
+import { and, desc, eq } from "drizzle-orm";
 import { isAddress, getAddress } from "viem";
+import { getDb, schema } from "./db";
 
 // ─── Constants ───
 
@@ -88,14 +89,20 @@ export function validateWalletAddress(address: unknown): string | null {
  * Includes members AND pending open listings.
  */
 export async function getTeamShareSnapshot(teamId: string): Promise<TeamShareSnapshot> {
-  // Fetch all active team members
-  const { data: members } = await supabaseAdmin
-    .from("team_members")
-    .select("id, agent_id, role, revenue_share_pct")
-    .eq("team_id", teamId)
-    .eq("status", "active");
+  const db = getDb();
 
-  const membersList = (members || []).map((m) => ({
+  // Fetch all active team members
+  const members = await db
+    .select({
+      id: schema.teamMembers.id,
+      agent_id: schema.teamMembers.agentId,
+      role: schema.teamMembers.role,
+      revenue_share_pct: schema.teamMembers.revenueSharePct,
+    })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.status, "active")));
+
+  const membersList = members.map((m) => ({
     id: m.id,
     agent_id: m.agent_id,
     role: m.role as string,
@@ -103,13 +110,12 @@ export async function getTeamShareSnapshot(teamId: string): Promise<TeamShareSna
   }));
 
   // Sum share_pct of open listings (committed but not yet claimed)
-  const { data: openListings } = await supabaseAdmin
-    .from("marketplace_listings")
-    .select("share_pct")
-    .eq("team_id", teamId)
-    .eq("status", "open");
+  const openListings = await db
+    .select({ share_pct: schema.marketplaceListings.sharePct })
+    .from(schema.marketplaceListings)
+    .where(and(eq(schema.marketplaceListings.teamId, teamId), eq(schema.marketplaceListings.status, "open")));
 
-  const openListingsPct = (openListings || []).reduce(
+  const openListingsPct = openListings.reduce(
     (sum, l) => sum + (l.share_pct || 0),
     0
   );
@@ -187,13 +193,19 @@ export async function enforceShareIntegrity(teamId: string): Promise<{
   corrected: boolean;
   issues: string[];
 }> {
-  const { data: members } = await supabaseAdmin
-    .from("team_members")
-    .select("id, agent_id, role, revenue_share_pct")
-    .eq("team_id", teamId)
-    .eq("status", "active");
+  const db = getDb();
 
-  if (!members || members.length === 0) {
+  const members = await db
+    .select({
+      id: schema.teamMembers.id,
+      agent_id: schema.teamMembers.agentId,
+      role: schema.teamMembers.role,
+      revenue_share_pct: schema.teamMembers.revenueSharePct,
+    })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.status, "active")));
+
+  if (members.length === 0) {
     return { valid: false, corrected: false, issues: ["Team has no active members"] };
   }
 
@@ -238,10 +250,12 @@ export async function enforceShareIntegrity(teamId: string): Promise<{
   }
 
   // Apply correction
-  await supabaseAdmin
-    .from("team_members")
-    .update({ revenue_share_pct: correctedLeaderPct })
-    .eq("id", leader.id);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.teamMembers)
+      .set({ revenueSharePct: correctedLeaderPct })
+      .where(eq(schema.teamMembers.id, leader.id));
+  });
 
   console.warn(
     `[SHARE_INTEGRITY] Auto-corrected team ${teamId}: leader share ${leader.revenue_share_pct}% → ${correctedLeaderPct}%`
@@ -261,18 +275,18 @@ export async function enforceShareIntegrity(teamId: string): Promise<{
  * Called after a marketplace claim to clean up stale listings.
  */
 export async function autoWithdrawInvalidListings(teamId: string): Promise<string[]> {
+  const db = getDb();
   const snapshot = await getTeamShareSnapshot(teamId);
   const withdrawnIds: string[] = [];
 
   // Get all open listings for this team, ordered by newest first
-  const { data: openListings } = await supabaseAdmin
-    .from("marketplace_listings")
-    .select("id, share_pct")
-    .eq("team_id", teamId)
-    .eq("status", "open")
-    .order("created_at", { ascending: false });
+  const openListings = await db
+    .select({ id: schema.marketplaceListings.id, share_pct: schema.marketplaceListings.sharePct })
+    .from(schema.marketplaceListings)
+    .where(and(eq(schema.marketplaceListings.teamId, teamId), eq(schema.marketplaceListings.status, "open")))
+    .orderBy(desc(schema.marketplaceListings.createdAt));
 
-  if (!openListings || openListings.length === 0) return withdrawnIds;
+  if (openListings.length === 0) return withdrawnIds;
 
   // Calculate how much share the leader has available
   // (leader's current share minus LEADER_MIN_KEEP_PCT)
@@ -285,13 +299,13 @@ export async function autoWithdrawInvalidListings(teamId: string): Promise<strin
       remainingBudget -= listing.share_pct;
     } else {
       // This listing can't be fulfilled — auto-withdraw it
-      const { error } = await supabaseAdmin
-        .from("marketplace_listings")
-        .update({ status: "withdrawn" })
-        .eq("id", listing.id)
-        .eq("status", "open"); // Optimistic lock
+      const updated = await db
+        .update(schema.marketplaceListings)
+        .set({ status: "withdrawn" })
+        .where(and(eq(schema.marketplaceListings.id, listing.id), eq(schema.marketplaceListings.status, "open")))
+        .returning({ id: schema.marketplaceListings.id }); // Optimistic lock
 
-      if (!error) {
+      if (updated.length > 0) {
         withdrawnIds.push(listing.id);
         console.warn(
           `[MARKETPLACE] Auto-withdrew listing ${listing.id} (${listing.share_pct}%) — ` +
@@ -701,14 +715,16 @@ export async function checkAgentNotAlreadyInHackathon(
   agentId: string,
   hackathonId: string
 ): Promise<{ alreadyIn: boolean; teamId: string | null; role: string | null }> {
-  const { data: existing } = await supabaseAdmin
-    .from("team_members")
-    .select("team_id, role, teams!inner(hackathon_id)")
-    .eq("agent_id", agentId)
-    .eq("teams.hackathon_id", hackathonId)
+  const db = getDb();
+
+  const existing = await db
+    .select({ team_id: schema.teamMembers.teamId, role: schema.teamMembers.role })
+    .from(schema.teamMembers)
+    .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+    .where(and(eq(schema.teamMembers.agentId, agentId), eq(schema.teams.hackathonId, hackathonId)))
     .limit(1);
 
-  if (existing && existing.length > 0) {
+  if (existing.length > 0) {
     return { alreadyIn: true, teamId: existing[0].team_id, role: existing[0].role };
   }
   return { alreadyIn: false, teamId: null, role: null };

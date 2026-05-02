@@ -26,7 +26,18 @@
  */
 
 import crypto from "crypto";
-import { supabaseAdmin } from "./supabase";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { getDb } from "./db";
+import {
+  agentWebhooks,
+  agents as agentsTable,
+  hackathons,
+  submissions,
+  teamMembers,
+  teams,
+  webhookDeliveries,
+  type JsonRecord,
+} from "./db/schema";
 import { enqueueJob } from "./queue";
 
 // ─── Types ───
@@ -91,6 +102,26 @@ export interface WebhookConfig {
   failure_count: number;
   created_at: string;
   updated_at: string;
+}
+
+type AgentWebhookRow = typeof agentWebhooks.$inferSelect;
+
+function toWebhookConfig(row: AgentWebhookRow): WebhookConfig {
+  return {
+    agent_id: row.agentId,
+    webhook_url: row.webhookUrl,
+    webhook_secret: row.webhookSecret,
+    events: row.events as WebhookEventType[],
+    active: row.active,
+    last_delivery_at: row.lastDeliveryAt,
+    failure_count: row.failureCount,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
+
+function toJsonRecord(value: unknown): JsonRecord {
+  return value as JsonRecord;
 }
 
 // ─── Known Commands ───
@@ -194,75 +225,75 @@ export async function upsertWebhookConfig(
     throw new Error(`Invalid webhook URL: ${(err as Error).message}`);
   }
 
-  // Check if config already exists
-  const { data: existing } = await supabaseAdmin
-    .from("agent_webhooks")
-    .select("*")
-    .eq("agent_id", agentId)
-    .single();
+  return getDb().transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(agentWebhooks)
+      .where(eq(agentWebhooks.agentId, agentId))
+      .limit(1);
 
-  const secret = existing?.webhook_secret || crypto.randomBytes(32).toString("hex");
+    const secret = existing?.webhookSecret || crypto.randomBytes(32).toString("hex");
 
-  if (existing) {
-    // Update
-    const { data: updated, error } = await supabaseAdmin
-      .from("agent_webhooks")
-      .update({
-        webhook_url: webhookUrl,
-        events: events || existing.events || [],
+    if (existing) {
+      const [updated] = await tx
+        .update(agentWebhooks)
+        .set({
+          webhookUrl,
+          events: events || existing.events || [],
+          active: true,
+          failureCount: 0, // Reset on re-register
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(agentWebhooks.agentId, agentId))
+        .returning();
+
+      if (!updated) throw new Error("Failed to update webhook");
+      return { config: toWebhookConfig(updated), secret, isNew: false };
+    }
+
+    const [created] = await tx
+      .insert(agentWebhooks)
+      .values({
+        agentId,
+        webhookUrl,
+        webhookSecret: secret,
+        events: events || [],
         active: true,
-        failure_count: 0, // Reset on re-register
-        updated_at: new Date().toISOString(),
+        failureCount: 0,
       })
-      .eq("agent_id", agentId)
-      .select("*")
-      .single();
+      .returning();
 
-    if (error) throw new Error(`Failed to update webhook: ${error.message}`);
-    return { config: updated as WebhookConfig, secret, isNew: false };
-  }
-
-  // Create new
-  const { data: created, error } = await supabaseAdmin
-    .from("agent_webhooks")
-    .insert({
-      agent_id: agentId,
-      webhook_url: webhookUrl,
-      webhook_secret: secret,
-      events: events || [],
-      active: true,
-      failure_count: 0,
-    })
-    .select("*")
-    .single();
-
-  if (error) throw new Error(`Failed to create webhook: ${error.message}`);
-  return { config: created as WebhookConfig, secret, isNew: true };
+    if (!created) throw new Error("Failed to create webhook");
+    return { config: toWebhookConfig(created), secret, isNew: true };
+  });
 }
 
 /**
  * Get webhook config for an agent.
  */
 export async function getWebhookConfig(agentId: string): Promise<WebhookConfig | null> {
-  const { data } = await supabaseAdmin
-    .from("agent_webhooks")
-    .select("*")
-    .eq("agent_id", agentId)
-    .single();
+  const [row] = await getDb()
+    .select()
+    .from(agentWebhooks)
+    .where(eq(agentWebhooks.agentId, agentId))
+    .limit(1);
 
-  return data as WebhookConfig | null;
+  return row ? toWebhookConfig(row) : null;
 }
 
 /**
  * Deactivate an agent's webhook.
  */
 export async function deactivateWebhook(agentId: string): Promise<boolean> {
-  const { error } = await supabaseAdmin
-    .from("agent_webhooks")
-    .update({ active: false, updated_at: new Date().toISOString() })
-    .eq("agent_id", agentId);
-
-  return !error;
+  try {
+    await getDb()
+      .update(agentWebhooks)
+      .set({ active: false, updatedAt: new Date().toISOString() })
+      .where(eq(agentWebhooks.agentId, agentId));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Webhook Delivery ───
@@ -315,14 +346,15 @@ async function deliverWebhook(
 
       if (resp.ok) {
         // Success — reset failure count
-        await supabaseAdmin
-          .from("agent_webhooks")
-          .update({
-            last_delivery_at: new Date().toISOString(),
-            failure_count: 0,
-            updated_at: new Date().toISOString(),
+        const now = new Date().toISOString();
+        await getDb()
+          .update(agentWebhooks)
+          .set({
+            lastDeliveryAt: now,
+            failureCount: 0,
+            updatedAt: now,
           })
-          .eq("agent_id", config.agent_id);
+          .where(eq(agentWebhooks.agentId, config.agent_id));
 
         console.log(`[WEBHOOK] ✅ Delivered ${payload.event} to ${config.agent_id} (attempt ${attempt + 1})`);
         return { success: true, statusCode: resp.status };
@@ -340,43 +372,48 @@ async function deliverWebhook(
   }
 
   // All retries failed — increment failure counter
-  const { data: current } = await supabaseAdmin
-    .from("agent_webhooks")
-    .select("failure_count")
-    .eq("agent_id", config.agent_id)
-    .single();
+  await getDb().transaction(async (tx) => {
+    const [current] = await tx
+      .select({ failureCount: agentWebhooks.failureCount })
+      .from(agentWebhooks)
+      .where(eq(agentWebhooks.agentId, config.agent_id))
+      .limit(1);
 
-  const newCount = (current?.failure_count || 0) + 1;
+    const newCount = (current?.failureCount || 0) + 1;
+    const updates: Partial<typeof agentWebhooks.$inferInsert> = {
+      failureCount: newCount,
+      updatedAt: new Date().toISOString(),
+    };
 
-  // Auto-deactivate after 10 consecutive failures
-  const updates: Record<string, unknown> = {
-    failure_count: newCount,
-    updated_at: new Date().toISOString(),
-  };
+    if (newCount >= 10) {
+      updates.active = false;
+      console.error(`[WEBHOOK] ❌ Auto-deactivated webhook for ${config.agent_id} after ${newCount} consecutive failures`);
+    }
 
-  if (newCount >= 10) {
-    updates.active = false;
-    console.error(`[WEBHOOK] ❌ Auto-deactivated webhook for ${config.agent_id} after ${newCount} consecutive failures`);
-  }
-
-  await supabaseAdmin
-    .from("agent_webhooks")
-    .update(updates)
-    .eq("agent_id", config.agent_id);
+    await tx
+      .update(agentWebhooks)
+      .set(updates)
+      .where(eq(agentWebhooks.agentId, config.agent_id));
+  });
 
   return { success: false, error: `All ${retries.length} delivery attempts failed` };
 }
 
 export async function dispatchQueuedWebhookDelivery(deliveryId: string): Promise<boolean> {
-  const { data: row, error } = await supabaseAdmin
-    .from("webhook_deliveries")
-    .select("delivery_id, agent_id, payload, attempts")
-    .eq("delivery_id", deliveryId)
-    .single();
+  const [row] = await getDb()
+    .select({
+      deliveryId: webhookDeliveries.deliveryId,
+      agentId: webhookDeliveries.agentId,
+      payload: webhookDeliveries.payload,
+      attempts: webhookDeliveries.attempts,
+    })
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.deliveryId, deliveryId))
+    .limit(1);
 
-  if (error || !row?.payload) throw new Error(error?.message || "Webhook delivery payload not found");
+  if (!row?.payload) throw new Error("Webhook delivery payload not found");
 
-  const payload = row.payload as WebhookPayload;
+  const payload = row.payload as unknown as WebhookPayload;
   const config = await getWebhookConfig(payload.agent_id);
   if (!config || !config.active) {
     await logDelivery(payload, "failed");
@@ -384,10 +421,10 @@ export async function dispatchQueuedWebhookDelivery(deliveryId: string): Promise
   }
 
   const result = await deliverWebhook(config, payload);
-  await supabaseAdmin
-    .from("webhook_deliveries")
-    .update({ attempts: (row.attempts || 0) + 1, updated_at: new Date().toISOString() })
-    .eq("delivery_id", deliveryId);
+  await getDb()
+    .update(webhookDeliveries)
+    .set({ attempts: (row.attempts || 0) + 1, updatedAt: new Date().toISOString() })
+    .where(eq(webhookDeliveries.deliveryId, deliveryId));
   await logDelivery(payload, result.success ? "delivered" : "failed");
 
   if (!result.success && (row.attempts || 0) < 2) {
@@ -422,19 +459,20 @@ export async function dispatchMentionWebhooks(opts: {
   if (mentions.length === 0) return [];
 
   // Resolve mentioned agents by name
-  const { data: agents } = await supabaseAdmin
-    .from("agents")
-    .select("id, name, strategy")
-    .in("name", mentions);
+  const agents = await getDb()
+    .select({ id: agentsTable.id, name: agentsTable.name, strategy: agentsTable.strategy })
+    .from(agentsTable)
+    .where(inArray(agentsTable.name, mentions));
 
-  if (!agents || agents.length === 0) {
+  if (agents.length === 0) {
     // Also try matching by telegram_username stored in strategy
-    const { data: allAgents } = await supabaseAdmin
-      .from("agents")
-      .select("id, name, strategy")
-      .not("strategy", "is", null);
+    const allAgents = await getDb()
+      .select({ id: agentsTable.id, name: agentsTable.name, strategy: agentsTable.strategy })
+      .from(agentsTable)
+      .where(isNotNull(agentsTable.strategy));
 
-    const matched = (allAgents || []).filter((a) => {
+    const matched = allAgents.filter((a) => {
+      if (!a.strategy) return false;
       try {
         const s = JSON.parse(a.strategy || "{}");
         return mentions.includes((s.telegram_username || "").toLowerCase());
@@ -466,11 +504,11 @@ export async function dispatchEventWebhook(opts: {
   if (config.events.length > 0 && !config.events.includes(opts.event)) return false;
 
   // Get agent info
-  const { data: agent } = await supabaseAdmin
-    .from("agents")
-    .select("name")
-    .eq("id", opts.agentId)
-    .single();
+  const [agent] = await getDb()
+    .select({ name: agentsTable.name })
+    .from(agentsTable)
+    .where(eq(agentsTable.id, opts.agentId))
+    .limit(1);
 
   if (!agent) return false;
 
@@ -566,11 +604,11 @@ async function buildContext(
   };
 
   if (hackathonId) {
-    const { data: hackathon } = await supabaseAdmin
-      .from("hackathons")
-      .select("title, brief")
-      .eq("id", hackathonId)
-      .single();
+    const [hackathon] = await getDb()
+      .select({ title: hackathons.title, brief: hackathons.brief })
+      .from(hackathons)
+      .where(eq(hackathons.id, hackathonId))
+      .limit(1);
 
     if (hackathon) {
       context.hackathon_title = hackathon.title;
@@ -579,35 +617,38 @@ async function buildContext(
   }
 
   if (teamId) {
-    const { data: team } = await supabaseAdmin
-      .from("teams")
-      .select("name")
-      .eq("id", teamId)
-      .single();
+    const [team] = await getDb()
+      .select({ name: teams.name })
+      .from(teams)
+      .where(eq(teams.id, teamId))
+      .limit(1);
 
     if (team) context.team_name = team.name;
 
     // Get agent's role in this team
-    const { data: membership } = await supabaseAdmin
-      .from("team_members")
-      .select("role, revenue_share_pct")
-      .eq("team_id", teamId)
-      .eq("agent_id", agentId)
-      .single();
+    const [membership] = await getDb()
+      .select({ role: teamMembers.role })
+      .from(teamMembers)
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.agentId, agentId)))
+      .limit(1);
 
     if (membership) context.agent_role = membership.role;
 
     // Get repo URL from latest submission
-    const { data: submission } = await supabaseAdmin
-      .from("submissions")
-      .select("repo_url, project_url")
-      .eq("team_id", teamId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+    const [submission] = await getDb()
+      .select({ buildLog: submissions.buildLog, previewUrl: submissions.previewUrl })
+      .from(submissions)
+      .where(eq(submissions.teamId, teamId))
+      .orderBy(desc(submissions.createdAt))
+      .limit(1);
 
     if (submission) {
-      context.repo_url = submission.repo_url || submission.project_url || null;
+      try {
+        const meta = JSON.parse(submission.buildLog || "{}");
+        context.repo_url = meta.repo_url || meta.project_url || submission.previewUrl || null;
+      } catch {
+        context.repo_url = submission.previewUrl || null;
+      }
     }
   }
 
@@ -622,23 +663,37 @@ async function logDelivery(
   status: "pending" | "delivered" | "failed",
 ): Promise<void> {
   try {
-    await supabaseAdmin
-      .from("webhook_deliveries")
-      .upsert({
-        delivery_id: payload.delivery_id,
-        agent_id: payload.agent_id,
+    const now = new Date().toISOString();
+    const payloadSummary = {
+      event: payload.event,
+      command: payload.message.command,
+      from: payload.message.from,
+      team_id: payload.context.team_id,
+      hackathon_id: payload.context.hackathon_id,
+    };
+
+    await getDb()
+      .insert(webhookDeliveries)
+      .values({
+        deliveryId: payload.delivery_id,
+        agentId: payload.agent_id,
         event: payload.event,
         status,
-        payload,
-        payload_summary: {
+        payload: toJsonRecord(payload),
+        payloadSummary: toJsonRecord(payloadSummary),
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: webhookDeliveries.deliveryId,
+        set: {
+          agentId: payload.agent_id,
           event: payload.event,
-          command: payload.message.command,
-          from: payload.message.from,
-          team_id: payload.context.team_id,
-          hackathon_id: payload.context.hackathon_id,
+          status,
+          payload: toJsonRecord(payload),
+          payloadSummary: toJsonRecord(payloadSummary),
+          updatedAt: now,
         },
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "delivery_id" });
+      });
   } catch (err) {
     // Non-critical — don't let logging break delivery
     console.warn("[WEBHOOK] Log failed:", (err as Error).message);
@@ -660,14 +715,26 @@ export async function getDeliveryLogs(
   payload_summary: unknown;
   updated_at: string;
 }>> {
-  const { data } = await supabaseAdmin
-    .from("webhook_deliveries")
-    .select("delivery_id, event, status, payload_summary, updated_at")
-    .eq("agent_id", agentId)
-    .order("updated_at", { ascending: false })
+  const rows = await getDb()
+    .select({
+      deliveryId: webhookDeliveries.deliveryId,
+      event: webhookDeliveries.event,
+      status: webhookDeliveries.status,
+      payloadSummary: webhookDeliveries.payloadSummary,
+      updatedAt: webhookDeliveries.updatedAt,
+    })
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.agentId, agentId))
+    .orderBy(desc(webhookDeliveries.updatedAt))
     .limit(limit);
 
-  return data || [];
+  return rows.map((row) => ({
+    delivery_id: row.deliveryId,
+    event: row.event,
+    status: row.status,
+    payload_summary: row.payloadSummary,
+    updated_at: row.updatedAt,
+  }));
 }
 
 /**

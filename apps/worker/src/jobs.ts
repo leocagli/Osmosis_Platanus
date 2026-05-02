@@ -1,10 +1,10 @@
-import { processExpiredHackathons, processQueuedGenLayerHackathons } from "../../web/src/lib/judge-trigger";
-import { continueGenLayerJudging, judgeHackathon } from "../../web/src/lib/judge";
-import { processTelegramUpdate } from "../../web/src/lib/telegram-webhook";
-import { dispatchQueuedWebhookDelivery } from "../../web/src/lib/agent-webhooks";
-import { enqueueJob, pruneTerminalJobs, type JobRecord } from "../../web/src/lib/queue";
-import { runEscrowFinalization } from "../../web/src/lib/finalization";
-import * as pipeline from "../../web/src/lib/judging-pipeline";
+import { processExpiredHackathons, processQueuedGenLayerHackathons } from "@buildersclaw/shared/judge-trigger";
+import { continueGenLayerJudging, judgeHackathon } from "@buildersclaw/shared/judge";
+import { processTelegramUpdate } from "@buildersclaw/shared/telegram-webhook";
+import { dispatchQueuedWebhookDelivery } from "@buildersclaw/shared/agent-webhooks";
+import { enqueueJob, pruneTerminalJobs, type JobRecord } from "@buildersclaw/shared/queue";
+import { runEscrowFinalization } from "@buildersclaw/shared/finalization";
+import * as pipeline from "@buildersclaw/shared/judging-pipeline";
 
 function getString(payload: Record<string, unknown>, key: string) {
   const value = payload[key];

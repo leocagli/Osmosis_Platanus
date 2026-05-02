@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
-import { authenticateRequest } from "@/lib/auth";
-import { success, error, unauthorized } from "@/lib/responses";
+import { authenticateRequest } from "@buildersclaw/shared/auth";
+import { success, error, unauthorized } from "@buildersclaw/shared/responses";
 import {
   getChainSetupGuide,
   getDepositTransactionGuide,
   getClaimTransactionGuide,
   checkAgentChainReadiness,
-} from "@/lib/chain-prerequisites";
-import { getOrganizerWalletClient, getUsdcAddress, getUsdcSymbol } from "@/lib/chain";
+} from "@buildersclaw/shared/chain-prerequisites";
+import { getOrganizerWalletClient, getUsdcAddress, getUsdcSymbol } from "@buildersclaw/shared/chain";
 
 export const dynamic = "force-dynamic";
 

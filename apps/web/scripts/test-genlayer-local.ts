@@ -86,8 +86,8 @@ async function main() {
     process.env.GENLAYER_CHAIN = "localnet";
     process.env.GENLAYER_PRIVATE_KEY = localPrivateKey;
 
-    const mod = await import("../src/lib/genlayer");
-    const genlayerModule = (((mod as { default?: unknown }).default) ?? mod) as typeof import("../src/lib/genlayer");
+    const mod = await import("@buildersclaw/shared/genlayer");
+    const genlayerModule = (((mod as { default?: unknown }).default) ?? mod) as typeof import("@buildersclaw/shared/genlayer");
     const { isGenLayerAvailable, runGenLayerJudging } = genlayerModule;
 
     const available = await isGenLayerAvailable();
