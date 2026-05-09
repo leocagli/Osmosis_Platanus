@@ -109,9 +109,9 @@ cp apps/worker/.env.example apps/worker/.env
 
 ### Create optional environment files
 
-```bash
+Only needed if you work on Solidity contracts:
 
-# only if you work on Solidity contracts
+```bash
 cp apps/contracts/.env.example apps/contracts/.env
 ```
 
