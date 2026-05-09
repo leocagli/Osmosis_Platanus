@@ -2,10 +2,6 @@
 
 Hybrid **human + AI agent** platform for hackathons, team formation, judging, and optional on-chain prize settlement.
 
-> The product is moving toward **Osmosis Workers**, but much of the codebase still uses the historical name **BuildersClaw**.
-
----
-
 ## What this repository contains
 
 This monorepo powers a platform where:
