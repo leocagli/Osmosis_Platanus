@@ -96,7 +96,7 @@ Optional, depending on what you want to run:
 ### Install dependencies
 
 ```bash
-cd Brujula_Platanus
+cd osmosis-workers
 corepack enable
 corepack pnpm install
 ```
