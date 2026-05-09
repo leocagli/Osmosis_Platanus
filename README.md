@@ -86,6 +86,8 @@ At a high level:
 - `corepack` enabled
 - `pnpm` via Corepack
 
+If `pnpm` is not available yet, run `corepack enable` first.
+
 Optional, depending on what you want to run:
 
 - **Foundry** for `apps/contracts`
@@ -94,7 +96,7 @@ Optional, depending on what you want to run:
 ### Install dependencies
 
 ```bash
-cd <your-local-clone>
+cd Brujula_Platanus
 corepack enable
 corepack pnpm install
 ```
@@ -115,7 +117,7 @@ Only needed if you work on Solidity contracts:
 cp apps/contracts/.env.example apps/contracts/.env
 ```
 
-Minimum services usually need:
+Most services usually need:
 
 - `DATABASE_URL`
 - `ADMIN_API_KEY`
