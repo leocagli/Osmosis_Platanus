@@ -21,6 +21,47 @@ import {
 } from "@buildersclaw/shared/validation";
 import { getMarketplaceReputationScore } from "@buildersclaw/shared/erc8004";
 
+const OPPORTUNITY_MODES = ["hackathon_competitive", "direct_job"] as const;
+type OpportunityMode = (typeof OPPORTUNITY_MODES)[number];
+const PAYMENT_MODELS = ["prize_pool", "fixed_price", "milestones", "hourly_cap", "retainer"] as const;
+type PaymentModel = (typeof PAYMENT_MODELS)[number];
+
+function parseRolePayload(raw: string | null) {
+  if (!raw) {
+    return {
+      description: null as string | null,
+      repo_url: null as string | null,
+      opportunity_mode: "hackathon_competitive" as OpportunityMode,
+      payment_model: "prize_pool" as PaymentModel,
+      human_accessible: true,
+      human_summary: null as string | null,
+      human_override_required: false,
+    };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      description: typeof parsed.description === "string" ? parsed.description : null,
+      repo_url: typeof parsed.repo_url === "string" ? parsed.repo_url : null,
+      opportunity_mode: OPPORTUNITY_MODES.includes(parsed.opportunity_mode as OpportunityMode) ? parsed.opportunity_mode as OpportunityMode : "hackathon_competitive",
+      payment_model: PAYMENT_MODELS.includes(parsed.payment_model as PaymentModel) ? parsed.payment_model as PaymentModel : "prize_pool",
+      human_accessible: typeof parsed.human_accessible === "boolean" ? parsed.human_accessible : true,
+      human_summary: typeof parsed.human_summary === "string" ? parsed.human_summary : null,
+      human_override_required: typeof parsed.human_override_required === "boolean" ? parsed.human_override_required : false,
+    };
+  } catch {
+    return {
+      description: raw,
+      repo_url: null as string | null,
+      opportunity_mode: "hackathon_competitive" as OpportunityMode,
+      payment_model: "prize_pool" as PaymentModel,
+      human_accessible: true,
+      human_summary: null as string | null,
+      human_override_required: false,
+    };
+  }
+}
+
 /**
  * ═══════════════════════════════════════════════════════════════
  * MARKETPLACE — Team leaders post roles. Agents claim them.
@@ -162,6 +203,7 @@ export async function GET(req: NextRequest) {
       const poster = l.poster;
       const team = l.team;
       const hackathon = l.hackathon;
+      const rolePayload = parseRolePayload(l.role_description);
 
       return {
         id: l.id,
@@ -211,18 +253,13 @@ export async function GET(req: NextRequest) {
           return null;
         })(),
         role_title: l.role_title,
-        role_description: (() => {
-          try {
-            const parsed = JSON.parse(l.role_description || "{}");
-            return parsed?.description || null;
-          } catch { return l.role_description; }
-        })(),
-        repo_url: (() => {
-          try {
-            const parsed = JSON.parse(l.role_description || "{}");
-            return parsed?.repo_url || null;
-          } catch { return null; }
-        })(),
+        role_description: rolePayload.description,
+        repo_url: rolePayload.repo_url,
+        opportunity_mode: rolePayload.opportunity_mode,
+        payment_model: rolePayload.payment_model,
+        human_accessible: rolePayload.human_accessible,
+        human_summary: rolePayload.human_summary,
+        human_override_required: rolePayload.human_override_required,
         share_pct: l.share_pct,
         status: l.status,
         taken_by: l.taken_by,
@@ -268,7 +305,14 @@ export async function POST(req: NextRequest) {
   const teamId = typeof body.team_id === "string" ? body.team_id.trim() : null;
   const roleTitle = sanitizeString(body.role_title, 100);
   const roleDescription = sanitizeString(body.role_description, 1000);
+  const humanSummary = sanitizeString(body.human_summary, 300);
   const repoUrl = sanitizeString(body.repo_url, 512);
+  const opportunityMode = typeof body.opportunity_mode === "string" ? body.opportunity_mode : "hackathon_competitive";
+  if (!OPPORTUNITY_MODES.includes(opportunityMode as OpportunityMode)) return error("Invalid opportunity_mode", 400);
+  const paymentModel = typeof body.payment_model === "string" ? body.payment_model : "prize_pool";
+  if (!PAYMENT_MODELS.includes(paymentModel as PaymentModel)) return error("Invalid payment_model", 400);
+  if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") return error("human_accessible must be boolean", 400);
+  if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") return error("human_override_required must be boolean", 400);
   const sharePct = Number(body.share_pct);
 
   if (!hackathonId) return error("hackathon_id is required", 400);
@@ -399,6 +443,11 @@ export async function POST(req: NextRequest) {
       roleDescription: JSON.stringify({
         description: roleDescription,
         repo_url: repoUrl,
+        opportunity_mode: opportunityMode,
+        payment_model: paymentModel,
+        human_accessible: body.human_accessible !== undefined ? body.human_accessible : true,
+        human_summary: humanSummary,
+        human_override_required: body.human_override_required === true,
       }),
       sharePct: Math.round(sharePct),
       status: "open",
@@ -432,6 +481,8 @@ export async function POST(req: NextRequest) {
     leader_keeps: shareValidation.leader_would_keep,
     status: "open",
     message: `Role "${roleTitle}" posted at ${Math.round(sharePct)}% share. Repo: ${repoUrl}. Agents can now claim it directly.`,
+    opportunity_mode: opportunityMode,
+    payment_model: paymentModel,
   });
 }
 
@@ -562,20 +613,36 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Update role_description / repo_url
-  if (body.role_description !== undefined || body.repo_url !== undefined) {
+  const hasRoleMetaUpdate = body.role_description !== undefined
+    || body.repo_url !== undefined
+    || body.opportunity_mode !== undefined
+    || body.payment_model !== undefined
+    || body.human_accessible !== undefined
+    || body.human_summary !== undefined
+    || body.human_override_required !== undefined;
+  if (body.opportunity_mode !== undefined) {
+    if (typeof body.opportunity_mode !== "string" || !OPPORTUNITY_MODES.includes(body.opportunity_mode as OpportunityMode)) {
+      return error("Invalid opportunity_mode", 400);
+    }
+  }
+  if (body.payment_model !== undefined) {
+    if (typeof body.payment_model !== "string" || !PAYMENT_MODELS.includes(body.payment_model as PaymentModel)) {
+      return error("Invalid payment_model", 400);
+    }
+  }
+  if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") return error("human_accessible must be boolean", 400);
+  if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") return error("human_override_required must be boolean", 400);
+
+  if (hasRoleMetaUpdate) {
     // Parse existing description
-    let existing: Record<string, unknown> = {};
+    let existing: Record<string, unknown> = parseRolePayload(null) as unknown as Record<string, unknown>;
     const [fullListing] = await db
       .select({ role_description: schema.marketplaceListings.roleDescription })
       .from(schema.marketplaceListings)
       .where(eq(schema.marketplaceListings.id, listingId))
       .limit(1);
 
-    if (fullListing?.role_description) {
-      try {
-        existing = JSON.parse(fullListing.role_description as string);
-      } catch { /* not JSON */ }
-    }
+    if (fullListing?.role_description) existing = parseRolePayload(fullListing.role_description as string) as unknown as Record<string, unknown>;
 
     if (body.role_description !== undefined) {
       existing.description = sanitizeString(body.role_description, 1000);
@@ -583,6 +650,11 @@ export async function PATCH(req: NextRequest) {
     if (body.repo_url !== undefined) {
       existing.repo_url = sanitizeString(body.repo_url, 512);
     }
+    if (body.opportunity_mode !== undefined) existing.opportunity_mode = body.opportunity_mode;
+    if (body.payment_model !== undefined) existing.payment_model = body.payment_model;
+    if (body.human_accessible !== undefined) existing.human_accessible = body.human_accessible;
+    if (body.human_summary !== undefined) existing.human_summary = sanitizeString(body.human_summary, 300);
+    if (body.human_override_required !== undefined) existing.human_override_required = body.human_override_required;
 
     updates.role_description = JSON.stringify(existing);
   }

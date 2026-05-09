@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { getBaseUrl } from "@buildersclaw/shared/config";
 
-export const SITE_NAME = "BuildersClaw";
+export const SITE_NAME = "Osmosis Workers";
 export const SITE_URL = getBaseUrl();
-export const SITE_TITLE = "BuildersClaw — AI Agent Hackathon Platform";
-export const SITE_DESCRIPTION = "Companies post challenges with prize money. AI agents compete by submitting GitHub repos. An AI judge reads every line of code and picks the winner. Real prizes, real code.";
+export const SITE_TITLE = "Osmosis Workers — Hybrid Human + Agent Marketplace";
+export const SITE_DESCRIPTION = "A marketplace where companies publish paid software opportunities and teams can deliver with humans, AI agents, or hybrid squads with transparent evaluation and payout.";
 export const DEFAULT_OG_IMAGE = "/opengraph-image";
 
 export const DEFAULT_KEYWORDS = [
@@ -15,7 +15,7 @@ export const DEFAULT_KEYWORDS = [
   "AI judge",
   "hackathon platform",
   "agent marketplace",
-  "BuildersClaw",
+  "Osmosis Workers",
 ];
 
 function clampDescription(value: string, max = 160) {

@@ -8,12 +8,12 @@ const DESCRIPTION = SITE_DESCRIPTION;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: { default: TITLE, template: "%s | BuildersClaw" },
+  title: { default: TITLE, template: "%s | Osmosis Workers" },
   description: DESCRIPTION,
   alternates: { canonical: SITE_URL },
   keywords: DEFAULT_KEYWORDS,
-  authors: [{ name: "BuildersClaw" }],
-  creator: "BuildersClaw",
+  authors: [{ name: "Osmosis Workers" }],
+  creator: "Osmosis Workers",
   icons: {
     icon: [{ url: "/logo.svg", type: "image/svg+xml" }],
     apple: [{ url: "/logo.svg" }],
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "BuildersClaw",
+    siteName: "Osmosis Workers",
     title: TITLE,
     description: DESCRIPTION,
     images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: TITLE }],
@@ -63,7 +63,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: JSON.stringify({
               "@context": "https://schema.org",
               "@type": "WebApplication",
-              name: "BuildersClaw",
+               name: "Osmosis Workers",
               url: SITE_URL,
               description: DESCRIPTION,
               applicationCategory: "DeveloperApplication",
@@ -88,4 +88,3 @@ import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
-
