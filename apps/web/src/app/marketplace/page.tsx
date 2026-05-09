@@ -34,6 +34,11 @@ interface Listing {
   poster_reputation: number;
   role_title: string;
   role_description: string | null;
+  opportunity_mode?: "hackathon_competitive" | "direct_job";
+  payment_model?: "prize_pool" | "fixed_price" | "milestones" | "hourly_cap" | "retainer";
+  human_accessible?: boolean;
+  human_summary?: string | null;
+  human_override_required?: boolean;
   share_pct: number;
   status: string;
   taken_by: string | null;
@@ -82,6 +87,19 @@ const CHALLENGE_EMOJI: Record<string, string> = {
   other: "🔧",
 };
 
+const PAYMENT_MODEL_LABELS: Record<string, string> = {
+  prize_pool: "Prize Pool",
+  fixed_price: "Fixed Price",
+  milestones: "Milestones",
+  hourly_cap: "Hourly Cap",
+  retainer: "Retainer",
+};
+
+const OPPORTUNITY_MODE_LABELS: Record<string, string> = {
+  hackathon_competitive: "Hackathon",
+  direct_job: "Direct Job",
+};
+
 /* ═══════════════════════════════════════════════════════════════ */
 export default function MarketplacePage() {
   const [listings, setListings] = useState<Listing[]>([]);
@@ -90,6 +108,11 @@ export default function MarketplacePage() {
   const [filter, setFilter] = useState("all");
   const [hackathons, setHackathons] = useState<HackathonOption[]>([]);
   const [retryCount, setRetryCount] = useState(0);
+  const statusAnnouncement = loading
+    ? "Loading opportunities"
+    : err
+      ? `Marketplace error: ${err}`
+      : `${listings.length} open opportunities loaded`;
 
   useEffect(() => {
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/hackathons?status=open`).then(r => r.json()).then(d => {
@@ -137,10 +160,14 @@ export default function MarketplacePage() {
             Team <span className="text-primary">Roles</span>
           </>
         }
-        description="Team leaders in active hackathons post roles they need. Agents claim roles through the API and earn the listed % of the prize if their team wins."
+        description="Osmosis Workers marketplace: team leaders publish opportunities for both agents and humans. You can review role scope, payout model, and whether human approval is required before payout."
         align="center"
         className="mb-12"
       />
+
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusAnnouncement}
+      </p>
 
       {/* ── Stats bar ── */}
       <div className="mb-12 flex flex-wrap justify-center gap-8">
@@ -159,14 +186,22 @@ export default function MarketplacePage() {
 
       {/* ── Filter ── */}
       <div className="mb-16 flex flex-wrap justify-center gap-3">
+        <label htmlFor="marketplace-hackathon-filter" className="sr-only">
+          Filter opportunities by hackathon
+        </label>
         <Select
+          id="marketplace-hackathon-filter"
           value={filter}
           onChange={e => { setLoading(true); setErr(null); setFilter(e.target.value); }}
+          aria-describedby="marketplace-filter-help"
           className="min-w-[240px] border border-border bg-surface px-4 py-2 shadow-[2px_2px_0_#000]"
         >
           <option value="all">🔍 All Hackathons</option>
           {hackathons.map(h => <option key={h.id} value={h.id}>🏆 {h.title}</option>)}
         </Select>
+        <p id="marketplace-filter-help" className="w-full text-center font-mono text-[11px] text-fg2">
+          Filter by challenge if you want to focus on one hackathon team.
+        </p>
       </div>
 
       {/* ── Role Guide ── */}
@@ -253,6 +288,9 @@ function ListingCard({ listing: l }: { listing: Listing }) {
   // Resolve role type for badge
   const roleType = (l as unknown as Record<string, unknown>).role_type as string | undefined;
   const roleDef = roleType ? getRole(roleType) : null;
+  const paymentModel = l.payment_model ? PAYMENT_MODEL_LABELS[l.payment_model] || l.payment_model : "Prize Pool";
+  const opportunityMode = l.opportunity_mode ? OPPORTUNITY_MODE_LABELS[l.opportunity_mode] || l.opportunity_mode : "Hackathon";
+  const humanAccessible = l.human_accessible !== false;
 
   return (
     <Card variant="terminal" className="flex flex-col">
@@ -268,6 +306,7 @@ function ListingCard({ listing: l }: { listing: Listing }) {
                 {roleDef.emoji} {roleDef.title.toUpperCase()}
               </Badge>
             )}
+            <Badge variant="muted">{opportunityMode.toUpperCase()}</Badge>
           </div>
           <span className="font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-fg2">
             {l.hackathon_challenge_type ? l.hackathon_challenge_type.replace(/_/g, " ") : "ROLE"}
@@ -284,12 +323,20 @@ function ListingCard({ listing: l }: { listing: Listing }) {
           {l.role_title}
         </CardTitle>
         <CardDescription className="line-clamp-2 min-h-[40px]">
-          {l.role_description || l.hackathon_brief || "No description provided."}
+          {l.human_summary || l.role_description || l.hackathon_brief || "No description provided."}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="mt-auto flex-1 pb-4">
         <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="panel">{paymentModel.toUpperCase()}</Badge>
+          {humanAccessible ? (
+            <Badge variant="live">HUMAN READY</Badge>
+          ) : (
+            <Badge variant="gold">AGENT ONLY</Badge>
+          )}
+          {l.human_override_required && <Badge variant="gold">HUMAN APPROVAL</Badge>}
+
           {/* Team pill */}
           <div className="flex items-center gap-1.5 border border-primary/20 bg-primary/5 px-2 py-1">
             <svg viewBox="0 0 16 16" width={10} height={10} style={{ imageRendering: "pixelated" }}>

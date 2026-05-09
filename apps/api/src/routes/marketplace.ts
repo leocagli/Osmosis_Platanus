@@ -3,7 +3,21 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@buildersclaw/shared/db";
 import { sanitizeString } from "@buildersclaw/shared/hackathons";
-import { checkRateLimit, enforceShareIntegrity, isValidUUID, validateRoleType, validateSharePct, validateTeamTotalShares } from "@buildersclaw/shared/validation";
+import { parseMarketplaceRolePayload } from "@buildersclaw/shared/marketplace-payload";
+import {
+  MARKETPLACE_HUMAN_SUMMARY_MAX,
+  MARKETPLACE_OPPORTUNITY_MODES,
+  MARKETPLACE_PAYMENT_MODELS,
+  MARKETPLACE_ROLE_DESCRIPTION_MAX,
+  type MarketplaceOpportunityMode,
+  type MarketplacePaymentModel,
+  checkRateLimit,
+  enforceShareIntegrity,
+  isValidUUID,
+  validateRoleType,
+  validateSharePct,
+  validateTeamTotalShares,
+} from "@buildersclaw/shared/validation";
 import { ok, created, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
@@ -59,12 +73,21 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
       .orderBy(desc(schema.marketplaceListings.createdAt))
       .limit(100);
 
-    return ok(reply, rows.map((row) => ({
-      ...row,
-      poster: { name: row.poster_name, display_name: row.poster_display_name },
-      team: { name: row.team_name },
-      hackathon: { title: row.hackathon_title, status: row.hackathon_status },
-    })));
+    return ok(reply, rows.map((row) => {
+      const parsed = parseMarketplaceRolePayload(row.role_description);
+      return {
+        ...row,
+        role_description: parsed.description,
+        opportunity_mode: parsed.opportunity_mode,
+        payment_model: parsed.payment_model,
+        human_accessible: parsed.human_accessible,
+        human_summary: parsed.human_summary,
+        human_override_required: parsed.human_override_required,
+        poster: { name: row.poster_name, display_name: row.poster_display_name },
+        team: { name: row.team_name },
+        hackathon: { title: row.hackathon_title, status: row.hackathon_status },
+      };
+    }));
   });
 
   fastify.post("/api/v1/marketplace", async (req, reply) => {
@@ -80,7 +103,22 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
     if (!teamId || !isValidUUID(teamId)) return fail(reply, "team_id is required", 400);
 
     const roleTitle = sanitizeString(body.role_title, 120);
-    const roleDescription = sanitizeString(body.role_description, 2000);
+    const roleDescription = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
+    const humanSummary = sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX);
+    const opportunityMode = typeof body.opportunity_mode === "string" ? body.opportunity_mode : "hackathon_competitive";
+    if (!MARKETPLACE_OPPORTUNITY_MODES.includes(opportunityMode as MarketplaceOpportunityMode)) {
+      return fail(reply, "Invalid opportunity_mode", 400);
+    }
+    const paymentModel = typeof body.payment_model === "string" ? body.payment_model : "prize_pool";
+    if (!MARKETPLACE_PAYMENT_MODELS.includes(paymentModel as MarketplacePaymentModel)) {
+      return fail(reply, "Invalid payment_model", 400);
+    }
+    if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") {
+      return fail(reply, "human_accessible must be boolean", 400);
+    }
+    if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") {
+      return fail(reply, "human_override_required must be boolean", 400);
+    }
     if (!roleTitle) return fail(reply, "role_title is required", 400);
 
     const roleType = validateRoleType(body.role_type || "builder");
@@ -102,12 +140,19 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
       postedBy: agent.id,
       roleTitle,
       roleType: roleType.role_type,
-      roleDescription,
+      roleDescription: JSON.stringify({
+        description: roleDescription,
+        opportunity_mode: opportunityMode,
+        payment_model: paymentModel,
+        human_accessible: body.human_accessible !== undefined ? body.human_accessible : true,
+        human_summary: humanSummary,
+        human_override_required: body.human_override_required === true,
+      }),
       sharePct: share.value,
       status: "open",
     }).returning(listingSelect);
 
-    return created(reply, { ...listing, role_type_warning: roleType.message });
+    return created(reply, { ...listing, role_type_warning: roleType.message, opportunity_mode: opportunityMode, payment_model: paymentModel });
   });
 
   fastify.patch("/api/v1/marketplace", async (req, reply) => {
@@ -128,7 +173,41 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
       if (!roleTitle) return fail(reply, "role_title cannot be empty", 400);
       updates.roleTitle = roleTitle;
     }
-    if (body.role_description !== undefined) updates.roleDescription = sanitizeString(body.role_description, 2000);
+    if (body.opportunity_mode !== undefined) {
+      if (typeof body.opportunity_mode !== "string" || !MARKETPLACE_OPPORTUNITY_MODES.includes(body.opportunity_mode as MarketplaceOpportunityMode)) {
+        return fail(reply, "Invalid opportunity_mode", 400);
+      }
+    }
+    if (body.payment_model !== undefined) {
+      if (typeof body.payment_model !== "string" || !MARKETPLACE_PAYMENT_MODELS.includes(body.payment_model as MarketplacePaymentModel)) {
+        return fail(reply, "Invalid payment_model", 400);
+      }
+    }
+    if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") {
+      return fail(reply, "human_accessible must be boolean", 400);
+    }
+    if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") {
+      return fail(reply, "human_override_required must be boolean", 400);
+    }
+      const hasRoleMetaUpdate = body.role_description !== undefined
+      || body.opportunity_mode !== undefined
+      || body.payment_model !== undefined
+      || body.human_accessible !== undefined
+      || body.human_summary !== undefined
+      || body.human_override_required !== undefined;
+    if (hasRoleMetaUpdate) {
+      const current = parseMarketplaceRolePayload(listing.role_description);
+      const nextDescription = body.role_description !== undefined ? sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX) : current.description;
+      const nextHumanSummary = body.human_summary !== undefined ? sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX) : current.human_summary;
+      updates.roleDescription = JSON.stringify({
+        description: nextDescription,
+        opportunity_mode: body.opportunity_mode !== undefined ? body.opportunity_mode : current.opportunity_mode,
+        payment_model: body.payment_model !== undefined ? body.payment_model : current.payment_model,
+        human_accessible: body.human_accessible !== undefined ? body.human_accessible : current.human_accessible,
+        human_summary: nextHumanSummary,
+        human_override_required: body.human_override_required !== undefined ? body.human_override_required : current.human_override_required,
+      });
+    }
     if (body.role_type !== undefined) {
       const roleType = validateRoleType(body.role_type);
       if (!roleType.valid || !roleType.role_type) return fail(reply, roleType.message || "Invalid role_type", 400);

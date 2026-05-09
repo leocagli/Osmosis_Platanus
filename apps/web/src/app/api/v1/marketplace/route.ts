@@ -5,6 +5,7 @@ import { authenticateRequest } from "@buildersclaw/shared/auth";
 import { getDb, schema } from "@buildersclaw/shared/db";
 import { success, created, error, unauthorized } from "@buildersclaw/shared/responses";
 import { sanitizeString } from "@buildersclaw/shared/hackathons";
+import { parseMarketplaceRolePayload, type MarketplaceRolePayload } from "@buildersclaw/shared/marketplace-payload";
 import {
   MEMBER_MIN_SHARE_PCT,
   LEADER_MIN_KEEP_PCT,
@@ -13,6 +14,12 @@ import {
   MAX_OPEN_LISTINGS_PER_TEAM,
   MAX_ALLOCATED_PCT,
   isValidUUID,
+  MARKETPLACE_HUMAN_SUMMARY_MAX,
+  MARKETPLACE_OPPORTUNITY_MODES,
+  MARKETPLACE_PAYMENT_MODELS,
+  MARKETPLACE_ROLE_DESCRIPTION_MAX,
+  type MarketplaceOpportunityMode,
+  type MarketplacePaymentModel,
   checkRateLimit,
   getTeamShareSnapshot,
   validateTeamTotalShares,
@@ -162,6 +169,7 @@ export async function GET(req: NextRequest) {
       const poster = l.poster;
       const team = l.team;
       const hackathon = l.hackathon;
+      const rolePayload = parseMarketplaceRolePayload(l.role_description);
 
       return {
         id: l.id,
@@ -211,18 +219,13 @@ export async function GET(req: NextRequest) {
           return null;
         })(),
         role_title: l.role_title,
-        role_description: (() => {
-          try {
-            const parsed = JSON.parse(l.role_description || "{}");
-            return parsed?.description || null;
-          } catch { return l.role_description; }
-        })(),
-        repo_url: (() => {
-          try {
-            const parsed = JSON.parse(l.role_description || "{}");
-            return parsed?.repo_url || null;
-          } catch { return null; }
-        })(),
+        role_description: rolePayload.description,
+        repo_url: rolePayload.repo_url,
+        opportunity_mode: rolePayload.opportunity_mode,
+        payment_model: rolePayload.payment_model,
+        human_accessible: rolePayload.human_accessible,
+        human_summary: rolePayload.human_summary,
+        human_override_required: rolePayload.human_override_required,
         share_pct: l.share_pct,
         status: l.status,
         taken_by: l.taken_by,
@@ -267,8 +270,15 @@ export async function POST(req: NextRequest) {
   const hackathonId = typeof body.hackathon_id === "string" ? body.hackathon_id.trim() : null;
   const teamId = typeof body.team_id === "string" ? body.team_id.trim() : null;
   const roleTitle = sanitizeString(body.role_title, 100);
-  const roleDescription = sanitizeString(body.role_description, 1000);
+  const roleDescription = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
+  const humanSummary = sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX);
   const repoUrl = sanitizeString(body.repo_url, 512);
+  const opportunityMode = typeof body.opportunity_mode === "string" ? body.opportunity_mode : "hackathon_competitive";
+  if (!MARKETPLACE_OPPORTUNITY_MODES.includes(opportunityMode as MarketplaceOpportunityMode)) return error("Invalid opportunity_mode", 400);
+  const paymentModel = typeof body.payment_model === "string" ? body.payment_model : "prize_pool";
+  if (!MARKETPLACE_PAYMENT_MODELS.includes(paymentModel as MarketplacePaymentModel)) return error("Invalid payment_model", 400);
+  if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") return error("human_accessible must be boolean", 400);
+  if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") return error("human_override_required must be boolean", 400);
   const sharePct = Number(body.share_pct);
 
   if (!hackathonId) return error("hackathon_id is required", 400);
@@ -399,6 +409,11 @@ export async function POST(req: NextRequest) {
       roleDescription: JSON.stringify({
         description: roleDescription,
         repo_url: repoUrl,
+        opportunity_mode: opportunityMode,
+        payment_model: paymentModel,
+        human_accessible: body.human_accessible !== undefined ? body.human_accessible : true,
+        human_summary: humanSummary,
+        human_override_required: body.human_override_required === true,
       }),
       sharePct: Math.round(sharePct),
       status: "open",
@@ -432,6 +447,8 @@ export async function POST(req: NextRequest) {
     leader_keeps: shareValidation.leader_would_keep,
     status: "open",
     message: `Role "${roleTitle}" posted at ${Math.round(sharePct)}% share. Repo: ${repoUrl}. Agents can now claim it directly.`,
+    opportunity_mode: opportunityMode,
+    payment_model: paymentModel,
   });
 }
 
@@ -562,27 +579,48 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Update role_description / repo_url
-  if (body.role_description !== undefined || body.repo_url !== undefined) {
+  const hasRoleMetaUpdate = body.role_description !== undefined
+    || body.repo_url !== undefined
+    || body.opportunity_mode !== undefined
+    || body.payment_model !== undefined
+    || body.human_accessible !== undefined
+    || body.human_summary !== undefined
+    || body.human_override_required !== undefined;
+  if (body.opportunity_mode !== undefined) {
+    if (typeof body.opportunity_mode !== "string" || !MARKETPLACE_OPPORTUNITY_MODES.includes(body.opportunity_mode as MarketplaceOpportunityMode)) {
+      return error("Invalid opportunity_mode", 400);
+    }
+  }
+  if (body.payment_model !== undefined) {
+    if (typeof body.payment_model !== "string" || !MARKETPLACE_PAYMENT_MODELS.includes(body.payment_model as MarketplacePaymentModel)) {
+      return error("Invalid payment_model", 400);
+    }
+  }
+  if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") return error("human_accessible must be boolean", 400);
+  if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") return error("human_override_required must be boolean", 400);
+
+  if (hasRoleMetaUpdate) {
     // Parse existing description
-    let existing: Record<string, unknown> = {};
+    let existing: MarketplaceRolePayload = parseMarketplaceRolePayload(null);
     const [fullListing] = await db
       .select({ role_description: schema.marketplaceListings.roleDescription })
       .from(schema.marketplaceListings)
       .where(eq(schema.marketplaceListings.id, listingId))
       .limit(1);
 
-    if (fullListing?.role_description) {
-      try {
-        existing = JSON.parse(fullListing.role_description as string);
-      } catch { /* not JSON */ }
-    }
+    if (fullListing?.role_description) existing = parseMarketplaceRolePayload(fullListing.role_description as string);
 
     if (body.role_description !== undefined) {
-      existing.description = sanitizeString(body.role_description, 1000);
+      existing.description = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
     }
     if (body.repo_url !== undefined) {
       existing.repo_url = sanitizeString(body.repo_url, 512);
     }
+    if (body.opportunity_mode !== undefined) existing.opportunity_mode = body.opportunity_mode as MarketplaceOpportunityMode;
+    if (body.payment_model !== undefined) existing.payment_model = body.payment_model as MarketplacePaymentModel;
+    if (body.human_accessible !== undefined) existing.human_accessible = body.human_accessible;
+    if (body.human_summary !== undefined) existing.human_summary = sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX);
+    if (body.human_override_required !== undefined) existing.human_override_required = body.human_override_required;
 
     updates.role_description = JSON.stringify(existing);
   }
