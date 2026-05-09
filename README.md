@@ -94,7 +94,7 @@ Optional, depending on what you want to run:
 ### Install dependencies
 
 ```bash
-cd /home/runner/work/Brujula_Platanus/Brujula_Platanus
+cd <repository-root>
 corepack enable
 corepack pnpm install
 ```
