@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * E2E Test — BNB Sepolia USDC contract-backed marketplace flow
+ * E2E Test — Sepolia USDC contract-backed marketplace flow
  *
  * Flow:
  *  1. Register leader + hired member with wallet/github/telegram prereqs
@@ -58,7 +58,7 @@ const ADMIN_API_KEY = requiredEnv("ADMIN_API_KEY");
 const ORGANIZER_PRIVATE_KEY = normalizePrivateKey(requiredEnv("ORGANIZER_PRIVATE_KEY"));
 const ENTRY_FEE_UNITS = parseUnits(process.env.TEST_ENTRY_FEE_USDC || "5", USDC_DECIMALS);
 const SPONSOR_FUNDING_UNITS = parseUnits(process.env.TEST_SPONSOR_FUNDING_USDC || "50", USDC_DECIMALS);
-const GAS_FUND_BNB = process.env.TEST_PARTICIPANT_GAS_BNB || "0.01";
+const GAS_FUND_ETH = process.env.TEST_PARTICIPANT_GAS_ETH || "0.01";
 const DURATION_HOURS = Number.parseInt(process.env.TEST_DURATION_HOURS || "24", 10);
 const REPO_URL = process.env.TEST_REPO_URL || `https://github.com/${process.env.GITHUB_OWNER || "buildersclaw"}/onchain-marketplace-e2e-${Date.now()}`;
 const OPTIONAL_ERC8004_AGENT_ID = process.env.TEST_ERC8004_AGENT_ID || "";
@@ -69,8 +69,8 @@ const chain = defineChain({
   id: CHAIN_ID,
   name: process.env.CHAIN_NAME || "buildersclaw-testnet",
   nativeCurrency: {
-    name: process.env.CHAIN_CURRENCY_NAME || "BNB",
-    symbol: process.env.CHAIN_CURRENCY_SYMBOL || "BNB",
+    name: process.env.CHAIN_CURRENCY_NAME || "Ether",
+    symbol: process.env.CHAIN_CURRENCY_SYMBOL || "ETH",
     decimals: 18,
   },
   rpcUrls: {
@@ -379,12 +379,12 @@ async function submitProposal({ escrowAddress, fundingTxHash, endsAt }) {
     company: `On-chain E2E Co ${Date.now()}`,
     email: `onchain-e2e-${Date.now()}@example.com`,
     track: "api",
-    problem: "Verify BNB Sepolia USDC contract-backed marketplace flow.",
+    problem: "Verify Sepolia USDC contract-backed marketplace flow.",
     judge_agent: "platform",
     prize_amount: formatUnits(SPONSOR_FUNDING_UNITS, USDC_DECIMALS),
     judging_priorities: "On-chain verification, finalization reliability, marketplace collaboration.",
-    tech_requirements: "USDC-backed contract flow on BNB Sepolia with marketplace hiring.",
-    hackathon_title: `BNB Sepolia Onchain Flow ${Date.now()}`,
+    tech_requirements: "USDC-backed contract flow on Sepolia with marketplace hiring.",
+    hackathon_title: `Sepolia Onchain Flow ${Date.now()}`,
     hackathon_brief: "Leader joins on-chain, hires via marketplace, then winners claim split USDC prizes.",
     hackathon_rules: "Leader must join on-chain with USDC approval and tx proof before backend registration.",
     hackathon_deadline: endsAt,
@@ -401,7 +401,7 @@ async function submitProposal({ escrowAddress, fundingTxHash, endsAt }) {
   const approval = await api("PATCH", "/proposals", {
     id: proposal.json.data.id,
     status: "approved",
-    notes: "Automated BNB Sepolia USDC E2E approval.",
+    notes: "Automated Sepolia USDC E2E approval.",
   }, ADMIN_API_KEY);
   if (!approval.ok) throw new Error(`Proposal approval failed: ${JSON.stringify(approval.json)}`);
 
@@ -438,7 +438,7 @@ async function claimPrize(participant, escrowAddress) {
 
 async function main() {
   console.log("============================================================");
-  console.log(" BuildersClaw BNB Sepolia USDC On-chain E2E");
+  console.log(" BuildersClaw Sepolia USDC On-chain E2E");
   console.log("============================================================");
   console.log(` Base URL:        ${BASE_URL}`);
   console.log(` Chain ID:        ${CHAIN_ID}`);
@@ -453,7 +453,7 @@ async function main() {
     getUsdcBalance(organizerAddress),
   ]);
   const minimumUsdc = SPONSOR_FUNDING_UNITS + ENTRY_FEE_UNITS;
-  assert(organizerGas > parseUnits(GAS_FUND_BNB, 18) * 3n, "Organizer has enough BNB for gas", organizerGas.toString());
+  assert(organizerGas > parseUnits(GAS_FUND_ETH, 18) * 3n, "Organizer has enough ETH for gas", organizerGas.toString());
   assert(organizerUsdc >= minimumUsdc, `Organizer has at least ${formatUnits(minimumUsdc, USDC_DECIMALS)} ${USDC_SYMBOL}`, formatUnits(organizerUsdc, USDC_DECIMALS));
   if (failed > 0) throw new Error("Organizer funding precheck failed");
 
@@ -466,9 +466,9 @@ async function main() {
   const hired = await registerAgent("onchain_hired", hiredWallet.account.address, uid("ghhired"), hiredTelegram);
   assert(!!leader.key && !!hired.key, "Leader and hired agents registered");
 
-  step("3.", "Fund leader/hired with BNB gas and leader with USDC entry fee");
-  await sendNative(organizerWalletClient, leaderWallet.account.address, parseUnits(GAS_FUND_BNB, 18));
-  await sendNative(organizerWalletClient, hiredWallet.account.address, parseUnits(GAS_FUND_BNB, 18));
+  step("3.", "Fund leader/hired with ETH gas and leader with USDC entry fee");
+  await sendNative(organizerWalletClient, leaderWallet.account.address, parseUnits(GAS_FUND_ETH, 18));
+  await sendNative(organizerWalletClient, hiredWallet.account.address, parseUnits(GAS_FUND_ETH, 18));
   await transferUsdc(leaderWallet.account.address, ENTRY_FEE_UNITS);
   const leaderUsdc = await getUsdcBalance(leaderWallet.account.address);
   assertBigInt(leaderUsdc, ENTRY_FEE_UNITS, "Leader received exact USDC entry fee");
@@ -554,12 +554,12 @@ async function main() {
   step("9.", "Team submits repo and admin finalizes split winners on-chain");
   const submit = await api("POST", `/hackathons/${proposal.hackathonId}/teams/${teamId}/submit`, {
     repo_url: REPO_URL,
-    notes: "Automated BNB Sepolia on-chain marketplace e2e submission.",
+    notes: "Automated Sepolia on-chain marketplace e2e submission.",
   }, leader.key);
   assert(submit.ok, "Team submission succeeds", JSON.stringify(submit.json));
   const finalize = await api("POST", `/admin/hackathons/${proposal.hackathonId}/finalize`, {
     winner_team_id: teamId,
-    notes: "Automated BNB Sepolia USDC finalization test.",
+    notes: "Automated Sepolia USDC finalization test.",
   }, ADMIN_API_KEY);
   assert(finalize.ok, "Admin finalize succeeds", JSON.stringify(finalize.json));
   assertEqual(finalize.json.data.winners.length, 2, "Finalize returns two winner entries");

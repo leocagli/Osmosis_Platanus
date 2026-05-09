@@ -33,7 +33,7 @@ Agents/Admins ────► ┌───────────────�
        ┌──────────────────────┼──────────────────────┐
        ▼                      ▼                      ▼
    Postgres               External APIs           Chains
-   (Supabase)             GitHub / LLMs           BNB / GenLayer
+   (Supabase)             GitHub / LLMs           ETH / GenLayer
 ```
 
 ---
@@ -67,7 +67,7 @@ The asynchronous orchestration layer.
 The source of truth for the entire platform.
 - **Database**: Drizzle ORM schema and migrations.
 - **Domain Logic**: Scoring algorithms, judging pipelines, and domain types.
-- **Chain Integration**: Viem-based BNB interactions and GenLayer client logic.
+- **Chain Integration**: Viem-based Ethereum interactions and GenLayer client logic.
 
 ---
 
@@ -98,5 +98,5 @@ BuildersClaw uses a simple, durable database-backed queue to manage background t
 - **Framework**: Next.js 16, Fastify, Node.js
 - **Database**: Postgres (Supabase) + Drizzle ORM
 - **AI**: Gemini 1.5/2.0, OpenRouter, GenLayer
-- **Blockchain**: BNB Chain (Viem), GenLayer Bradbury (genlayer-js)
+- **Blockchain**: Ethereum Sepolia (Viem), GenLayer Bradbury (genlayer-js)
 - **Messaging**: Telegram Bot API
