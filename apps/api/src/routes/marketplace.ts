@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@buildersclaw/shared/db";
 import { sanitizeString } from "@buildersclaw/shared/hackathons";
+import { parseMarketplaceRolePayload } from "@buildersclaw/shared/marketplace-payload";
 import {
   MARKETPLACE_HUMAN_SUMMARY_MAX,
   MARKETPLACE_OPPORTUNITY_MODES,
@@ -34,39 +35,6 @@ const listingSelect = {
   taken_at: schema.marketplaceListings.takenAt,
   created_at: schema.marketplaceListings.createdAt,
 };
-
-function parseRoleDescriptionPayload(raw: string | null) {
-  if (!raw) {
-    return {
-      description: null,
-      opportunity_mode: "hackathon_competitive" as MarketplaceOpportunityMode,
-      payment_model: "prize_pool" as MarketplacePaymentModel,
-      human_accessible: true,
-      human_summary: null,
-      human_override_required: false,
-    };
-  }
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      description: typeof parsed.description === "string" ? parsed.description : null,
-      opportunity_mode: MARKETPLACE_OPPORTUNITY_MODES.includes(parsed.opportunity_mode as MarketplaceOpportunityMode) ? parsed.opportunity_mode as MarketplaceOpportunityMode : "hackathon_competitive",
-      payment_model: MARKETPLACE_PAYMENT_MODELS.includes(parsed.payment_model as MarketplacePaymentModel) ? parsed.payment_model as MarketplacePaymentModel : "prize_pool",
-      human_accessible: typeof parsed.human_accessible === "boolean" ? parsed.human_accessible : true,
-      human_summary: typeof parsed.human_summary === "string" ? parsed.human_summary : null,
-      human_override_required: typeof parsed.human_override_required === "boolean" ? parsed.human_override_required : false,
-    };
-  } catch {
-    return {
-      description: raw,
-      opportunity_mode: "hackathon_competitive" as MarketplaceOpportunityMode,
-      payment_model: "prize_pool" as MarketplacePaymentModel,
-      human_accessible: true,
-      human_summary: null,
-      human_override_required: false,
-    };
-  }
-}
 
 async function requireTeamLeader(teamId: string, agentId: string) {
   const [membership] = await getDb()
@@ -106,7 +74,7 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
       .limit(100);
 
     return ok(reply, rows.map((row) => {
-      const parsed = parseRoleDescriptionPayload(row.role_description);
+      const parsed = parseMarketplaceRolePayload(row.role_description);
       return {
         ...row,
         role_description: parsed.description,
@@ -221,14 +189,14 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
     if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") {
       return fail(reply, "human_override_required must be boolean", 400);
     }
-    const hasRoleMetaUpdate = body.role_description !== undefined
+      const hasRoleMetaUpdate = body.role_description !== undefined
       || body.opportunity_mode !== undefined
       || body.payment_model !== undefined
       || body.human_accessible !== undefined
       || body.human_summary !== undefined
       || body.human_override_required !== undefined;
     if (hasRoleMetaUpdate) {
-      const current = parseRoleDescriptionPayload(listing.role_description);
+      const current = parseMarketplaceRolePayload(listing.role_description);
       const nextDescription = body.role_description !== undefined ? sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX) : current.description;
       const nextHumanSummary = body.human_summary !== undefined ? sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX) : current.human_summary;
       updates.roleDescription = JSON.stringify({

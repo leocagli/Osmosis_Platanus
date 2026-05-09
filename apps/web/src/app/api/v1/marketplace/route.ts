@@ -5,6 +5,7 @@ import { authenticateRequest } from "@buildersclaw/shared/auth";
 import { getDb, schema } from "@buildersclaw/shared/db";
 import { success, created, error, unauthorized } from "@buildersclaw/shared/responses";
 import { sanitizeString } from "@buildersclaw/shared/hackathons";
+import { parseMarketplaceRolePayload, type MarketplaceRolePayload } from "@buildersclaw/shared/marketplace-payload";
 import {
   MEMBER_MIN_SHARE_PCT,
   LEADER_MIN_KEEP_PCT,
@@ -26,52 +27,6 @@ import {
   validateRoleType,
 } from "@buildersclaw/shared/validation";
 import { getMarketplaceReputationScore } from "@buildersclaw/shared/erc8004";
-
-type RolePayload = {
-  description: string | null;
-  repo_url: string | null;
-  opportunity_mode: MarketplaceOpportunityMode;
-  payment_model: MarketplacePaymentModel;
-  human_accessible: boolean;
-  human_summary: string | null;
-  human_override_required: boolean;
-};
-
-function parseRolePayload(raw: string | null): RolePayload {
-  if (!raw) {
-    return {
-      description: null,
-      repo_url: null,
-      opportunity_mode: "hackathon_competitive",
-      payment_model: "prize_pool",
-      human_accessible: true,
-      human_summary: null,
-      human_override_required: false,
-    };
-  }
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      description: typeof parsed.description === "string" ? parsed.description : null,
-      repo_url: typeof parsed.repo_url === "string" ? parsed.repo_url : null,
-      opportunity_mode: MARKETPLACE_OPPORTUNITY_MODES.includes(parsed.opportunity_mode as MarketplaceOpportunityMode) ? parsed.opportunity_mode as MarketplaceOpportunityMode : "hackathon_competitive",
-      payment_model: MARKETPLACE_PAYMENT_MODELS.includes(parsed.payment_model as MarketplacePaymentModel) ? parsed.payment_model as MarketplacePaymentModel : "prize_pool",
-      human_accessible: typeof parsed.human_accessible === "boolean" ? parsed.human_accessible : true,
-      human_summary: typeof parsed.human_summary === "string" ? parsed.human_summary : null,
-      human_override_required: typeof parsed.human_override_required === "boolean" ? parsed.human_override_required : false,
-    };
-  } catch {
-    return {
-      description: raw,
-      repo_url: null,
-      opportunity_mode: "hackathon_competitive",
-      payment_model: "prize_pool",
-      human_accessible: true,
-      human_summary: null,
-      human_override_required: false,
-    };
-  }
-}
 
 /**
  * ═══════════════════════════════════════════════════════════════
@@ -214,7 +169,7 @@ export async function GET(req: NextRequest) {
       const poster = l.poster;
       const team = l.team;
       const hackathon = l.hackathon;
-      const rolePayload = parseRolePayload(l.role_description);
+      const rolePayload = parseMarketplaceRolePayload(l.role_description);
 
       return {
         id: l.id,
@@ -646,14 +601,14 @@ export async function PATCH(req: NextRequest) {
 
   if (hasRoleMetaUpdate) {
     // Parse existing description
-    let existing: RolePayload = parseRolePayload(null);
+    let existing: MarketplaceRolePayload = parseMarketplaceRolePayload(null);
     const [fullListing] = await db
       .select({ role_description: schema.marketplaceListings.roleDescription })
       .from(schema.marketplaceListings)
       .where(eq(schema.marketplaceListings.id, listingId))
       .limit(1);
 
-    if (fullListing?.role_description) existing = parseRolePayload(fullListing.role_description as string);
+    if (fullListing?.role_description) existing = parseMarketplaceRolePayload(fullListing.role_description as string);
 
     if (body.role_description !== undefined) {
       existing.description = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
