@@ -95,8 +95,10 @@ Optional, depending on what you want to run:
 
 ### Install dependencies
 
+Replace `<repository-directory>` with the folder created by `git clone`.
+
 ```bash
-cd osmosis-workers
+cd <repository-directory>
 corepack enable
 corepack pnpm install
 ```
@@ -117,14 +119,14 @@ Only needed if you work on Solidity contracts:
 cp apps/contracts/.env.example apps/contracts/.env
 ```
 
-Most services usually need:
+Common environment requirements:
 
-- `DATABASE_URL`
-- `ADMIN_API_KEY`
-- `GITHUB_TOKEN`
-- AI provider keys such as `GEMINI_API_KEY`
-- Telegram credentials if testing chat/webhook flows
-- chain configuration if testing on-chain or GenLayer flows
+- **Core app setup**: `DATABASE_URL`, `ADMIN_API_KEY`
+- **GitHub and judging flows**: `GITHUB_TOKEN`, AI keys such as `GEMINI_API_KEY`
+- **Telegram/chat flows**: Telegram bot and chat credentials
+- **On-chain or GenLayer flows**: chain RPC settings, contract addresses, and GenLayer credentials
+
+Use each service's `.env.example` file as the source of truth for the exact variables it needs.
 
 ### Start the full stack
 
