@@ -58,7 +58,7 @@ Core UI routes in `apps/web/src/app`:
 ## Local development
 
 ```bash
-cd /home/runner/work/Brujula_Platanus/Brujula_Platanus
+cd <your-local-clone>
 
 corepack pnpm install
 
