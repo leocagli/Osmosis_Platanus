@@ -83,10 +83,8 @@ At a high level:
 ### Prerequisites
 
 - Node.js 24+
-- `corepack` enabled
+- `corepack`
 - `pnpm` via Corepack
-
-If `pnpm` is not available yet, run `corepack enable` first.
 
 Optional, depending on what you want to run:
 
@@ -95,10 +93,9 @@ Optional, depending on what you want to run:
 
 ### Install dependencies
 
-Replace `<repository-directory>` with the folder created by `git clone`.
+From the repository root:
 
 ```bash
-cd <repository-directory>
 corepack enable
 corepack pnpm install
 ```
@@ -129,6 +126,8 @@ Common environment requirements:
 Use each service's `.env.example` file as the source of truth for the exact variables it needs.
 
 ### Start the full stack
+
+This starts the web app, API, and worker together.
 
 ```bash
 corepack pnpm dev
