@@ -108,6 +108,11 @@ export default function MarketplacePage() {
   const [filter, setFilter] = useState("all");
   const [hackathons, setHackathons] = useState<HackathonOption[]>([]);
   const [retryCount, setRetryCount] = useState(0);
+  const statusAnnouncement = loading
+    ? "Loading opportunities"
+    : err
+      ? `Marketplace error: ${err}`
+      : `${listings.length} open opportunities loaded`;
 
   useEffect(() => {
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/hackathons?status=open`).then(r => r.json()).then(d => {
@@ -160,8 +165,8 @@ export default function MarketplacePage() {
         className="mb-12"
       />
 
-      <p aria-live="polite" className="sr-only">
-        {loading ? "Loading opportunities" : `${listings.length} open opportunities loaded`}
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusAnnouncement}
       </p>
 
       {/* ── Stats bar ── */}

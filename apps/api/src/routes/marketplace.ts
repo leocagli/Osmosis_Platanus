@@ -3,7 +3,20 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@buildersclaw/shared/db";
 import { sanitizeString } from "@buildersclaw/shared/hackathons";
-import { checkRateLimit, enforceShareIntegrity, isValidUUID, validateRoleType, validateSharePct, validateTeamTotalShares } from "@buildersclaw/shared/validation";
+import {
+  MARKETPLACE_HUMAN_SUMMARY_MAX,
+  MARKETPLACE_OPPORTUNITY_MODES,
+  MARKETPLACE_PAYMENT_MODELS,
+  MARKETPLACE_ROLE_DESCRIPTION_MAX,
+  type MarketplaceOpportunityMode,
+  type MarketplacePaymentModel,
+  checkRateLimit,
+  enforceShareIntegrity,
+  isValidUUID,
+  validateRoleType,
+  validateSharePct,
+  validateTeamTotalShares,
+} from "@buildersclaw/shared/validation";
 import { ok, created, fail, notFound, unauthorized } from "../respond";
 import { authFastify } from "../auth";
 
@@ -22,19 +35,14 @@ const listingSelect = {
   created_at: schema.marketplaceListings.createdAt,
 };
 
-const OPPORTUNITY_MODES = ["hackathon_competitive", "direct_job"] as const;
-type OpportunityMode = (typeof OPPORTUNITY_MODES)[number];
-const PAYMENT_MODELS = ["prize_pool", "fixed_price", "milestones", "hourly_cap", "retainer"] as const;
-type PaymentModel = (typeof PAYMENT_MODELS)[number];
-
 function parseRoleDescriptionPayload(raw: string | null) {
   if (!raw) {
     return {
-      description: null as string | null,
-      opportunity_mode: "hackathon_competitive" as OpportunityMode,
-      payment_model: "prize_pool" as PaymentModel,
+      description: null,
+      opportunity_mode: "hackathon_competitive" as MarketplaceOpportunityMode,
+      payment_model: "prize_pool" as MarketplacePaymentModel,
       human_accessible: true,
-      human_summary: null as string | null,
+      human_summary: null,
       human_override_required: false,
     };
   }
@@ -42,8 +50,8 @@ function parseRoleDescriptionPayload(raw: string | null) {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
       description: typeof parsed.description === "string" ? parsed.description : null,
-      opportunity_mode: OPPORTUNITY_MODES.includes(parsed.opportunity_mode as OpportunityMode) ? parsed.opportunity_mode as OpportunityMode : "hackathon_competitive",
-      payment_model: PAYMENT_MODELS.includes(parsed.payment_model as PaymentModel) ? parsed.payment_model as PaymentModel : "prize_pool",
+      opportunity_mode: MARKETPLACE_OPPORTUNITY_MODES.includes(parsed.opportunity_mode as MarketplaceOpportunityMode) ? parsed.opportunity_mode as MarketplaceOpportunityMode : "hackathon_competitive",
+      payment_model: MARKETPLACE_PAYMENT_MODELS.includes(parsed.payment_model as MarketplacePaymentModel) ? parsed.payment_model as MarketplacePaymentModel : "prize_pool",
       human_accessible: typeof parsed.human_accessible === "boolean" ? parsed.human_accessible : true,
       human_summary: typeof parsed.human_summary === "string" ? parsed.human_summary : null,
       human_override_required: typeof parsed.human_override_required === "boolean" ? parsed.human_override_required : false,
@@ -51,10 +59,10 @@ function parseRoleDescriptionPayload(raw: string | null) {
   } catch {
     return {
       description: raw,
-      opportunity_mode: "hackathon_competitive" as OpportunityMode,
-      payment_model: "prize_pool" as PaymentModel,
+      opportunity_mode: "hackathon_competitive" as MarketplaceOpportunityMode,
+      payment_model: "prize_pool" as MarketplacePaymentModel,
       human_accessible: true,
-      human_summary: null as string | null,
+      human_summary: null,
       human_override_required: false,
     };
   }
@@ -127,14 +135,14 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
     if (!teamId || !isValidUUID(teamId)) return fail(reply, "team_id is required", 400);
 
     const roleTitle = sanitizeString(body.role_title, 120);
-    const roleDescription = sanitizeString(body.role_description, 1200);
-    const humanSummary = sanitizeString(body.human_summary, 300);
+    const roleDescription = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
+    const humanSummary = sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX);
     const opportunityMode = typeof body.opportunity_mode === "string" ? body.opportunity_mode : "hackathon_competitive";
-    if (!OPPORTUNITY_MODES.includes(opportunityMode as OpportunityMode)) {
+    if (!MARKETPLACE_OPPORTUNITY_MODES.includes(opportunityMode as MarketplaceOpportunityMode)) {
       return fail(reply, "Invalid opportunity_mode", 400);
     }
     const paymentModel = typeof body.payment_model === "string" ? body.payment_model : "prize_pool";
-    if (!PAYMENT_MODELS.includes(paymentModel as PaymentModel)) {
+    if (!MARKETPLACE_PAYMENT_MODELS.includes(paymentModel as MarketplacePaymentModel)) {
       return fail(reply, "Invalid payment_model", 400);
     }
     if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") {
@@ -198,12 +206,12 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
       updates.roleTitle = roleTitle;
     }
     if (body.opportunity_mode !== undefined) {
-      if (typeof body.opportunity_mode !== "string" || !OPPORTUNITY_MODES.includes(body.opportunity_mode as OpportunityMode)) {
+      if (typeof body.opportunity_mode !== "string" || !MARKETPLACE_OPPORTUNITY_MODES.includes(body.opportunity_mode as MarketplaceOpportunityMode)) {
         return fail(reply, "Invalid opportunity_mode", 400);
       }
     }
     if (body.payment_model !== undefined) {
-      if (typeof body.payment_model !== "string" || !PAYMENT_MODELS.includes(body.payment_model as PaymentModel)) {
+      if (typeof body.payment_model !== "string" || !MARKETPLACE_PAYMENT_MODELS.includes(body.payment_model as MarketplacePaymentModel)) {
         return fail(reply, "Invalid payment_model", 400);
       }
     }
@@ -221,8 +229,8 @@ export async function marketplaceRoutes(fastify: FastifyInstance) {
       || body.human_override_required !== undefined;
     if (hasRoleMetaUpdate) {
       const current = parseRoleDescriptionPayload(listing.role_description);
-      const nextDescription = body.role_description !== undefined ? sanitizeString(body.role_description, 1200) : current.description;
-      const nextHumanSummary = body.human_summary !== undefined ? sanitizeString(body.human_summary, 300) : current.human_summary;
+      const nextDescription = body.role_description !== undefined ? sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX) : current.description;
+      const nextHumanSummary = body.human_summary !== undefined ? sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX) : current.human_summary;
       updates.roleDescription = JSON.stringify({
         description: nextDescription,
         opportunity_mode: body.opportunity_mode !== undefined ? body.opportunity_mode : current.opportunity_mode,

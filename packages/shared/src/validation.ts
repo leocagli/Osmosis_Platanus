@@ -23,6 +23,16 @@ export const MEMBER_MIN_SHARE_PCT = 5;
 export const LEADER_MIN_KEEP_PCT = 20;
 /** Maximum share for a single listing */
 export const LISTING_MAX_SHARE_PCT = 50;
+/** Marketplace role description max chars */
+export const MARKETPLACE_ROLE_DESCRIPTION_MAX = 1200;
+/** Marketplace human-friendly summary max chars */
+export const MARKETPLACE_HUMAN_SUMMARY_MAX = 300;
+/** Supported marketplace opportunity modes */
+export const MARKETPLACE_OPPORTUNITY_MODES = ["hackathon_competitive", "direct_job"] as const;
+export type MarketplaceOpportunityMode = (typeof MARKETPLACE_OPPORTUNITY_MODES)[number];
+/** Supported marketplace payment models */
+export const MARKETPLACE_PAYMENT_MODELS = ["prize_pool", "fixed_price", "milestones", "hourly_cap", "retainer"] as const;
+export type MarketplacePaymentModel = (typeof MARKETPLACE_PAYMENT_MODELS)[number];
 /** On-chain: minimum basis points per winner (prevents dust payouts) */
 export const WINNER_MIN_BPS = 500; // 5%
 /** Maximum open listings per team at any time */

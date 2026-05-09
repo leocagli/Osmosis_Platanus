@@ -13,6 +13,12 @@ import {
   MAX_OPEN_LISTINGS_PER_TEAM,
   MAX_ALLOCATED_PCT,
   isValidUUID,
+  MARKETPLACE_HUMAN_SUMMARY_MAX,
+  MARKETPLACE_OPPORTUNITY_MODES,
+  MARKETPLACE_PAYMENT_MODELS,
+  MARKETPLACE_ROLE_DESCRIPTION_MAX,
+  type MarketplaceOpportunityMode,
+  type MarketplacePaymentModel,
   checkRateLimit,
   getTeamShareSnapshot,
   validateTeamTotalShares,
@@ -21,20 +27,25 @@ import {
 } from "@buildersclaw/shared/validation";
 import { getMarketplaceReputationScore } from "@buildersclaw/shared/erc8004";
 
-const OPPORTUNITY_MODES = ["hackathon_competitive", "direct_job"] as const;
-type OpportunityMode = (typeof OPPORTUNITY_MODES)[number];
-const PAYMENT_MODELS = ["prize_pool", "fixed_price", "milestones", "hourly_cap", "retainer"] as const;
-type PaymentModel = (typeof PAYMENT_MODELS)[number];
+type RolePayload = {
+  description: string | null;
+  repo_url: string | null;
+  opportunity_mode: MarketplaceOpportunityMode;
+  payment_model: MarketplacePaymentModel;
+  human_accessible: boolean;
+  human_summary: string | null;
+  human_override_required: boolean;
+};
 
-function parseRolePayload(raw: string | null) {
+function parseRolePayload(raw: string | null): RolePayload {
   if (!raw) {
     return {
-      description: null as string | null,
-      repo_url: null as string | null,
-      opportunity_mode: "hackathon_competitive" as OpportunityMode,
-      payment_model: "prize_pool" as PaymentModel,
+      description: null,
+      repo_url: null,
+      opportunity_mode: "hackathon_competitive",
+      payment_model: "prize_pool",
       human_accessible: true,
-      human_summary: null as string | null,
+      human_summary: null,
       human_override_required: false,
     };
   }
@@ -43,8 +54,8 @@ function parseRolePayload(raw: string | null) {
     return {
       description: typeof parsed.description === "string" ? parsed.description : null,
       repo_url: typeof parsed.repo_url === "string" ? parsed.repo_url : null,
-      opportunity_mode: OPPORTUNITY_MODES.includes(parsed.opportunity_mode as OpportunityMode) ? parsed.opportunity_mode as OpportunityMode : "hackathon_competitive",
-      payment_model: PAYMENT_MODELS.includes(parsed.payment_model as PaymentModel) ? parsed.payment_model as PaymentModel : "prize_pool",
+      opportunity_mode: MARKETPLACE_OPPORTUNITY_MODES.includes(parsed.opportunity_mode as MarketplaceOpportunityMode) ? parsed.opportunity_mode as MarketplaceOpportunityMode : "hackathon_competitive",
+      payment_model: MARKETPLACE_PAYMENT_MODELS.includes(parsed.payment_model as MarketplacePaymentModel) ? parsed.payment_model as MarketplacePaymentModel : "prize_pool",
       human_accessible: typeof parsed.human_accessible === "boolean" ? parsed.human_accessible : true,
       human_summary: typeof parsed.human_summary === "string" ? parsed.human_summary : null,
       human_override_required: typeof parsed.human_override_required === "boolean" ? parsed.human_override_required : false,
@@ -52,11 +63,11 @@ function parseRolePayload(raw: string | null) {
   } catch {
     return {
       description: raw,
-      repo_url: null as string | null,
-      opportunity_mode: "hackathon_competitive" as OpportunityMode,
-      payment_model: "prize_pool" as PaymentModel,
+      repo_url: null,
+      opportunity_mode: "hackathon_competitive",
+      payment_model: "prize_pool",
       human_accessible: true,
-      human_summary: null as string | null,
+      human_summary: null,
       human_override_required: false,
     };
   }
@@ -304,13 +315,13 @@ export async function POST(req: NextRequest) {
   const hackathonId = typeof body.hackathon_id === "string" ? body.hackathon_id.trim() : null;
   const teamId = typeof body.team_id === "string" ? body.team_id.trim() : null;
   const roleTitle = sanitizeString(body.role_title, 100);
-  const roleDescription = sanitizeString(body.role_description, 1000);
-  const humanSummary = sanitizeString(body.human_summary, 300);
+  const roleDescription = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
+  const humanSummary = sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX);
   const repoUrl = sanitizeString(body.repo_url, 512);
   const opportunityMode = typeof body.opportunity_mode === "string" ? body.opportunity_mode : "hackathon_competitive";
-  if (!OPPORTUNITY_MODES.includes(opportunityMode as OpportunityMode)) return error("Invalid opportunity_mode", 400);
+  if (!MARKETPLACE_OPPORTUNITY_MODES.includes(opportunityMode as MarketplaceOpportunityMode)) return error("Invalid opportunity_mode", 400);
   const paymentModel = typeof body.payment_model === "string" ? body.payment_model : "prize_pool";
-  if (!PAYMENT_MODELS.includes(paymentModel as PaymentModel)) return error("Invalid payment_model", 400);
+  if (!MARKETPLACE_PAYMENT_MODELS.includes(paymentModel as MarketplacePaymentModel)) return error("Invalid payment_model", 400);
   if (body.human_accessible !== undefined && typeof body.human_accessible !== "boolean") return error("human_accessible must be boolean", 400);
   if (body.human_override_required !== undefined && typeof body.human_override_required !== "boolean") return error("human_override_required must be boolean", 400);
   const sharePct = Number(body.share_pct);
@@ -621,12 +632,12 @@ export async function PATCH(req: NextRequest) {
     || body.human_summary !== undefined
     || body.human_override_required !== undefined;
   if (body.opportunity_mode !== undefined) {
-    if (typeof body.opportunity_mode !== "string" || !OPPORTUNITY_MODES.includes(body.opportunity_mode as OpportunityMode)) {
+    if (typeof body.opportunity_mode !== "string" || !MARKETPLACE_OPPORTUNITY_MODES.includes(body.opportunity_mode as MarketplaceOpportunityMode)) {
       return error("Invalid opportunity_mode", 400);
     }
   }
   if (body.payment_model !== undefined) {
-    if (typeof body.payment_model !== "string" || !PAYMENT_MODELS.includes(body.payment_model as PaymentModel)) {
+    if (typeof body.payment_model !== "string" || !MARKETPLACE_PAYMENT_MODELS.includes(body.payment_model as MarketplacePaymentModel)) {
       return error("Invalid payment_model", 400);
     }
   }
@@ -635,25 +646,25 @@ export async function PATCH(req: NextRequest) {
 
   if (hasRoleMetaUpdate) {
     // Parse existing description
-    let existing: Record<string, unknown> = parseRolePayload(null) as unknown as Record<string, unknown>;
+    let existing: RolePayload = parseRolePayload(null);
     const [fullListing] = await db
       .select({ role_description: schema.marketplaceListings.roleDescription })
       .from(schema.marketplaceListings)
       .where(eq(schema.marketplaceListings.id, listingId))
       .limit(1);
 
-    if (fullListing?.role_description) existing = parseRolePayload(fullListing.role_description as string) as unknown as Record<string, unknown>;
+    if (fullListing?.role_description) existing = parseRolePayload(fullListing.role_description as string);
 
     if (body.role_description !== undefined) {
-      existing.description = sanitizeString(body.role_description, 1000);
+      existing.description = sanitizeString(body.role_description, MARKETPLACE_ROLE_DESCRIPTION_MAX);
     }
     if (body.repo_url !== undefined) {
       existing.repo_url = sanitizeString(body.repo_url, 512);
     }
-    if (body.opportunity_mode !== undefined) existing.opportunity_mode = body.opportunity_mode;
-    if (body.payment_model !== undefined) existing.payment_model = body.payment_model;
+    if (body.opportunity_mode !== undefined) existing.opportunity_mode = body.opportunity_mode as MarketplaceOpportunityMode;
+    if (body.payment_model !== undefined) existing.payment_model = body.payment_model as MarketplacePaymentModel;
     if (body.human_accessible !== undefined) existing.human_accessible = body.human_accessible;
-    if (body.human_summary !== undefined) existing.human_summary = sanitizeString(body.human_summary, 300);
+    if (body.human_summary !== undefined) existing.human_summary = sanitizeString(body.human_summary, MARKETPLACE_HUMAN_SUMMARY_MAX);
     if (body.human_override_required !== undefined) existing.human_override_required = body.human_override_required;
 
     updates.role_description = JSON.stringify(existing);
