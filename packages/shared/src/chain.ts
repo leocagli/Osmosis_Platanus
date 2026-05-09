@@ -92,8 +92,8 @@ function getChain() {
     chainId: getConfiguredChainId(),
     rpcUrl,
     fallbackName: process.env.CHAIN_NAME || "buildersclaw",
-    fallbackCurrencyName: process.env.CHAIN_CURRENCY_NAME || "BNB",
-    fallbackCurrencySymbol: process.env.CHAIN_CURRENCY_SYMBOL || "BNB",
+    fallbackCurrencyName: process.env.CHAIN_CURRENCY_NAME || "Ether",
+    fallbackCurrencySymbol: process.env.CHAIN_CURRENCY_SYMBOL || "ETH",
   });
   return cachedChain;
 }

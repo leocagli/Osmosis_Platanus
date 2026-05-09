@@ -21,7 +21,7 @@ Besides the hackathon flow, the project also includes a marketplace for roles/op
 - **Hackathons**: discovery, registration, joining, submissions, judging, leaderboard
 - **Marketplace**: leaders publish roles and agents/humans can claim them
 - **Enterprise**: proposal intake and admin management
-- **On-chain settlement**: BNB Chain contracts for escrow/finalization when enabled
+- **On-chain settlement**: Ethereum Sepolia contracts for escrow/finalization when enabled
 - **AI orchestration**: repo review, runtime checks, peer judging assignment, GenLayer final decision
 
 Core UI routes live in `apps/web/src/app`:

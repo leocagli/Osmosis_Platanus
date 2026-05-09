@@ -5,7 +5,7 @@
  *
  * Flow:
  *  1. Verify organizer funds and required env
- *  2. Deploy + fund a real BNB testnet escrow
+ *  2. Deploy + fund a real Sepolia escrow
  *  3. Create + approve a real contract-backed hackathon proposal
  *  4. Register 3 solo agents with real wallets
  *  5. Fund each wallet with gas + USDC and complete on-chain join
@@ -58,8 +58,8 @@ const USDC_SYMBOL = process.env.USDC_SYMBOL || "USDC";
 const USDC_DECIMALS = Number.parseInt(process.env.USDC_DECIMALS || "18", 10);
 const ENTRY_FEE_UNITS = parseUnits(process.env.TEST_ENTRY_FEE_USDC || "5", USDC_DECIMALS);
 const SPONSOR_FUNDING_UNITS = parseUnits(process.env.TEST_SPONSOR_FUNDING_USDC || "100", USDC_DECIMALS);
-const GAS_FUND_BNB = process.env.TEST_PARTICIPANT_GAS_BNB || "0.01";
-const MIN_ORGANIZER_GAS_BNB = process.env.TEST_MIN_ORGANIZER_GAS_BNB || "0.045";
+const GAS_FUND_ETH = process.env.TEST_PARTICIPANT_GAS_ETH || "0.01";
+const MIN_ORGANIZER_GAS_ETH = process.env.TEST_MIN_ORGANIZER_GAS_ETH || "0.045";
 const DURATION_HOURS = Number.parseInt(process.env.TEST_DURATION_HOURS || "24", 10);
 const TEST_CREDIT_SECRET = process.env.TEST_CREDIT_SECRET || ADMIN_API_KEY;
 const GITHUB_OWNER_OVERRIDE = process.env.GITHUB_OWNER || "";
@@ -105,8 +105,8 @@ const chain = defineChain({
   id: CHAIN_ID,
   name: process.env.CHAIN_NAME || "buildersclaw-testnet",
   nativeCurrency: {
-    name: process.env.CHAIN_CURRENCY_NAME || "BNB",
-    symbol: process.env.CHAIN_CURRENCY_SYMBOL || "BNB",
+    name: process.env.CHAIN_CURRENCY_NAME || "Ether",
+    symbol: process.env.CHAIN_CURRENCY_SYMBOL || "ETH",
     decimals: 18,
   },
   rpcUrls: {
@@ -466,7 +466,7 @@ async function submitProposal({ escrowAddress, fundingTxHash, endsAt, brief, tit
     company: `Autonomous E2E Co ${Date.now()}`,
     email: `autonomous-e2e-${Date.now()}@example.com`,
     track: "api",
-    problem: "Verify full real autonomous hackathon flow with BNB Sepolia prizes and GenLayer judging.",
+    problem: "Verify full real autonomous hackathon flow with Sepolia prizes and GenLayer judging.",
     judge_agent: "platform",
     prize_amount: formatUnits(SPONSOR_FUNDING_UNITS, USDC_DECIMALS),
     judging_priorities: "Real submissions, meaningful ranking, on-chain settlement, GenLayer consensus.",
@@ -522,7 +522,7 @@ async function submitProposal({ escrowAddress, fundingTxHash, endsAt, brief, tit
   const approval = await api("PATCH", "/proposals", {
     id: proposal.json.data.id,
     status: "approved",
-    notes: "Automated full real autonomous BNB/GenLayer approval.",
+    notes: "Automated full real autonomous ETH/GenLayer approval.",
   }, ADMIN_API_KEY);
   if (!approval.ok) throw new Error(`Proposal approval failed: ${JSON.stringify(approval.json)}`);
 
@@ -738,7 +738,7 @@ async function main() {
     publicClient.getBalance({ address: organizerAddress }),
     getUsdcBalance(organizerAddress),
   ]);
-  assert(organizerGas > parseUnits(MIN_ORGANIZER_GAS_BNB, 18), "Organizer has enough BNB for gas", organizerGas.toString());
+  assert(organizerGas > parseUnits(MIN_ORGANIZER_GAS_ETH, 18), "Organizer has enough ETH for gas", organizerGas.toString());
   assert(organizerUsdc >= minimumUsdc, `Organizer has at least ${formatUnits(minimumUsdc, USDC_DECIMALS)} ${USDC_SYMBOL}`, formatUnits(organizerUsdc, USDC_DECIMALS));
   if (failed > 0) throw new Error("Organizer funding precheck failed");
 
@@ -777,7 +777,7 @@ async function main() {
   step("5.", "Fund participant wallets and complete on-chain joins");
   const teams = [];
   for (const participant of participants) {
-    await sendNative(organizerWalletClient, participant.wallet.account.address, parseUnits(GAS_FUND_BNB, 18));
+    await sendNative(organizerWalletClient, participant.wallet.account.address, parseUnits(GAS_FUND_ETH, 18));
     await transferUsdc(participant.wallet.account.address, ENTRY_FEE_UNITS);
     const usdcBalance = await getUsdcBalance(participant.wallet.account.address);
     assertBigInt(usdcBalance, ENTRY_FEE_UNITS, `${participant.profile.label} received exact USDC entry fee`);
