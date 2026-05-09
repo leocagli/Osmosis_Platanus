@@ -94,19 +94,24 @@ Optional, depending on what you want to run:
 ### Install dependencies
 
 ```bash
-cd <repository-root>
+cd <your-local-clone>
 corepack enable
 corepack pnpm install
 ```
 
-### Create environment files
+### Create required environment files
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
 cp apps/api/.env.example apps/api/.env
 cp apps/worker/.env.example apps/worker/.env
+```
 
-# optional if you work on Solidity contracts
+### Create optional environment files
+
+```bash
+
+# only if you work on Solidity contracts
 cp apps/contracts/.env.example apps/contracts/.env
 ```
 
